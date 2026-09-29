@@ -12,7 +12,9 @@ the payloads look like, and how do they map to seat states `working` / `idle` / 
 
 **Short answer: yes, with three caveats** — (1) in WSL NAT mode the host firewall blocks
 WSL → Windows traffic, so the hook relay goes through WSL interop (`curl.exe` → Windows loopback)
-or, in the real design, through a node agent inside WSL; (2) Claude Code wraps larger pastes in
+or, in the real design, through a node agent inside WSL. With **mirrored** networking (verified
+afterwards, see [Mirrored networking recheck](#mirrored-networking-recheck)), Linux `curl` reaches a
+Windows listener on `127.0.0.1` directly; (2) Claude Code wraps larger pastes in
 `<pasted_content>` and the model then treats them as data, not instructions, so every delivered
 message needs a short typed (non-pasted) lead line; (3) input sent before the TUI is ready loses
 the submit key, so delivery must wait for a readiness signal.
@@ -86,6 +88,22 @@ listener on the `vEthernet (WSL (Hyper-V firewall))` interface (all profiles ena
 firewall for WSL: `DefaultInboundAction Block`). Adding a firewall rule needs admin rights and is
 a security-setting change, so it was **not** done in this spike. The interop route (a Windows
 executable launched from WSL talks to Windows loopback) works without any system change.
+
+#### Mirrored networking recheck
+
+This was rerun after the maintainer switched to `networkingMode=mirrored` (the change that spike
+0003 needed anyway). The listener was bound to **`127.0.0.1:5101` only**, and a hook variant used
+Linux `curl` instead of `curl.exe`:
+
+```bash
+curl -s -m 3 -X POST -H "Content-Type: application/json" -H "X-Aiakos-Seat: ${AIAKOS_SEAT:-none}" \
+  --data-binary @- "http://127.0.0.1:5101/$kind/$name" >/dev/null 2>&1
+```
+
+One Haiku session in `tmux -L aiakos-spike1` (a single prompt, then `/exit`) delivered
+`SessionStart` (`source: startup`), `UserPromptSubmit`, `Stop` (`last_assistant_message`
+`MIRRORED`), `SessionEnd` and four statusLine ticks. Every event came from `remote=127.0.0.1`
+with UA `curl` and header `X-Aiakos-Seat: spike1m`. No firewall rule and no interop were involved.
 
 ### 3. Hook relay, statusLine script, per-spike settings (WSL)
 
@@ -321,7 +339,7 @@ source (per seat), and the SeatActor must order by it, not by arrival.
 7. Hook scripts must always `exit 0` quickly and time out their network call; a hung relay would
    stall the harness.
 8. In WSL NAT mode, WSL cannot reach a Windows listener without a firewall rule; `localhost` from
-   WSL does not reach Windows.
+   WSL does not reach Windows. In mirrored mode `127.0.0.1` works both ways (verified).
 9. Driving `wsl.exe` from PowerShell 5.1 mangles embedded double quotes in `bash -lc '…'`; put
    commands in script files (or use a node agent inside WSL). A `wsl.exe` call whose script
    leaves a background child (the statusLine relay) can also linger until the child exits.
@@ -336,10 +354,9 @@ source (per seat), and the SeatActor must order by it, not by arrival.
 - **Hook transport**: hooks should POST to a **node agent inside WSL** (localhost, no firewall,
   no interop cost), which stamps sequence numbers, buffers while offline, and forwards to the
   orchestrator. This matches plan §7 ("hooks POST to the node agent"). The node agent → Windows
-  orchestrator link then has the same NAT/firewall problem; options, to be decided in spike #3
-  (Aspire launching a WSL node): the orchestrator connects *into* WSL (NAT mode forwards Windows
-  `localhost` to WSL listeners), mirrored networking, or a one-time firewall rule by the user.
-  The interop `curl.exe` relay is an acceptable fallback, not the design.
+  orchestrator link has the NAT/firewall problem. Spike 0003 settled it: **mirrored networking**
+  is the dev prerequisite, and the node reaches the orchestrator on `127.0.0.1`. The interop
+  `curl.exe` relay is an acceptable fallback for NAT, not the design.
 - **ISessionHost (tmux)** needs: `Start(seat, cmd, env)` via `new-session -e` (per-seat token
   in env → `X-Aiakos-Seat`-style header, rule 2), `Deliver(lead, body)` = `send-keys -l lead` +
   `load-buffer`/`paste-buffer -p -r -d` + `send-keys C-m`, `Capture()` (evidence only),
