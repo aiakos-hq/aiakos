@@ -327,8 +327,10 @@ Alternatives considered: rig-per-repo (simple, poor cross-repo), shared only (no
 ## 6. Node profiles and auth
 
 - **`local` node** (WSL on the PC): no sandbox; harnesses use subscription logins; tmux.
-  Aspire launches the node agent via `wsl.exe`; WSL mirrored networking so OTLP and gRPC reach
-  the Windows host.
+  Aspire launches the node agent via `wsl.exe`. **WSL mirrored networking is a prerequisite**
+  (`networkingMode=mirrored` in `%USERPROFILE%\.wslconfig`): OTLP, gRPC and hook traffic between
+  WSL and Windows then use `127.0.0.1` without firewall rules. In NAT mode, Windows Firewall
+  blocks WSL → Windows by default. Verified in [spike 0003](spikes/0003-aspire-wsl-node.md).
 - **`sandboxed` node** (dedicated Linux box): Docker first, brig later; API keys delivered as
   files from a secret store; mandatory worktree checkout; egress control.
 - Verify per provider whether subscription logins via third-party harnesses (e.g. OpenCode) are

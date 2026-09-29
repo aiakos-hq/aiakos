@@ -19,6 +19,10 @@ structure in [`docs/spikes/README.md`](docs/spikes/README.md).
 **Environment:** Windows 11 host; WSL2 distro `Ubuntu` (agents, tmux, Claude Code run there);
 Docker Desktop (`docker-desktop` WSL distro). Keep repos that agents edit on the WSL filesystem
 when working inside WSL (performance, file watching); this repo itself is checked out on Windows.
+**WSL mirrored networking is required** for local development: `%USERPROFILE%\.wslconfig` must
+contain `[wsl2]` / `networkingMode=mirrored` (apply with `wsl --shutdown`). WSL and Windows then
+reach each other on `127.0.0.1` with no firewall rules; NAT mode is not supported
+(see [spike 0003](docs/spikes/0003-aspire-wsl-node.md)).
 
 **Related repositories:** `aiakos-hq/aiakos.dev` (website; renders this repo's `docs/`, never
 edit docs there) and `aiakos-hq/.github` (org profile, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT).
