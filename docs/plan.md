@@ -19,12 +19,20 @@ username `aiakos` are taken. No agent-tooling projects use the name.
 Status:
 - [x] GitHub organization **`aiakos-hq`** created (contact: Gmail plus-address)
 - [x] Domain **`aiakos.dev`** purchased
-- [x] Website repo **`aiakos-hq/aiakos.dev`** created
-- [ ] Main repo `aiakos-hq/aiakos` (this plan goes in it)
-- [ ] `aiakos-hq/.github` (org profile + community health files)
-- [ ] NuGet ID `Aiakos` + prefix reservation
-- [ ] GitHub Pages + DNS + org-level domain verification for `aiakos.dev`
-- [ ] Email routing `hello@aiakos.dev` → Gmail
+- [x] Website repo **`aiakos-hq/aiakos.dev`** — Statiq site scaffolded from the maintainer's blog
+  (landing, news, docs rendered from `aiakos/docs`, Pagefind search); live at https://aiakos.dev
+- [x] Main repo **`aiakos-hq/aiakos`** — stage A set up (this plan, ADRs, templates, labels, milestones, issues)
+- [x] **`aiakos-hq/.github`** — org profile + community health files
+- [x] GitHub Pages + DNS (Namecheap) + org-level domain verification + HTTPS enforced
+- [x] Email: `hello@aiakos.dev` → Gmail via **Namecheap email forwarding** (Domain tab → Redirect Email)
+- [x] `main` protected (ruleset "Protect main": PRs only, 0 approvals while solo, no force-push/deletion);
+      private vulnerability reporting enabled
+- [ ] NuGet ID `Aiakos` + prefix reservation — issue #6
+- [ ] Docs rebuild trigger: fine-grained token (*Contents: write* on `aiakos.dev`) as a secret in
+      `aiakos`, plus a workflow sending `repository_dispatch` `docs-updated` on `docs/**` changes
+      (until then the site rebuilds nightly)
+- [ ] Later: required status checks on `main` (once CI exists, M1); raise approvals to 1 when a
+      reviewer seat or second maintainer exists; optional GitHub Project board
 
 ### 0.1 GitHub organization
 1. Go to https://github.com/organizations/plan → **Free**. ✅ `aiakos-hq`
@@ -64,10 +72,12 @@ else ships as containers or native-AOT binaries (see §0.5).
    links to GitHub org + published package). Protects all future `Aiakos.*` packages.
 
 ### 0.3 Also worth doing now
-- ✅ `aiakos.dev` registered. DNS for GitHub Pages: apex `A` 185.199.108–111.153 (+ `AAAA`
-  2606:50c0:8000–8003::153), `www` `CNAME` → `aiakos-hq.github.io`; on Cloudflare keep
-  "DNS only" until the certificate is issued; **Enforce HTTPS** (`.dev` is HTTPS-only).
-- Email: Cloudflare Email Routing `hello@aiakos.dev` → Gmail; later move GitHub/NuGet contacts to it.
+- ✅ `aiakos.dev` registered at **Namecheap** (Namecheap DNS). Records for GitHub Pages: apex `A`
+  185.199.108–111.153 (+ `AAAA` 2606:50c0:8000–8003::153), `www` `CNAME` → `aiakos-hq.github.io.`,
+  TXT `_github-pages-challenge-aiakos-hq`; parking records removed; **Enforce HTTPS** on
+  (`.dev` is HTTPS-only).
+- ✅ Email: Namecheap email forwarding `hello@aiakos.dev` → Gmail (keep Namecheap's MX/SPF records).
+  Later move GitHub/NuGet contacts to it.
 - Optionally claim `aiakos` on npm/PyPI if a JS plugin (e.g. OpenCode) or Python SDK is plausible.
 - Before any public release: trademark search (EUIPO/TMview, USPTO; classes 9 and 42).
 - Later: NuGet **trusted publishing** (OIDC) from GitHub Actions instead of long-lived keys.
