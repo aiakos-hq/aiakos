@@ -11,6 +11,19 @@ do not reopen them without writing a new ADR that supersedes the old one.
 session. Milestone **M1** is the self-hosting threshold; after it, this repository is developed
 by an Aiakos-managed rig defined in [`rigs/aiakos-dev/`](rigs/aiakos-dev/).
 
+**Next up: milestone M0 spikes**, in this order: #1 (Claude Code in WSL tmux: paste delivery +
+hooks to a host endpoint), #2 (session ID + resume), #3 (Aspire launching a WSL node). #4
+(OpenCode) and #5 (Docker seat) follow. Spike findings go to `docs/spikes/NNNN-*.md` using the
+structure in [`docs/spikes/README.md`](docs/spikes/README.md).
+
+**Environment:** Windows 11 host; WSL2 distro `Ubuntu` (agents, tmux, Claude Code run there);
+Docker Desktop (`docker-desktop` WSL distro). Keep repos that agents edit on the WSL filesystem
+when working inside WSL (performance, file watching); this repo itself is checked out on Windows.
+
+**Related repositories:** `aiakos-hq/aiakos.dev` (website; renders this repo's `docs/`, never
+edit docs there) and `aiakos-hq/.github` (org profile, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT).
+`main` is protected: every change goes through a pull request.
+
 ## How work is organized
 
 - **Tickets**: GitHub Issues in `aiakos-hq/aiakos` (use `gh`). Every piece of work has an issue.
