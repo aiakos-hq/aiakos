@@ -9,4 +9,4 @@ and test plan. The *what/why* and status live in the linked GitHub issue.
 
 | # | Title | Status | Milestone |
 |---|---|---|---|
-| — | *(none yet)* | | |
+| [0002](0002-orchestrator-node-grpc-contract.md) | Orchestrator ↔ node gRPC contract v1 | draft | M1 |
