@@ -13,4 +13,4 @@ For each spike, write `NNNN-short-title.md` with:
 
 | # | Spike | Issue | Result |
 |---|---|---|---|
-| — | *(none yet — see milestone M0)* | | |
+| [0001](0001-claude-wsl-tmux-hooks.md) | Claude Code in WSL tmux: paste delivery and hooks | [#1](https://github.com/aiakos-hq/aiakos/issues/1) | Works. Paste plus a separate submit is reliable, and all hooks and the statusLine were captured. Needs a readiness gate and a typed lead line before pastes. With mirrored networking, hooks reach Windows on `127.0.0.1`. |
