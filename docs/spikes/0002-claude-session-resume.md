@@ -7,8 +7,8 @@ spike 0001 (paste delivery + hooks).
 **Result:** works, with caveats. We can choose the session ID up front, see it in every hook and
 statusLine payload, and resume the same conversation after killing the tmux server. A resume that
 fails exits non-zero and never starts a fresh session on its own, **as long as the adapter only
-passes a UUID it believes exists**. Anything that is not a UUID opens an interactive picker. The
-after-`wsl --shutdown` case is **pending** (see [Pending step](#pending-step-resume-after-wsl---shutdown)).
+passes a UUID it believes exists**. Anything that is not a UUID opens an interactive picker. Resume
+after `wsl --shutdown` also **passed** (see [Resume after `wsl --shutdown`](#resume-after-wsl---shutdown)).
 
 ## Question
 
@@ -219,10 +219,11 @@ If no `SessionStart` arrives within a timeout (about 15 s), the state is `unknow
 `capture-pane` for evidence; it is usually the trust prompt or the picker. A `SessionEnd` without a
 preceding `SessionStart` is noise from a failed launch and must not change seat state.
 
-## Pending step: resume after `wsl --shutdown`
+## Resume after `wsl --shutdown`
 
-This was not run here, because spikes #1 and #3 share the distro. The session is prepared and its
-files are left in place:
+**Result: PASS.** The maintainer ran the verifier below after `wsl --shutdown`, once spikes #1 and
+#3 (which share the distro) had finished. The resumed session reported `SessionStart source=resume`
+with the same ID and recalled the nonce. The session was prepared as follows:
 
 | | |
 |---|---|
@@ -234,7 +235,7 @@ files are left in place:
 | Env file | `~/aiakos-spikes/0002/pending-wsl-shutdown.env` |
 | Verifier | `~/aiakos-spikes/0002/bin/verify-pending.sh` |
 
-Run these when no other spike needs WSL:
+Commands:
 
 ```powershell
 wsl --shutdown
@@ -267,10 +268,9 @@ tmux -L aiakos-spike2 capture-pane -p -t seatW | tail -15
 tmux -L aiakos-spike2 kill-session -t seatW
 ```
 
-Expected: PASS. The transcript lives on the WSL ext4 disk, and kill-server resume uses the same code
-path. A restart differs only in the lost `/run/user/1000/cc-socks/*.sock` files and in stale
-`~/.claude/sessions/<pid>.json` files; none of these are needed for `--resume`. Record the result
-here when it has run.
+This matches the expectation. The transcript lives on the WSL ext4 disk, and kill-server resume
+uses the same code path. A restart differs only in the lost `/run/user/1000/cc-socks/*.sock` files
+and in stale `~/.claude/sessions/<pid>.json` files; none of these are needed for `--resume`.
 
 ## Decision / follow-ups
 
@@ -302,7 +302,6 @@ Recommendation for the Claude Code adapter (`IHarnessAdapter.BuildLaunch`, M1):
 
 Follow-ups:
 
-- Run the pending WSL-shutdown step and record the result here.
 - Spike #5 (Docker seat): first-run onboarding and login in a fresh config dir, plus trust
   projection.
 - Consider `--bg` / `claude attach` later as an alternative session host (not needed for M1).
