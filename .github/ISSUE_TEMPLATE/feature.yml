@@ -1,0 +1,29 @@
+name: Feature
+description: A new capability or an improvement
+labels: ["type/feature", "spec-needed"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What is missing or painful, and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What should be possible when this is done? Keep it observable.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria (draft)
+      description: Checkable statements. The spec in docs/specs/ refines these.
+      placeholder: "- [ ] `aiakos up solo` starts a Claude Code seat and `aiakos ps` shows it as idle"
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Related issues, ADRs, plan sections, prior art.

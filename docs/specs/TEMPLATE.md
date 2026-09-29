@@ -1,0 +1,38 @@
+---
+id: NNNN
+title: Short title
+status: draft            # draft | accepted | implemented | superseded
+issue: https://github.com/aiakos-hq/aiakos/issues/N
+milestone: M1
+owner: "@handle or seat@rig"
+---
+
+# NNNN — Short title
+
+## Context
+Why this is needed now. Link the issue, relevant ADRs and plan sections.
+
+## Goals
+- Observable outcomes this spec delivers.
+
+## Non-goals / out of scope
+- What this deliberately does not do.
+
+## Requirements
+Numbered, testable statements (R1, R2, …).
+
+## Design
+Components, interfaces, data (tables/migrations), protocols, sequence of operations.
+Call out which interfaces (`ISessionHost`, `ISandbox`, …) are touched.
+
+## Acceptance criteria
+- [ ] AC1 — stated as something a reviewer can verify (command + expected result).
+
+## Test plan
+Unit, integration (real tmux/Docker where relevant), and the manual demo.
+
+## Risks and open questions
+- …
+
+## Changes after acceptance
+Dated notes when the implementation deviated from the design above.

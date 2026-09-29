@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Plan and architecture
+    url: https://github.com/aiakos-hq/aiakos/blob/main/docs/plan.md
+    about: Read the plan and ADRs before proposing larger changes.

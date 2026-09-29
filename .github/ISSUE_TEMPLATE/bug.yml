@@ -1,0 +1,34 @@
+name: Bug
+description: Something does not work as documented
+labels: ["type/bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, rig files (redact secrets), harness and versions.
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "Aiakos version, OS / WSL distro, tmux, harness (claude/opencode/codex) versions, sandbox"
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs / evidence
+      description: Relevant log lines, trace IDs, `aiakos ps --json` output.
+      render: text
