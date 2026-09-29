@@ -13,4 +13,4 @@ For each spike, write `NNNN-short-title.md` with:
 
 | # | Spike | Issue | Result |
 |---|---|---|---|
-| — | *(none yet — see milestone M0)* | | |
+| 0001 | [Claude Code in WSL tmux — paste delivery and hooks](0001-claude-wsl-tmux-hooks.md) | #1 | Works: paste + separate submit reliable; all hooks and statusLine captured. Needs readiness gate, typed lead line before pastes, and an in-WSL relay (NAT mode blocks WSL → host). |
