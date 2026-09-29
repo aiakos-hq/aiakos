@@ -19,8 +19,9 @@ three conditions:
 2. The dashboard's OTLP URL that Aspire injects (`localhost`) has to be rewritten for WSL.
 3. In the current **NAT** networking mode, Windows Firewall blocks WSL → Windows by default.
    Each listening Windows executable needs an inbound allow rule. Mirrored networking avoids this,
-   which is why ADR 0011 asks for it. Mirrored mode is **not yet verified** because switching needs
-   a WSL restart (see [Pending](#pending-mirrored-networking-verification)).
+   which is why ADR 0011 asks for it. Mirrored mode was **verified** afterwards: everything runs
+   over `127.0.0.1` with no firewall rules involved (see
+   [Mirrored networking verification](#mirrored-networking-verification)).
 
 ## Environment
 
@@ -195,7 +196,7 @@ twice (a parent/child pair) under `dcp.exe run-controllers`. The OTel env vars, 
   - The rules that matter are for the process that owns the socket. For the dashboard OTLP port that
     is `dcp.exe`, which proxies it. For the orchestrator it is `Orchestrator.exe`.
 - With the OTLP URL set to `0.0.0.0`, DCP bound `:19003` on **every IPv4 address, including the LAN**
-  (`192.168.10.252`). The API key protects it, but it is exposed. The dashboard UI (15003) and the
+  (e.g. `192.168.x.y`). The API key protects it, but it is exposed. The dashboard UI (15003) and the
   resource service stay on localhost.
 - Aspire displays and injects `http://localhost:19003` even when it is configured as `0.0.0.0`,
   which is why the rewrite is needed.
@@ -217,10 +218,9 @@ on Windows `localhost` too. The first attempt used 5180 on both sides, and the o
 with `Failed to bind to address http://127.0.0.1:5180: address already in use`. This is a
 workaround only. Mirrored mode makes it unnecessary.
 
-**Mirrored (ADR 0011): not verified yet.** It needs a `.wslconfig` change and a WSL restart. See
-[Pending](#pending-mirrored-networking-verification). Expected: WSL reaches Windows services on
-`127.0.0.1`, loopback is not subject to the host firewall prompts, the orchestrator and dashboard can
-stay bound to `localhost`, and the AppHost uses `windowsFromWsl = "127.0.0.1"`.
+**Mirrored (ADR 0011): verified.** WSL reaches Windows services on `127.0.0.1`. The orchestrator and
+the dashboard's OTLP endpoint stay bound to `localhost`, and the AppHost uses
+`windowsFromWsl = "127.0.0.1"`. See [Mirrored networking verification](#mirrored-networking-verification).
 
 **HTTPS / dev cert:** the spike used `http` (h2c) with `ASPIRE_ALLOW_UNSECURED_TRANSPORT=true`. For
 HTTPS from Linux, the ASP.NET dev cert (CN=localhost) would have to be exported
@@ -285,10 +285,30 @@ The node logs the POSIX signals it receives to `~/aiakos-spikes/0003/node.pids`.
 13. Run the node from the WSL filesystem, not `/mnt/c`, and publish it self-contained. The distro
     has no .NET, and none is needed.
 
-## Pending: mirrored networking verification
+## Mirrored networking verification
 
-This needs a WSL restart. **Not done here:** other spikes share the distro, and the coordinator
-serializes it.
+**Result: PASS.** This was run after the other spikes had finished, because it needs a WSL restart.
+Run `run8-mirrored` gave these results:
+
+- `wsl.exe -d Ubuntu -- ip -br addr` shows the Windows NIC address on `eth0`, and the default route
+  is the LAN router. There is no `172.x` address.
+- In WSL, `ss -tn` shows the node's connections to `127.0.0.1:5180` (gRPC) and to `127.0.0.1:19003`
+  (OTLP; one per exporter).
+- The orchestrator console log shows `Heartbeat N from ipv4:127.0.0.1:<port>` for the node
+  `wsl-local`.
+- The dashboard shows 43 structured logs for `node-wsl`, 52 `node-wsl: node.heartbeat` traces, and
+  `node-wsl` metrics (`Spike0003.Node`, `System.Net.Http`, `System.Runtime`), all after about 2
+  minutes.
+- Ctrl+C on the AppHost (the `ctrlc` helper) stopped everything: the AppHost exited, no
+  `Spike0003.Node` process was left in WSL, and all `dcp.exe` processes exited within seconds.
+- No firewall prompt appeared. The traffic is loopback, which the inbound firewall rules do not
+  filter.
+
+Not rechecked in mirrored mode: a **fresh** orchestrator output path (to rule out the old NAT-era
+allow rules helping), and pitfall 8 (shared port space). Loopback makes the first one moot. The
+second one is inherent to mirrored mode, so M1 must keep the orchestrator and node ports distinct.
+
+The steps that were followed:
 
 1. Add to `%USERPROFILE%\.wslconfig` (the file does not exist today):
 
@@ -311,14 +331,13 @@ serializes it.
    structured logs, traces and metrics show in the dashboard; there is **no** firewall prompt, and a
    **fresh** orchestrator path works too (build into a new output dir). Also confirm pitfall 8 still
    holds, since in mirrored mode Windows and WSL share the port space.
-5. Record the result here and flip the ADR 0011 note from "to validate" to "validated".
 
 ## Decision / follow-ups
 
 - **ADR 0011 stands.** The `wsl.exe` launch path works, lifetime is clean, and telemetry flows. The
   NAT experience (firewall prompts per exe path, gateway IP discovery, LAN-exposed OTLP) is a strong
-  argument for **mirrored networking as the documented dev prerequisite**, pending the verification
-  above. NAT remains possible with firewall allow rules. The reverse bridge is a known escape hatch;
+  argument for **mirrored networking as the documented dev prerequisite**, and the verification
+  above confirms it works. NAT remains possible with firewall allow rules. The reverse bridge is a known escape hatch;
   do not build it unless mirrored mode fails.
 - **For the M1 solution skeleton (#9):**
   - AppHost: the `AddExecutable("node-wsl", "wsl.exe", "-d", distro, "--cd", "~", "--exec", nodePath)`
