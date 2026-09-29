@@ -14,3 +14,4 @@ For each spike, write `NNNN-short-title.md` with:
 | # | Spike | Issue | Result |
 |---|---|---|---|
 | [0001](0001-claude-wsl-tmux-hooks.md) | Claude Code in WSL tmux: paste delivery and hooks | [#1](https://github.com/aiakos-hq/aiakos/issues/1) | Works. Paste plus a separate submit is reliable, and all hooks and the statusLine were captured. Needs a readiness gate and a typed lead line before pastes. With mirrored networking, hooks reach Windows on `127.0.0.1`. |
+| [0002](0002-claude-session-resume.md) | Claude Code session ID capture and resume | [#2](https://github.com/aiakos-hq/aiakos/issues/2) | Works. Chosen `--session-id`, then `--resume` after a tmux kill and after `wsl --shutdown`. A failed resume exits 1 and never silently starts fresh. Pass validated UUIDs only (anything else opens a picker). A trusted seat root is required. |
