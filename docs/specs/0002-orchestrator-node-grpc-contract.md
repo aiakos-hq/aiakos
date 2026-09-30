@@ -1,7 +1,7 @@
 ---
 id: 0002
 title: Orchestrator ↔ node gRPC contract v1
-status: draft            # draft | accepted | implemented | superseded
+status: accepted         # draft | accepted | implemented | superseded
 issue: https://github.com/aiakos-hq/aiakos/issues/10
 milestone: M1
 owner: "@bsakel"
@@ -85,7 +85,7 @@ Related specs, written in parallel or later:
     seats (M6);
   - reading files from a seat home (transcripts, `ISeatProbe`) and chunked transfer of large
     files (M5/M7);
-  - a durable, on-disk event spool on the node (see open question Q2);
+  - a durable, on-disk event spool on the node (decision D2);
   - TLS, mTLS, token rotation and remote nodes (M6; see [Security](#security));
   - node self-update, node metrics over the stream (OTLP already covers metrics), compression,
     and multiple orchestrators (Akka.Cluster, M8).
@@ -101,7 +101,8 @@ Related specs, written in parallel or later:
   The orchestrator never dials a node.
 - **R3** The major version is the package name (`v1`). Within a major version every change is
   additive and follows the [compatibility rules](#compatibility-rules). A breaking change creates
-  `aiakos.node.v2`, served side by side with `v1` for at least one release.
+  `aiakos.node.v2`, served side by side with `v1` for at least one release
+  ([ADR 0020](../adr/0020-node-contract-versioning.md)).
 - **R4** `Hello` and `Welcome` carry `ProtocolVersion {major, minor}`. The orchestrator rejects a
   different major version with `FAILED_PRECONDITION`. The negotiated minor is the lower of the
   two; neither side uses a feature above it.
@@ -122,7 +123,7 @@ Related specs, written in parallel or later:
   orchestrator closes the stream with `PERMISSION_DENIED` (fail closed, no guessing).
 - **R9** At most one live stream per node. A new, authenticated `Connect` for a node that already
   has one **replaces** it: the old stream receives `Goodbye{SUPERSEDED}` and is closed with
-  `ABORTED`.
+  `ABORTED` (D7).
 - **R10** The node sends `Heartbeat` every `Welcome.heartbeat_interval` (default 5 s). No
   message of any kind from the node for `Welcome.liveness_timeout` (default 15 s) → the
   orchestrator marks the node, and the liveness of all its seats, `unknown` (plan §7; the state
@@ -161,6 +162,8 @@ Related specs, written in parallel or later:
   orchestrator-owned native session ID, workspace, argv, non-secret env, projected files and
   secrets. The node expands only the placeholders `${AIAKOS_SEAT_HOME}` and `${AIAKOS_WORKSPACE}`
   in argv, env values and file contents marked `expand`; it does not interpret anything else.
+  When `Workspace.worktree` is set, the node ensures the worktree exists (idempotent) before it
+  launches (D6). Resume and fork are launch modes of `StartSeat`, not separate commands (D4).
 - **R20** A `StartSeat` for a seat that already has a live harness under a different `launch_id`
   is rejected with `SEAT_ALREADY_RUNNING`. The node never kills a running seat to satisfy a
   start.
@@ -169,7 +172,10 @@ Related specs, written in parallel or later:
   `FAILED` (the harness exited or reported that the session does not exist), or `UNKNOWN`
   (no readiness within `ready_timeout`; a pane capture is attached as evidence). `RESUME` never
   falls back to a fresh session on the node. A fresh start after a failed resume is a new,
-  explicit `StartSeat{FRESH}` decided and recorded by the orchestrator.
+  explicit `StartSeat{FRESH}` decided and recorded by the orchestrator. The node decides the
+  outcome (it sees the harness signal first and holds the timer); the SeatActor records it and
+  still receives the underlying harness events. A disagreement between the two becomes a health
+  finding, never a silent override (D5).
 - **R22** `DeliverInput` carries a one-line `lead` and a `body`. The node rejects it with
   `SEAT_NOT_READY` if it has not observed readiness for the current launch, and with `SEAT_BUSY`
   if a delivery for the seat is in flight. The result is `CONFIRMED` (the harness acknowledged
@@ -194,11 +200,14 @@ Related specs, written in parallel or later:
 - **R27** `seq` is assigned by the node when the event enters its buffer. It starts at 1 per
   `(node_instance_id, seat_id)`, increases by exactly 1 per event, and a number is never reused,
   even if the event is later dropped. `node_instance_id` is a UUID generated at every node
-  process start and is the epoch of the sequence.
+  process start and is the epoch of the sequence. In M1 the buffer is in memory only; there is
+  no on-disk spool (D2).
 - **R28** An optional `source_seq`, stamped by the hook relay per seat, orders harness events by
   when the harness emitted them (spike 0001: arrival order is not emission order). The SeatActor
   orders harness events by `source_seq` when present and by `seq` otherwise. `observed_at` is
-  never used for ordering.
+  never used for ordering. The hook relay stamps it with a per-seat counter file under `flock`
+  in the seat home (#12); if that proves too slow, `source_seq` stays 0 and ingest order (`seq`)
+  applies (D3).
 - **R29** Delivery is at least once. The orchestrator persists each event with the unique key
   `(tenant_id, node_instance_id, seat_id, seq)` and treats a duplicate insert as success.
 - **R30** The orchestrator acks with `EventAck{seat_id, through_seq}` (cumulative) only **after**
@@ -207,7 +216,9 @@ Related specs, written in parallel or later:
 - **R31** On (re)connect, `Hello.seats` lists every seat the node knows with its buffered range.
   `Welcome.replay` gives, per seat, the `next_seq` the orchestrator expects for the current
   `node_instance_id`. The node discards buffered events below `next_seq` and sends the rest in
-  `seq` order before any new event for that seat.
+  `seq` order before any new event for that seat. A seat in `Hello.seats` that the orchestrator
+  does not know (database reset, manual launch) becomes a health finding with its inventory; the
+  orchestrator never stops it automatically in M1 (D9).
 - **R32** Gaps are detected, not hidden: if the first event the orchestrator receives for a seat
   is above its `next_seq`, or `node_instance_id` changed while it still expected events from the
   previous instance, the orchestrator records a gap for the seat and asks #13 to resync (capture
@@ -302,7 +313,7 @@ Related specs, written in parallel or later:
 | `CapturePane` | `ISessionHost.CaptureAsync` |
 | `StopSeat` | harness driver graceful stop, then `ISessionHost` kill |
 | `ProcessExited` | `ISessionHost.IsAliveAsync` / `EventsAsync` |
-| `HarnessEvent`, `SessionObserved` | node-side part of `IHarnessAdapter.ParseEvent` (normalization only, see Q1) |
+| `HarnessEvent`, `SessionObserved` | node-side part of `IHarnessAdapter.ParseEvent` (normalization only; D1, [ADR 0018](../adr/0018-harness-adapter-split.md)) |
 
 ### Proposed proto (v1.0)
 
@@ -778,6 +789,9 @@ reconnect (R33). No message changes are needed for M2 except the additive `Answe
 
 ### Sequencing and delivery guarantees
 
+The delivery model (one stream, node-numbered events, ack after commit, at-most-once input) is
+recorded in [ADR 0019](../adr/0019-node-link-delivery-model.md).
+
 | Direction | Guarantee | Mechanism |
 |---|---|---|
 | Seat events, node → orchestrator | at least once on the wire, exactly once in the database, in `seq` order per seat | node buffer + `seq`; orchestrator unique key + `EventAck` after commit; replay from `Welcome.replay` |
@@ -846,6 +860,10 @@ changes, not a v2:
 - Tenant-owned nodes (M8) only change how tokens are issued; tenant never enters the messages.
 
 ### Compatibility rules
+
+The versioning scheme (package major, negotiated minor, capabilities) is recorded in
+[ADR 0020](../adr/0020-node-contract-versioning.md); `buf` as the lint and breaking-change tool
+in [ADR 0021](../adr/0021-buf-for-proto-tooling.md).
 
 1. Never change the number, type or meaning of an existing field; never reuse a number. Removed
    fields and enum values become `reserved` (number and name).
@@ -1088,52 +1106,58 @@ Claude Code runs only in the manual demo (AC11), because it needs a login.
 
 ## Risks and open questions
 
-Each question has a recommendation; the reviewer can accept it by merging.
+No questions remain open. The review on PR #27 accepted every recommendation; the outcomes are
+folded into the requirements and design above.
 
-- **Q1 — Where does harness normalization run?** The node sees raw hook/SSE payloads; the
-  orchestrator owns meaning. *Recommendation:* split `IHarnessAdapter`. The **orchestrator side**
-  builds launches (argv, files) and interprets events into state; a **node-side driver** does the
-  mechanics (readiness, delivery, confirmation, resume verification) and normalizes `kind`,
-  `native_session_id`, `attributes` and `usage`. The raw payload always travels, so the
-  orchestrator can re-derive anything. *Deserves an ADR* (it refines ADR 0004's "no business
-  logic on the node").
-- **Q2 — Durable event spool on the node in M1?** *Recommendation:* no. Use an in-memory buffer
-  with `node_instance_id` as the epoch and honest gap reporting. A node restart loses hook posts
-  sent while it is down anyway, so the gap path is needed regardless; a disk spool only narrows
-  it. Revisit in M7 (long-running health).
-- **Q3 — Who stamps `source_seq`?** *Recommendation:* the hook relay, with a per-seat counter file
-  under `flock` in the seat home (#12). If that proves too slow, the node falls back to ingest
-  order and leaves `source_seq = 0`; the contract supports both.
-- **Q4 — Resume as its own command or as a launch mode?** *Recommendation:* a mode of `StartSeat`
-  (`RESUME`, `FORK`), with its own `launch_id`, so launch idempotency, evidence and outcome
-  handling are shared. The outcome vocabulary maps directly: `READY` = verified, `FAILED`,
-  `UNKNOWN`.
-- **Q5 — Does the node or the SeatActor decide readiness and resume verification?**
-  *Recommendation:* the node reports them in `LaunchResult` (it sees the hook first and holds the
-  timer), and the SeatActor records them while still receiving the underlying harness events; a
-  disagreement becomes a health finding (plan §7), never a silent override.
-- **Q6 — Should `StartSeat` also create the worktree?** *Recommendation:* yes for M1 (an
-  idempotent "ensure" in `Workspace.worktree`), because `seat-worktree` is an M1 checkout policy.
-  Split out a `PrepareWorkspace` command in a minor revision if clone times make `StartSeat`
-  timeouts awkward.
-- **Q7 — Newest stream wins, or reject the second connection?** *Recommendation:* newest wins
-  (R9). It recovers from half-open connections without waiting for keepalive; the node's
-  single-instance lock (spike 0003) prevents two live node processes on one machine.
-- **Q8 — Toolchain for lint and breaking checks.** *Recommendation:* `buf` CLI for lint and
-  `buf breaking` in CI, `Grpc.Tools` for C# code generation. *Deserves an ADR* (it adds a non-.NET
-  tool to the build).
-- **Q9 — Seats on the node that the orchestrator does not know (after a database reset or a
-  manual launch).** *Recommendation:* report as a health finding with the inventory; never stop
-  them automatically in M1.
-- **Risk — statusLine volume.** statusLine fires often; R39 rate-limits and coalesces it. If it
-  still dominates, move usage samples to a separate unsequenced message in a minor revision.
-- **Risk — secrets over h2c.** Acceptable only on loopback (R43). Any remote node needs TLS
-  first (M6).
+### Decisions (resolved in review)
 
-**Decisions that deserve an ADR** (not written here): the adapter split between orchestrator and
-node (Q1); the delivery model (single bidi stream, node-assigned per-seat `seq`, cumulative ack
-after commit, at-most-once for input commands); protocol versioning (package major + negotiated
-minor + capabilities); `buf` in the toolchain (Q8).
+- **D1 — Where does harness normalization run?** *Decision:* split `IHarnessAdapter`. The
+  **orchestrator side** builds launches (argv, files) and interprets events into state; a
+  **node-side driver** does the mechanics (readiness, delivery, confirmation, resume
+  verification) and normalizes `kind`, `native_session_id`, `attributes` and `usage`. The raw
+  payload always travels. *Rationale:* the node sees payloads first and must know the harness
+  mechanics anyway, while meaning stays with the orchestrator, which can re-derive anything from
+  the raw payload. Recorded in [ADR 0018](../adr/0018-harness-adapter-split.md).
+- **D2 — Durable event spool on the node in M1?** *Decision:* no. The buffer is in memory, with
+  `node_instance_id` as the epoch and honest gap reporting (R27, R32). *Rationale:* hook posts sent
+  while the node is down are lost anyway, so the gap path is needed regardless; a spool only
+  narrows it. Revisit in M7.
+- **D3 — Who stamps `source_seq`?** *Decision:* the hook relay, with a per-seat counter file under
+  `flock` in the seat home (#12); fallback is ingest order with `source_seq = 0` (R28).
+  *Rationale:* only the source sees emission order; the contract works either way.
+- **D4 — Resume as its own command or as a launch mode?** *Decision:* a mode of `StartSeat`
+  (`RESUME`, `FORK`) with its own `launch_id` (R19, R21). *Rationale:* launch idempotency, evidence
+  and outcome handling are shared, and the outcomes map directly (`READY` = verified, `FAILED`,
+  `UNKNOWN`).
+- **D5 — Who decides readiness and resume verification?** *Decision:* the node reports them in
+  `LaunchResult`; the SeatActor records them and turns any disagreement with the raw events into
+  a health finding (R21). *Rationale:* the node sees the hook first and holds the timer; plan §7
+  forbids silent overrides.
+- **D6 — Does `StartSeat` create the worktree?** *Decision:* yes in M1, as an idempotent ensure of
+  `Workspace.worktree` (R19). A `PrepareWorkspace` command can follow in a minor revision if clone
+  times make `StartSeat` timeouts awkward. *Rationale:* `seat-worktree` is an M1 checkout policy
+  and needs no extra round trip.
+- **D7 — Second connection from the same node?** *Decision:* the newest stream wins; the old one
+  gets `Goodbye{SUPERSEDED}` and `ABORTED` (R9). *Rationale:* it recovers from half-open
+  connections without waiting for keepalive, and the node's single-instance lock (spike 0003)
+  prevents two live node processes.
+- **D8 — Toolchain for lint and breaking checks?** *Decision:* the `buf` CLI for `buf lint` and
+  `buf breaking` in CI; `Grpc.Tools` for C# code generation (AC1, AC2). *Rationale:* `buf breaking`
+  enforces the compatibility rules mechanically. Recorded in
+  [ADR 0021](../adr/0021-buf-for-proto-tooling.md).
+- **D9 — Seats on the node that the orchestrator does not know?** *Decision:* report them as a
+  health finding with the inventory; never stop them automatically in M1 (R31). *Rationale:* no
+  guessing (rule 3); a human decides.
+
+The delivery model and the versioning scheme, which this spec defines rather than asks about, are
+recorded in [ADR 0019](../adr/0019-node-link-delivery-model.md) and
+[ADR 0020](../adr/0020-node-contract-versioning.md).
+
+### Risks
+
+- **statusLine volume.** statusLine fires often; R39 rate-limits and coalesces it. If it still
+  dominates, move usage samples to a separate unsequenced message in a minor revision.
+- **Secrets over h2c.** Acceptable only on loopback (R43). Any remote node needs TLS first (M6).
 
 ## Changes after acceptance
 
