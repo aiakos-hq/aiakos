@@ -1,7 +1,7 @@
 ---
 id: 0001
 title: Solution skeleton
-status: accepted         # draft | accepted | implemented | superseded
+status: implemented      # draft | accepted | implemented | superseded
 issue: https://github.com/aiakos-hq/aiakos/issues/9
 milestone: M1
 owner: "@bsakel"
@@ -738,7 +738,7 @@ Prerequisites: .NET SDK 10.0.1xx+ (see `global.json`); Docker Desktop running; W
 - Test (Docker required for the database tests): `dotnet test`
 - Run the dev stack (Postgres, orchestrator, node in WSL): `dotnet run --project src/Aiakos.AppHost`
   — dashboard at http://localhost:15180
-- WSL end-to-end test (Windows only, stack not running): `$env:AIAKOS_E2E_WSL=1; dotnet test tests/Aiakos.AppHost.Tests`
+- WSL end-to-end test (Windows only, stack not running): `$env:AIAKOS_E2E_WSL=1; dotnet test --project tests/Aiakos.AppHost.Tests`
 - Pack the placeholder tool: `dotnet pack src/Aiakos.Cli -c Release -o artifacts/packages`
 - Add a migration: `src/Aiakos.Data/Migrations/NNNN_description.sql` (next number; never edit a
   merged one; every table in schema `aiakos` gets `tenant_id`).
@@ -756,40 +756,40 @@ Prerequisites: .NET SDK 10.0.1xx+ (see `global.json`); Docker Desktop running; W
   reported as skipped.
 - [ ] **AC3** The `ci` workflow runs and passes on the implementation PR (build, test, node
   publish), and test results are attached as an artifact.
-- [ ] **AC4** `git grep -nE 'PackageReference[^>]*Version=' -- '*.csproj'` finds nothing, and
+- [x] **AC4** `git grep -nE 'PackageReference[^>]*Version=' -- '*.csproj'` finds nothing, and
   `git grep -n NoWarn` shows only `CS1591` (root) and `ASPIRE010` (AppHost, with a comment).
-- [ ] **AC5** `git ls-files --eol | grep 'i/crlf'` lists only `*.ps1`, `*.cmd` or `*.bat` files.
-- [ ] **AC6** With the prerequisites met, `dotnet run --project src/Aiakos.AppHost` shows in the
+- [x] **AC5** `git ls-files --eol | grep 'i/crlf'` lists only `*.ps1`, `*.cmd` or `*.bat` files.
+- [x] **AC6** With the prerequisites met, `dotnet run --project src/Aiakos.AppHost` shows in the
   dashboard (http://localhost:15180): `postgres` Running, `orchestrator` Running and Healthy,
   `node-publish` and `node-install` Finished (exit 0), `node-wsl` Running.
-- [ ] **AC7** The dashboard shows structured logs, traces and metrics for `orchestrator` and
+- [x] **AC7** The dashboard shows structured logs, traces and metrics for `orchestrator` and
   `node-wsl`, including one trace that contains a `node-wsl` client span and an `orchestrator`
   server span for `grpc.health.v1.Health/Check`. The `node-wsl` log shows `connected` to
   `http://127.0.0.1:5180`.
-- [ ] **AC8** In WSL, `ls ~/.aiakos-dev/node/aiakos-node` exists, and `ss -tn` shows the node's
+- [x] **AC8** In WSL, `ls ~/.aiakos-dev/node/aiakos-node` exists, and `ss -tn` shows the node's
   connection to `127.0.0.1:5180`. No process runs from `/mnt/c`.
-- [ ] **AC9** `psql` against the `aiakos` database: `SELECT slug FROM aiakos.tenant` returns only
+- [x] **AC9** `psql` against the `aiakos` database: `SELECT slug FROM aiakos.tenant` returns only
   `default`; `SELECT scriptname FROM aiakos_meta.schema_versions` lists the `0001_tenant.sql`
   script. Restarting the orchestrator applies no scripts (its log says so).
-- [ ] **AC10** Dashboard **Stop** on `orchestrator`: `node-wsl` keeps running and logs
+- [x] **AC10** Dashboard **Stop** on `orchestrator`: `node-wsl` keeps running and logs
   `unavailable` with growing retry delays capped at 30 s. **Start**: `node-wsl` logs `connected`
   within 35 s.
-- [ ] **AC11** Ctrl+C on the AppHost: the `node-wsl` log ends with a graceful stop line naming
+- [x] **AC11** Ctrl+C on the AppHost: the `node-wsl` log ends with a graceful stop line naming
   SIGHUP; within 5 s `pgrep -f aiakos-node` in WSL prints nothing.
-- [ ] **AC12** While the stack runs, starting a second node by hand in WSL with the same
+- [x] **AC12** While the stack runs, starting a second node by hand in WSL with the same
   `AIAKOS_HOME` exits with code 3 and a message that names `node.lock` and the first node's pid.
-- [ ] **AC13** Starting the node without `AIAKOS_ORCHESTRATOR_URL` exits with code 2 and names the
+- [x] **AC13** Starting the node without `AIAKOS_ORCHESTRATOR_URL` exits with code 2 and names the
   variable.
-- [ ] **AC14** Setting `Aiakos:Wsl:Home` to `.aiakos` (or `Aiakos:PortBase` to 7180, or
+- [x] **AC14** Setting `Aiakos:Wsl:Home` to `.aiakos` (or `Aiakos:PortBase` to 7180, or
   `Aiakos:Instance` to `release`) makes the AppHost refuse to start with a message naming the key.
-- [ ] **AC15** The rule-6 guard test fails when pointed at a database with a table in schema
+- [x] **AC15** The rule-6 guard test fails when pointed at a database with a table in schema
   `aiakos` that has no `tenant_id` (its own negative test shows this) and passes on the real
   migrations.
-- [ ] **AC16** The architecture test shows `Aiakos.Node` references none of `Aiakos.Orchestrator`,
+- [x] **AC16** The architecture test shows `Aiakos.Node` references none of `Aiakos.Orchestrator`,
   `Aiakos.Data`, `Akka*`, `Npgsql*` (ASP.NET Core is allowed, R40).
-- [ ] **AC17** `CLAUDE.md` "Commands" matches [Design → Commands](#commands-for-claudemd), and the
+- [x] **AC17** `CLAUDE.md` "Commands" matches [Design → Commands](#commands-for-claudemd), and the
   spec table in `docs/specs/README.md` shows 0001 as `implemented` when the PR merges.
-- [ ] **AC18** `Aiakos.Cli` is in `Aiakos.slnx`, its project file no longer sets the properties
+- [x] **AC18** `Aiakos.Cli` is in `Aiakos.slnx`, its project file no longer sets the properties
   that `Directory.Build.props` provides, and `dotnet pack src/Aiakos.Cli -c Release` produces
   `Aiakos.0.0.1-preview.1.nupkg` containing `README.md` and the `aiakos` tool command; running the
   tool prints the same greeting and version as before.
@@ -907,15 +907,25 @@ recommendation in the review of PR #26; they are folded into the requirements an
 - **RK1 — `wslinfo --networking-mode`** was not exercised in spike 0003. If it is unavailable in the
   installed WSL version, the preflight falls back to reading `networkingMode` from
   `%USERPROFILE%\.wslconfig` and reports `unknown` (and refuses) when neither works.
+  *Outcome (#9 PR):* `wslinfo --networking-mode` prints `mirrored` on WSL 2.7.10; the fallback
+  is implemented and covered by the preflight tests.
 - **RK2 — Per-endpoint Kestrel protocols with Aspire-managed endpoints** (R14) were not tried in the
   spike, which used the global `EndpointDefaults`. If Aspire's injected configuration fights the
   per-endpoint setting, fall back to configuring both endpoints explicitly in Kestrel from the
   ports Aspire passes, and record it under "Changes after acceptance".
+  *Outcome (#9 PR):* Aspire 13.5.4 passes project endpoints through `ASPNETCORE_URLS`, and
+  `ConfigureEndpointDefaults` sees each endpoint's port, so the per-endpoint setting works; the
+  fallback was not needed (AC6, and an orchestrator test binding two real ports).
 - **RK3 — Aspire version churn.** `EndpointReference` handling and event names changed across Aspire
   releases (spike 0003 pitfall 2). The AppHost tests pin the behaviour; upgrade Aspire only in a
-  dedicated PR.
+  dedicated PR. *Outcome (#9 PR):* in 13.5.4 `GetEnvironmentVariableValuesAsync` is obsolete (tests
+  use `ExecutionConfigurationBuilder`), `OTEL_EXPORTER_OTLP_ENDPOINT` is a `HostUrl` until the
+  dashboard exists (the rewrite handles both), and process output is logged under the resource
+  instance id (`node-wsl-xxxx`), not the resource name.
 - **RK4 — Akka.TestKit and xUnit v3** (D5): check compatibility before #13 starts.
 - **RK5 — Publish time on each AppHost start** (D2) could annoy; measure it in the implementation PR.
+  *Outcome (#9 PR):* an incremental `node-publish` takes about 5 s and `node-install` about 5 s;
+  the WSL end-to-end test (build excluded) takes 27 s from start to stop.
 
 ## Changes after acceptance
 
@@ -925,3 +935,35 @@ recommendation in the review of PR #26; they are folded into the requirements an
   base plus 10. R40 now allows ASP.NET Core in the node while still forbidding `Aiakos.Orchestrator`,
   `Aiakos.Data`, Akka and Npgsql (AC16 unchanged apart from that note); R41's rationale, the
   layout, the package table, the port table and [Design → Node](#node) follow. No ADR.
+
+- **2026-10-01 — implementation deviations (#9 PR).** None changes a decision; all were checked
+  in review of the implementation PR.
+  - *Packages and tooling:* Aspire is pinned to 13.5.4 exactly. The gRPC client instrumentation
+    package exists only as a beta, so it is not used; the node's `Health/Check` still produces a
+    client span through the `HttpClient` instrumentation, and one trace crosses the WSL boundary
+    (AC7). CI uses current action majors and `Microsoft.Testing.Extensions.TrxReport`
+    (`--report-trx`). Under Microsoft.Testing.Platform, `dotnet test` takes a project with
+    `--project`, so the end-to-end command in [Commands](#commands-for-claudemd) reads
+    `dotnet test --project tests/Aiakos.AppHost.Tests`. Test method names are PascalCase (CA1707).
+  - *Database:* the journal records scripts by file name (`0001_tenant.sql`), not by embedded
+    resource name, so renaming the assembly or namespace never re-runs them; scripts are loaded
+    with `WithScripts` rather than `WithScriptsEmbeddedInAssembly`. DbUp variable substitution is
+    disabled, because `$name$` would clash with Postgres dollar quoting. The migrator creates the
+    `aiakos_meta` schema under the advisory lock. `/health` also includes the `self` check.
+  - *Orchestrator:* a failed migration ends the process through the unhandled startup exception
+    (non-zero, as R28 requires) rather than a clean exit code 1, so `WebApplicationFactory` sees the
+    failure.
+  - *AppHost:* the orchestrator is added without a launch profile and its `http` and `grpc`
+    endpoints are declared in the AppHost. The instance guard also refuses port bases whose +0/+10
+    ports hit the released ones (7170, 7190), an absolute or empty home, and invalid instance names.
+    Only a passing preflight is cached, so a fixed WSL setup is picked up on a resource restart.
+    `WSLENV` is a value resolved after all environment callbacks rather than a final callback.
+  - *Node:* `InvariantGlobalization` is on, because a stock Ubuntu distro may have no libicu and a
+    self-contained app then fails at startup. Reading the lock holder's pid uses a raw `open(2)`
+    (so `AllowUnsafeBlocks` is on), because on Linux every .NET `FileStream` takes a flock. Each
+    connect attempt uses a fresh gRPC channel, because the channel's own subchannel backoff
+    otherwise stacks under ours; connects time out after 5 s, since a connect to a closed loopback
+    port can hang in mirrored mode. Jittered delays are clamped to 30 s. "Connected" requires
+    `SERVING`; any other status, including `NOT_SERVING` on the watch stream, counts as unavailable.
+  - *Telemetry shutdown:* providers are shut down with `Shutdown(timeout)`, which flushes first,
+    in parallel, and are resolved when the service is created.
