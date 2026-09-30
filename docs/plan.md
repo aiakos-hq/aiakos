@@ -181,13 +181,18 @@ host files), and much of its process machinery is specific to its own agent-driv
 
 ### Core interfaces
 ```csharp
-interface IHarnessAdapter  { Project(...); BuildLaunch(fresh|resume|fork); ParseEvent(...); }
+interface IHarnessAdapter  { Project(...); BuildLaunch(fresh|resume|fork); InterpretEvent(...); }   // orchestrator
+interface IHarnessDriver   { readiness; delivery + confirmation; resume verification; NormalizeEvent (raw payload forwarded); }   // node
 interface ISeatChannel     { SendAsync; Events; AnswerPermissionAsync; }   // API-driven or terminal-driven
 interface ISessionHost     { CreateAsync; SendTextAsync; SendKeysAsync; CaptureAsync; IsAliveAsync; EventsAsync; }
 interface ISandbox         { EnsureAsync; Wrap(cmd); Paths (PathMap); OrchestratorUrlFromInside; FileSystem; }
 interface ISeatProbe       { GetNativeSessionIdAsync; GetHarnessProcessAsync; }
 interface IChatConnector   { inbound messages; SendAsync; buttons/approvals; }
 ```
+Each harness has two halves ([ADR 0018](adr/0018-harness-adapter-split.md)): the orchestrator's
+`IHarnessAdapter` builds launches and interprets events into state; the node's `IHarnessDriver`
+handles readiness, delivery, confirmation and resume verification, and normalizes events while
+always forwarding the raw payload.
 A seat = **harness × session host × sandbox** (× node).
 
 ### Two harness styles
@@ -260,13 +265,14 @@ skills in the common `SKILL.md` folder format; runtime fragments tagged per harn
 | Seats, roles, edges, harness, model class | Which node each seat runs on |
 | Requirements: `sandbox: required`, `auth: api-key \| subscription` | Actual node / sandbox |
 | Repos by name + URL, checkout policy | Local paths, worktree root |
-| Secret **names** | Secret sources (store/env/file) |
+| Secret **names** | Secret sources: node-local `file:` references in v1 (`store:`/`env:` sources may be added later, still resolved on the node; [ADR 0016](adr/0016-secrets-as-node-file-references.md)) |
 | Channel roles ("lead receives inbound") | Slack channel / Telegram chat IDs |
 | Egress needs | Node proxy/firewall |
 
 ```yaml
 # rig.yaml (shared)
-version: "1"
+apiVersion: aiakos.dev/v1
+kind: Rig
 name: product-team
 culture_file: CULTURE.md
 workspace:
@@ -293,13 +299,15 @@ channels:
 
 ```yaml
 # rig.env.yaml (local, never shared)
+apiVersion: aiakos.dev/v1
+kind: RigEnv
 nodes:
   lead: wsl-local
   impl: linux-box
 repos:
   api: { path: ~/src/api }
 secrets:
-  anthropic_api_key: { store: vault, key: team/anthropic }
+  anthropic_api_key: { file: ~/.config/aiakos/secrets/anthropic_api_key }   # read on the node, delivered as a file
 channels:
   telegram: { chat_id: -100123456 }
 ```
