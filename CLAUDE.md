@@ -61,6 +61,7 @@ Milestones `M0`–`M8` follow the roadmap in `docs/plan.md` §10.
    (`ISessionHost`, `ISandbox`, `IHarnessAdapter` on the orchestrator and `IHarnessDriver` on
    the node (ADR 0018), `ISeatChannel`, `IChatConnector`).
 6. Every table has `tenant_id` from its first migration (single default tenant for now).
+   Only migration bookkeeping (the DbUp journal in schema `aiakos_meta`) is exempt.
 7. Line endings are LF (see `.gitattributes`); code is edited both on Windows and in WSL.
 
 ## Definition of done
