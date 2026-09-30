@@ -1,7 +1,7 @@
 ---
 id: 0007
 title: CLI and the released instance
-status: draft            # draft | accepted | implemented | superseded
+status: accepted         # draft | accepted | implemented | superseded
 issue: https://github.com/aiakos-hq/aiakos/issues/15
 milestone: M1
 owner: "@bsakel"
@@ -167,6 +167,9 @@ with it.
 
 ### Instance host
 
+R11–R18 are recorded in [ADR 0034](../adr/0034-released-instance-host.md) (the released instance
+host; D1, D4, D5, D7).
+
 - **R11** `aiakos instance start` starts the **instance host**, a hidden, detached Windows process
   that keeps running after the terminal closes. It waits until the orchestrator is healthy and the
   node is connected (timeout 90 s, `--timeout`), then prints `instance status`. If the host already
@@ -224,6 +227,8 @@ with it.
   `127.0.0.1:<port base + 14000>`) and points the orchestrator, the node and the CLI at it.
 
 ### Local API
+
+R22–R28 are recorded in [ADR 0035](../adr/0035-local-api.md) (the local API and its token; D2).
 
 - **R22** The orchestrator serves an HTTP/JSON API under `/v1` on `127.0.0.1:<port base + 1>`,
   HTTP/1.1, next to `/health` and `/alive`. It refuses to start if the API would bind a
@@ -349,6 +354,9 @@ with it.
 
 ### Packaging and releases
 
+R53–R54 and R27 are recorded in [ADR 0036](../adr/0036-release-and-versioning-policy.md) (release
+and versioning policy; D11–D13).
+
 - **R52** The package contains the CLI, the orchestrator and its dependencies (framework-dependent,
   `net10.0`, with the ASP.NET Core shared framework), and the node published self-contained for
   `linux-x64` under `tools/net10.0/any/node/linux-x64/`. It is built by the CI and release
@@ -424,7 +432,7 @@ the CLI: the pack step publishes it for `linux-x64` and adds the output to the p
 
 The instance host is to the released instance what the AppHost is to the dev stack: it starts
 the parts, wires their configuration and keeps the WSL node attached. Unlike the AppHost it is
-shipped, and it hosts the orchestrator in-process instead of as a child project (Q1).
+shipped, and it hosts the orchestrator in-process instead of as a child project (D1).
 
 ### Instance files
 
@@ -723,7 +731,7 @@ spec (as wave 2 did in #34):
 - **Spec 0004**: `GetAttachCommand` uses the shared `TmuxNames` helper from `Aiakos.Core` (R50); the
   input validator of R16 moves to `Aiakos.Core` so the CLI can pre-check (R43).
 - **Spec 0005**: R11's `<sender>` is the operator name from `CallerContext` in M1 (`bsakel`), not a
-  seat address, until humans are mapped to seats in M3 (Q6).
+  seat address, until humans are mapped to seats in M3 (D6).
 - **Spec 0006**: D12 is answered by the `rig_revision` table (Schema).
 
 ## Acceptance criteria
@@ -820,69 +828,82 @@ upgrade drill; the result goes into the implementation PR.
 
 ## Risks and open questions
 
-### Open questions (decide in review)
+No questions remain open. The maintainer accepted every recommendation in the review of PR #36;
+the outcomes are folded into the requirements and design above.
 
-Each has a recommendation; the requirements above assume the recommendation.
+### Decisions (resolved in review)
 
-- **Q1 — Where does the released orchestrator run?** (a) In-process in an instance host on Windows
-  that also supervises the node; (b) as a separate child process of the host; (c) inside WSL next
-  to the node. *Recommendation:* (a). One process to start, find, lock and stop; it holds the
-  `wsl.exe` child that keeps WSL alive; the dev AppHost and the host use the same composition
-  methods, so the two setups differ only in wiring. (b) adds a second supervision layer for no M1
-  gain; (c) needs a Linux orchestrator build in the package and Docker inside WSL. *ADR candidate.*
-- **Q2 — CLI ↔ orchestrator transport.** (a) HTTP/JSON on loopback with a bearer token file;
-  (b) a second gRPC service `aiakos.api.v1`. *Recommendation:* (a). Plan §3 names a REST API, the
-  M2 MCP server and the M5 dashboard reuse the same application services, polling fits spec 0006
-  R42, and it can be tried with `curl`. *ADR candidate* (together with R23's token model).
-- **Q3 — Does `up` start the instance when it is not running?** *Recommendation:* no; `up` exits
-  3 with "run `aiakos instance start`". Starting Postgres and a WSL node is a big side effect for
+- **D1 — Where does the released orchestrator run?** *Decision:* in-process in an **instance
+  host** on Windows that also supervises the WSL node through a held `wsl.exe` child (R11–R18).
+  *Rationale:* one process to start, find, lock and stop; the held child keeps WSL alive; the dev
+  AppHost and the host share the orchestrator's composition methods, so the two setups differ only
+  in wiring. A separate child process adds a second supervision layer for no M1 gain; running in
+  WSL needs a Linux orchestrator build in the package and Docker inside WSL. Recorded in
+  [ADR 0034](../adr/0034-released-instance-host.md).
+- **D2 — CLI ↔ orchestrator transport.** *Decision:* HTTP/JSON under `/v1` on loopback, with a
+  bearer token read from a user-only file; `CallerContext` comes from the token (R22–R28).
+  *Rationale:* plan §3 names a REST API, the M2 MCP server and the M5 dashboard reuse the same
+  application services, polling fits spec 0006 R42, and it can be tried with `curl`. A second gRPC
+  service would add tooling for no gain. Recorded in [ADR 0035](../adr/0035-local-api.md).
+- **D3 — Does `up` start the instance?** *Decision:* no; `up` exits 3 with "run
+  `aiakos instance start`". *Rationale:* starting Postgres and a WSL node is a big side effect for
   a command about seats, and explicit is honest (rule 3).
-- **Q4 — Postgres for the released instance.** (a) a Docker container managed by the host;
-  (b) a connection string the user provides; (c) Postgres installed in WSL. *Recommendation:* (a)
-  by default with (b) as an option (R15). Docker Desktop is already a prerequisite; (c) adds a
-  system package and a second data location.
-- **Q5 — Run from a versioned runtime copy or from the tool directory?** *Recommendation:* the
-  copy (R12). Windows locks a running tool's files, so without the copy `dotnet tool update`
-  fails while the instance runs, and "which version is running" would depend on the last update.
-- **Q6 — Who is `<sender>` in the lead line?** Spec 0005 R11 says the sender's address. In M1 the
-  caller is the operator (the API token), not a seat. *Recommendation:* the operator name
-  (`[aiakos from bsakel #1a2b3c4d]`) until M3 maps humans to seats; amend spec 0005 R11's wording.
-  Choosing the rig's human seat implicitly would be a guess.
-- **Q7 — `instance stop` with running seats.** *Recommendation:* refuse, with `--keep-seats` as
-  the explicit override (R18). Stopping the host detaches `wsl.exe`, so WSL may idle out and kill
-  the seats' tmux server; that should never happen by accident.
-- **Q8 — Applying a changed spec to running seats.** (a) report drift and let the lead run `down`
-  and `up`; (b) an `up --restart` that does both. *Recommendation:* (a) in M1 (R36): a restart
-  interrupts a turn, and `down` + `up` already resumes the conversation. (b) can be added once
-  stage B shows how often it is needed.
-- **Q9 — A `keys` command in M1?** *Recommendation:* no (Non-goals). The SeatActor has no message
-  for it, and `attach --write` covers the rare human need.
-- **Q10 — File logging.** (a) Serilog's file sink in the instance host only; (b) a small custom
-  `ILoggerProvider`. *Recommendation:* (a). It is the standard choice, rolling and retention are
-  built in, and the node keeps logging to stdout (captured by the host, R21). This answers spec
-  0001 D8.
-- **Q11 — Releases.** *Recommendation:* tags `v*` on `main`, trusted publishing, a `release`
-  environment with maintainer approval, and a GitHub Release with checksums (R54). *ADR
-  candidate* (release and versioning policy, together with Q12 and Q13).
-- **Q12 — Version numbers.** *Recommendation:* `0.<milestone>.<patch>` until 1.0 (R53), so the
-  version says which milestone's acceptance it passed; `0.1.0` is cut when #9–#15 are merged and
-  the manual demo passes, and #16's acceptance runs on it (fixes ship as `0.1.x`).
-- **Q13 — CLI/instance version compatibility.** *Recommendation:* same major.minor for commands
-  that change anything, any version for reads (R27). The CLI's rig loader must match the
-  orchestrator's expectations of the resolved rig; a patch never changes them.
-- **Q14 — `up --dry-run` in M1.** *Recommendation:* yes (R33). It is `RigLoader.Load` plus output,
-  it gives spec 0008 a CI check that the rig files load with the pinned release (spec 0003 R32),
-  and M2's `spec validate` can reuse it.
-- **Q15 — Rig revision history.** *Recommendation:* yes, the `rig_revision` table (Schema). Without
-  it, overwriting `rig.resolved` loses the files an older launch used, and the database stops being
-  the record of what ran (rule 4).
-- **Q16 — Recovery after a reboot.** After Windows restarts, seats that were up are
-  `unknown (inventory-missing)`, and `up` is rejected (spec 0006 R21). *Recommendation:* the CLI
-  prints the path (`capture`, `down`, `up`, R39) and does nothing automatically; an `up --recover`
-  that chains them is revisited with M7's snapshot/restore.
+- **D4 — Postgres for the released instance.** *Decision:* a Docker container managed by the host
+  by default, a user-provided connection string as the option (R15). *Rationale:* Docker Desktop is
+  already a prerequisite; Postgres installed in WSL adds a system package and a second data
+  location. Part of ADR 0034.
+- **D5 — Runtime copy.** *Decision:* the host runs from a versioned runtime copy (R12).
+  *Rationale:* Windows locks a running tool's files, so without the copy `dotnet tool update` fails
+  while the instance runs, and "which version is running" would depend on the last update. Part of
+  ADR 0034.
+- **D6 — `<sender>` in the lead line.** *Decision:* the operator name from `CallerContext`
+  (`[aiakos from bsakel #1a2b3c4d]`) until M3 maps humans to seats; spec 0005 R11's wording is
+  amended. *Rationale:* in M1 the caller is the operator (the API token), not a seat; choosing the
+  rig's human seat implicitly would be a guess.
+- **D7 — `instance stop` with running seats.** *Decision:* refused, with `--keep-seats` as the
+  explicit override (R18). *Rationale:* stopping the host detaches `wsl.exe`, so WSL may idle out
+  and kill the seats' tmux server; that must never happen by accident. Part of ADR 0034.
+- **D8 — Applying a changed spec to running seats.** *Decision:* report drift; the lead runs
+  `down` and `up` (R36). No `up --restart` in M1. *Rationale:* a restart interrupts a turn, and
+  `down` + `up` already resumes the conversation; a restart option can follow once stage B shows
+  how often it is needed.
+- **D9 — A `keys` command in M1?** *Decision:* no (Non-goals). *Rationale:* the SeatActor has no
+  message for it, and `attach --write` covers the rare human need.
+- **D10 — File logging.** *Decision:* Serilog's file sink in the instance host only; the node keeps
+  logging to stdout, captured by the host (R21). This answers spec 0001 D8. *Rationale:* the
+  standard choice, with rolling and retention built in.
+- **D11 — Releases.** *Decision:* tags `v*` on `main`, a `release` environment with maintainer
+  approval, NuGet trusted publishing, and a GitHub Release with checksums (R54). Recorded in
+  [ADR 0036](../adr/0036-release-and-versioning-policy.md).
+- **D12 — Version numbers.** *Decision:* `0.<milestone>.<patch>` until 1.0 (R53). `0.1.0` is cut
+  when #9–#15 are merged and the manual demo passes; #16's acceptance runs on it, and fixes ship as
+  `0.1.x`. *Rationale:* the version says which milestone's acceptance it passed. Part of ADR 0036.
+- **D13 — CLI/instance version compatibility.** *Decision:* same major.minor for commands that
+  change anything, any version for reads (R27). *Rationale:* the CLI's rig loader must match the
+  orchestrator's expectations of the resolved rig; a patch never changes them. Part of ADR 0036.
+- **D14 — `up --dry-run` in M1.** *Decision:* yes (R33). *Rationale:* it is `RigLoader.Load` plus
+  output, it gives spec 0008 a CI check that the rig files load with the pinned release (spec 0003
+  R32), and M2's `spec validate` can reuse it.
+- **D15 — Rig revision history.** *Decision:* the append-only `rig_revision` table
+  ([Schema](#schema)), answering spec 0006 D12. *Rationale:* without it, overwriting
+  `rig.resolved` loses the files an older launch used, and the database stops being the record of
+  what ran (rule 4).
+- **D16 — Recovery after a reboot.** *Decision:* the CLI prints the path (`capture`, `down`, `up`,
+  R39) and does nothing automatically; an `up --recover` is revisited with M7's snapshot/restore.
+  *Rationale:* after a restart the seats are `unknown (inventory-missing)`, and acting on an
+  unknown seat needs a human decision (ADR 0033).
 
-**ADR candidates:** the released instance's process model (Q1, Q5); the local API and its token
-(Q2, R23); the release and versioning policy (Q11–Q13).
+ADRs recording the cross-cutting decisions of this spec:
+
+1. [ADR 0034](../adr/0034-released-instance-host.md): the released instance is one host process
+   on Windows that runs the orchestrator in-process, manages Postgres and supervises the WSL node
+   (D1, D4, D5, D7).
+2. [ADR 0035](../adr/0035-local-api.md): the CLI uses a loopback HTTP/JSON API with a bearer token
+   file; identity comes from the token (D2, R23).
+3. [ADR 0036](../adr/0036-release-and-versioning-policy.md): tagged releases from `main` with
+   approval and trusted publishing, `0.<milestone>.<patch>` versions, and the compatibility rule
+   between CLI and instance (D11–D13).
+
 
 ### Risks
 
@@ -896,7 +917,7 @@ Stable IDs; [the register](../risks.md) indexes them.
 | **RK4** | **Seats run as the same user and can read the Windows instance home through `/mnt/c`**, including the API token, and so could drive the released instance. | Spec 0008's deny rules (speed bump); fixed by sandboxing (M6). Same class as spec 0004 RK7. | #15, #16 (M1 mitigation), M6 |
 | **RK5** | **Postgres data loss** through `docker volume prune`, a Docker Desktop reset or a WSL reinstall. | `instance status` shows the volume; `docs/cli.md` gives a `pg_dump` backup command; a backup command is an M5/M7 candidate. | #15 |
 | **RK6** | **Dev and release compositions drift** (the AppHost wires the orchestrator one way, the host another). | Both call `AddAiakosOrchestrator`/`MapAiakosOrchestrator`; the opt-in E2E runs the host; the manual demo runs both. | #15 |
-| **RK7** | **Reboot friction**: seats stay `unknown` after a restart until `down` and `up` (Q16). | Counted during stage B; revisited with M7. | #15 |
+| **RK7** | **Reboot friction**: seats stay `unknown` after a restart until `down` and `up` (D16). | Counted during stage B; revisited with M7. | #15 |
 | **RK8** | **User-only ACLs on Windows** may be set wrongly (inheritance left on) and expose the tokens to other local users. | AC3 (`icacls`); a unit test on the ACL builder. | #15 |
 | **RK9** | **Trusted publishing** may not be available for the account or may need a first push with an API key. | Checked when the policy is set up; fallback is a scoped, short-lived API key as an environment secret, recorded under "Changes after acceptance". | #15 |
 
