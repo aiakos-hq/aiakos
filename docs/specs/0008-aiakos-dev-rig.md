@@ -1,7 +1,7 @@
 ---
 id: 0008
 title: The aiakos-dev rig and the M1 acceptance
-status: draft            # draft | accepted | implemented | superseded
+status: accepted         # draft | accepted | implemented | superseded
 issue: https://github.com/aiakos-hq/aiakos/issues/16
 milestone: M1
 owner: "@bsakel"
@@ -70,7 +70,7 @@ Decisions this spec implements (not reopened here):
 
 - Seat-to-seat messaging, handoff and queue items (M2 MCP, M3 queue). In M1 the lead relays.
 - An OpenCode seat (M2), sandboxed seats and separate credentials per seat (M6).
-- A GitHub machine account for the seats (Q2).
+- A GitHub machine account for the seats (D2).
 - Automating the lead: nothing sends to seats on a schedule or reacts to their output.
 - Changing the CLI or the file format. Anything the rig needs from them goes through specs
   0003/0007.
@@ -108,7 +108,7 @@ Decisions this spec implements (not reopened here):
 - **R9** Work done by a seat is attributable: commits carry a trailer `Aiakos-Seat:
   <seat>@aiakos-dev`; PR bodies say `Implemented by impl@aiakos-dev`; review comments start with
   `Review by review@aiakos-dev at <head sha>`. The Git author and the GitHub account stay the
-  maintainer's in M1 (Q2).
+  maintainer's in M1 (D2, [ADR 0038](../adr/0038-seat-attribution-under-shared-github-identity.md)).
 - **R10** The deny rules common to both seats ([Common deny rules](#common-deny-rules)) block, as a
   speed bump, the ways a seat could reach the team's own instance or the machine outside its task:
   the `aiakos` CLI in any form, tmux, Windows interop executables, killing processes, the Windows
@@ -117,6 +117,8 @@ Decisions this spec implements (not reopened here):
   the repository.
 
 ### Pinning and compatibility
+
+R11–R13 are recorded in [ADR 0037](../adr/0037-team-pin-in-local-tool-manifest.md) (D3).
 
 - **R11** The pinned release is recorded in the repository's local tool manifest
   `.config/dotnet-tools.json` (tool `aiakos`, command `aiakos`, exact version). The lead runs the
@@ -270,6 +272,7 @@ and nothing after it.
 - Follow CLAUDE.md in the repository (rules 1–7, definition of done, commit and PR conventions).
 - Small PRs, one issue each, `Closes #N`, conventional subjects, the `Aiakos-Seat:` trailer.
 - Update your branch by merging origin/main. Never rewrite pushed history.
+- Change `rigs/aiakos-dev/` (your own team) only when an issue asks for it.
 
 ## Never
 - Never run `aiakos` (in any form), tmux, or Windows programs from WSL; never touch
@@ -451,7 +454,7 @@ harnesses:
 
 `gh pr review --comment` is the only way the reviewer speaks on GitHub: GitHub does not let an
 account approve or request changes on its own PR, and in M1 every seat uses the maintainer's
-account (Q2). One review per round keeps the record in one place.
+account (D2). One review per round keeps the record in one place.
 
 `GUIDANCE.md` (outline, normative):
 
@@ -561,7 +564,7 @@ never interrupted by `send` (it is refused anyway).
 
 ### M1 acceptance
 
-Run by the lead after `0.1.0` is released (spec 0007 Q12), with this spec's files merged and the
+Run by the lead after `0.1.0` is released (spec 0007 D12), with this spec's files merged and the
 pin at `0.1.0`:
 
 | Step | Action | Evidence |
@@ -569,7 +572,7 @@ pin at `0.1.0`:
 | 1 | `check-prereqs.sh` in WSL | all `ok` |
 | 2 | `dotnet tool restore`; `dotnet aiakos --version`; `instance.json` with `telemetry.dashboard: true`; `dotnet aiakos instance start` | version `0.1.x` = the pin; `instance status` healthy, node connected |
 | 3 | `dotnet aiakos up rigs/aiakos-dev`; `dotnet aiakos ps` | `impl` and `review` `present / idle`, `lead` human |
-| 4 | Send `impl` the chosen M2 issue (Q1) | a PR with `Closes #N`, the seat trailer, green CI; turn report `ready-for-review` |
+| 4 | Send `impl` the chosen M2 issue (D1: `aiakos spec validate`) | a PR with `Closes #N`, the seat trailer, green CI; turn report `ready-for-review` |
 | 5 | After step 4's turn report (seat `idle`, so no turn is cut off): `dotnet aiakos down impl`, `dotnet aiakos up`, then ask `impl` which issue and branch it is on | launch decision `resume`, outcome `ready`; the answer names the issue and branch (M1 "`down`/`up` resumes") |
 | 6 | Send `review` the PR | one review comment naming the head commit, with the checklist and a verdict |
 | 7 | If changes are needed: relay to `impl`, then review again | a new review at the new head commit |
@@ -627,50 +630,59 @@ percentage at the end of the issue, number of review rounds).
 
 ## Risks and open questions
 
-### Open questions (decide in review)
+No questions remain open. The maintainer accepted every recommendation in the review of PR #37;
+the outcomes are folded into the requirements and design above.
 
-Each has a recommendation; the requirements above assume it.
+### Decisions (resolved in review)
 
-- **Q1 — Which M2 issue is the acceptance task?** No M2 issues exist yet. *Recommendation:* create
-  the M2 issues when M1's implementation is done, and use **`aiakos spec validate`** (M2 in plan
-  §10): it is small, self-contained (loader + CLI, building on `up --dry-run`), easy to review
-  against a short spec, and useful to the team right away. Its spec is written and merged in
-  stage A before step 4. Something larger (the OpenCode adapter) would test the model more than
-  the rig.
-- **Q2 — GitHub identity of the seats.** (a) the maintainer's `gh` login in WSL; (b) a machine
-  account `aiakos-bot` with a fine-grained token per seat. *Recommendation:* (a) for M1, with
-  attribution by trailer and comment prefix (R9). (b) would allow real approvals, but a token per
-  seat is a secret to deliver, and seat secrets arrive properly with M6; revisit then.
-- **Q3 — How is the release pinned?** (a) the repository's local tool manifest; (b) a global tool
-  plus a version file. *Recommendation:* (a) (R11). It is .NET's standard pin, `dotnet tool
-  restore` enforces it on every machine and in CI, the upgrade is a reviewable one-line PR, and
-  the name `dotnet aiakos` keeps it visibly apart from `dotnet run --project src/Aiakos.Cli`. It
-  satisfies ADR 0008 ("installed as a pinned `dotnet tool`"); the ADR text says `-g` only as an
-  example.
-- **Q4 — Models.** *Recommendation:* `opus` for both seats, as in spec 0003's example. Review
-  quality matters as much as implementation quality; revisit with the context and cost numbers
-  from the acceptance record.
-- **Q5 — Reviewer permission mode.** (a) `default` with an allowlist and deny rules; (b) `plan`.
-  *Recommendation:* (a). Plan mode also blocks the builds and tests the reviewer must run, and it
-  ends turns with a plan instead of a review.
-- **Q6 — Implementer permission mode.** (a) `acceptEdits`; (b) `auto`. *Recommendation:* (a) in
-  M1: unknown commands become visible `needs-input` prompts that the lead answers, which is how
-  the allowlist gets tuned. Revisit `auto` with the prompt counts from the acceptance record (RK1).
-- **Q7 — A fixed turn report format?** *Recommendation:* yes (R8). Without MCP the lead reads
-  results from the pane; a fixed format makes that fast and prepares M3's closure contract.
-- **Q8 — Disable WSL interop for the distro** (`[interop] enabled=false`), so seats cannot start
-  Windows programs at all? *Recommendation:* not in M1. It also removes Windows `PATH` entries and
-  tools the maintainer uses in WSL, and it does not stop reading `/mnt/c`. The deny rules cover the
-  accident case; M6 sandboxing is the real fix (RK3).
-- **Q9 — May seats change `rigs/aiakos-dev/`?** *Recommendation:* yes, through PRs like any other
-  file, but only when an issue asks for it (culture). A merged change reaches the running team
+- **D1 — The acceptance task.** *Decision:* the M2 issues are created when M1's implementation is
+  done, and the acceptance task is **`aiakos spec validate`** (M2 in plan §10). Its spec is written
+  and merged in stage A before step 4. *Rationale:* it is small and self-contained (loader + CLI,
+  building on `up --dry-run`), easy to review against a short spec, and useful to the team right
+  away; something larger (the OpenCode adapter) would test the model more than the rig.
+- **D2 — GitHub identity of the seats.** *Decision:* in M1 the seats use the maintainer's `gh`
+  login in WSL, with attribution by commit trailer, PR body and review prefix (R9). *Rationale:* a
+  machine account would allow real approvals, but a token per seat is a secret to deliver, and
+  seat secrets arrive properly with M6; revisit then. Recorded in
+  [ADR 0038](../adr/0038-seat-attribution-under-shared-github-identity.md).
+- **D3 — Pinning the release.** *Decision:* the repository's local tool manifest
+  `.config/dotnet-tools.json`; the team runs `dotnet aiakos` (R11–R13). *Rationale:* .NET's
+  standard pin, enforced by `dotnet tool restore` on every machine and in CI; the upgrade is a
+  reviewable one-line PR; the name keeps the team's tool visibly apart from
+  `dotnet run --project src/Aiakos.Cli`. It satisfies ADR 0008 ("installed as a pinned
+  `dotnet tool`"; `-g` there is only an example). Recorded in
+  [ADR 0037](../adr/0037-team-pin-in-local-tool-manifest.md).
+- **D4 — Models.** *Decision:* `opus` for both seats. *Rationale:* review quality matters as much
+  as implementation quality; revisited with the context and cost numbers of the acceptance record.
+- **D5 — Reviewer permission mode.** *Decision:* `default` with an allowlist and deny rules.
+  *Rationale:* `plan` mode also blocks the builds and tests the reviewer must run, and it ends turns
+  with a plan instead of a review.
+- **D6 — Implementer permission mode.** *Decision:* `acceptEdits` in M1. *Rationale:* unknown
+  commands become visible `needs-input` prompts that the lead answers, which is how the allowlist
+  gets tuned; `auto` is revisited with the prompt counts of the acceptance record (RK1).
+- **D7 — Turn report.** *Decision:* a fixed format (R8, [Turn report](#turn-report)).
+  *Rationale:* without MCP the lead reads results from the pane; a fixed format makes that fast
+  and prepares M3's closure contract.
+- **D8 — WSL interop.** *Decision:* stays enabled in M1. *Rationale:* disabling it also removes
+  Windows `PATH` entries and tools the maintainer uses in WSL, and it does not stop reading
+  `/mnt/c`; the deny rules cover the accident case and M6 sandboxing is the real fix (RK3).
+- **D9 — Seats changing `rigs/aiakos-dev/`.** *Decision:* allowed through PRs like any other file,
+  only when an issue asks for it (culture). *Rationale:* a merged change reaches the running team
   only when the lead runs `up` from the updated `main`, and `rig-compat` keeps it loadable.
-- **Q10 — Where does the acceptance evidence go?** *Recommendation:* this spec's
-  [Acceptance record](#acceptance-record), in the PR that marks it `implemented`, so M1's proof
-  sits next to its definition.
-- **Q11 — Fresh conversation per issue?** *Recommendation:* no; `/compact` between issues, and
-  `up --fresh --seat` (a recorded decision) when switching areas or when context stays high. A
-  fresh start per issue throws away what the seat learned about the repository.
+- **D10 — Where the acceptance evidence goes.** *Decision:* this spec's
+  [Acceptance record](#acceptance-record), in the PR that marks it `implemented`. *Rationale:* M1's
+  proof sits next to its definition.
+- **D11 — Fresh conversation per issue?** *Decision:* no; `/compact` between issues, and
+  `up --fresh --seat` (a recorded decision) when switching areas or when context stays high.
+  *Rationale:* a fresh start per issue throws away what the seat learned about the repository.
+
+ADRs recording the cross-cutting decisions of this spec:
+
+1. [ADR 0037](../adr/0037-team-pin-in-local-tool-manifest.md): the team's release is pinned in
+   the repository's local tool manifest and upgraded by PR (D3).
+2. [ADR 0038](../adr/0038-seat-attribution-under-shared-github-identity.md): in M1 seats act under
+   the maintainer's GitHub identity; attribution is by trailer and prefix, and approval stays with
+   the maintainer (D2).
 
 ### Risks
 
@@ -679,11 +691,11 @@ Stable IDs; [the register](../risks.md) indexes them.
 | ID | Risk | How and when it is checked | Owner |
 |---|---|---|---|
 | **RK1** | **Permission prompts stall the seats**: every command outside the allowlist becomes `needs-input` and waits for the lead. | Prompt counts per seat in the acceptance record; the allowlist is tuned by PR. | #16 |
-| **RK2** | **One GitHub identity for everyone**: commits, PRs and reviews all show the maintainer; attribution relies on trailers and prefixes. | Accepted for M1 (Q2); revisited with M6 seat secrets. | #16, M6 |
+| **RK2** | **One GitHub identity for everyone**: commits, PRs and reviews all show the maintainer; attribution relies on trailers and prefixes. | Accepted for M1 (D2); revisited with M6 seat secrets. | #16, M6 |
 | **RK3** | **Deny rules are speed bumps**: prefix and path rules can be bypassed (`bash -c`, another path, interop by full path), so a seat could reach the team's instance or another seat's token. Same class as spec 0004 RK7, spec 0005 RK14 and spec 0007 RK4. | AC4, AC5; the real fix is sandboxing (M6). | #16 (M1 mitigation), M6 |
 | **RK4** | **The long-lived implementer worktree accumulates state** (untracked files, `bin/`, `obj/`, a stale branch) and a new issue starts from it. | The skill requires a clean tree and reports `blocked` otherwise; observed during the acceptance. | #16 |
 | **RK5** | **Docker is not reachable from WSL**, so the database tests fail in the seats (spike 0005 S0005-4). | `check-prereqs.sh` (AC6); CLAUDE.md gains the Docker Desktop WSL integration next to mirrored networking. | #16 |
-| **RK6** | **Context growth across issues** lowers quality or triggers compactions mid-task. | Context percentage in `ps` and in the acceptance record; `/compact` or fresh per the runbook (Q11). | #16 |
+| **RK6** | **Context growth across issues** lowers quality or triggers compactions mid-task. | Context percentage in `ps` and in the acceptance record; `/compact` or fresh per the runbook (D11). | #16 |
 | **RK7** | **Both worktrees share one clone's `.git`**, so concurrent `git fetch` calls can collide on lock files. | Observed during stage B; a failed fetch is retried by the seat. | #16 |
 | **RK8** | **A guidance change may not reach a resumed seat** (spec 0005 RK5), so the team keeps working with old rules after a rig PR. | The runbook's "after changing rig files" row; spec 0005's AC9 step 14 answers it. | #16, #12 |
 | **RK9** | **Acceptance is circular**: a bug in `0.1.0` found during the run must be fixed and released before the run can finish. | The procedure's failure path (fix, `0.1.x`, pin PR, upgrade, resume); never a development build. | #16 |

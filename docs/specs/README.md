@@ -15,4 +15,4 @@ and test plan. The *what/why* and status live in the linked GitHub issue.
 | [0004](0004-tmux-session-host.md) | Node agent: tmux session host | accepted | M1 |
 | [0005](0005-claude-code-adapter.md) | Claude Code adapter | accepted | M1 |
 | [0006](0006-seat-actor.md) | SeatActor: lifecycle and three-axis state | accepted | M1 |
-| [0008](0008-aiakos-dev-rig.md) | The aiakos-dev rig and the M1 acceptance | draft | M1 |
+| [0008](0008-aiakos-dev-rig.md) | The aiakos-dev rig and the M1 acceptance | accepted | M1 |
