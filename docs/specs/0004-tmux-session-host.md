@@ -208,7 +208,11 @@ change to one of them be traced to the parts of this spec that depend on it.
     another directory when `-c` does not exist; rule 3);
   - `Environment` names match `^[A-Z_][A-Z0-9_]*$`, values contain no NUL or newline, names are not
     reserved (`TMUX`, `TMUX_PANE`, `AIAKOS_NODE_*`), and no name contains `TOKEN`, `SECRET`,
-    `PASSWORD` or `API_KEY` (secrets never go through tmux: R38, D1);
+    `PASSWORD` or `API_KEY` (secrets never go through tmux: R38, D1). The one exception is a name
+    ending in `_FILE` whose value is an absolute path under the seat home: it carries a path to a
+    0600 file, not the secret (e.g. `AIAKOS_SEAT_TOKEN_FILE`, R38; spec 0005 D7;
+    [ADR 0025](../adr/0025-secrets-never-through-tmux.md)). A test accepts
+    `AIAKOS_SEAT_TOKEN_FILE=<seat home>/…` and still rejects `AIAKOS_SEAT_TOKEN`;
   - the packed size of argv plus environment is at most 12 KiB (tmux sends a command to its
     server in one message of about 16 KiB; larger configuration belongs in projected files);
   - `Size` is within 80–500 columns and 24–200 rows.
