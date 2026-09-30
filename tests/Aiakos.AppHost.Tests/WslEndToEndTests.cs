@@ -40,15 +40,13 @@ public sealed class WslEndToEndTests
             var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
             var logs = app.Services.GetRequiredService<ResourceLoggerService>();
 
-            // Subscribe before starting so no log line is missed.
-            var connected = WaitForLogAsync(logs, "node-wsl", IsConnectedLine, timeout.Token);
-
             await app.StartAsync(timeout.Token);
 
             await notifications.WaitForResourceAsync("node-publish", KnownResourceStates.Finished, timeout.Token);
             await notifications.WaitForResourceAsync("node-install", KnownResourceStates.Finished, timeout.Token);
             await notifications.WaitForResourceHealthyAsync("orchestrator", timeout.Token);
-            await notifications.WaitForResourceAsync("node-wsl", KnownResourceStates.Running, timeout.Token);
+            var nodeWsl = await notifications.WaitForResourceAsync(
+                "node-wsl", e => e.Snapshot.State?.Text == KnownResourceStates.Running, timeout.Token);
 
             using (var http = app.CreateHttpClient("orchestrator", "http"))
             {
@@ -56,7 +54,9 @@ public sealed class WslEndToEndTests
                 Assert.True(health.IsSuccessStatusCode, $"/health returned {(int)health.StatusCode}");
             }
 
-            var line = await connected;
+            // Process output is logged under the resource instance (e.g. node-wsl-abcd), not its
+            // name; the logger service replays earlier lines to a new watcher.
+            var line = await WaitForLogAsync(logs, nodeWsl.ResourceId, IsConnectedLine, timeout.Token);
             Assert.Contains("127.0.0.1", line, StringComparison.Ordinal);
 
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -91,9 +91,9 @@ public sealed class WslEndToEndTests
         && !content.Contains("disconnected", StringComparison.OrdinalIgnoreCase);
 
     private static async Task<string> WaitForLogAsync(
-        ResourceLoggerService logs, string resourceName, Func<string, bool> match, CancellationToken cancellationToken)
+        ResourceLoggerService logs, string resourceId, Func<string, bool> match, CancellationToken cancellationToken)
     {
-        await foreach (var batch in logs.WatchAsync(resourceName).WithCancellation(cancellationToken))
+        await foreach (var batch in logs.WatchAsync(resourceId).WithCancellation(cancellationToken))
         {
             foreach (var line in batch)
             {
@@ -104,6 +104,6 @@ public sealed class WslEndToEndTests
             }
         }
 
-        throw new InvalidOperationException($"The log stream of '{resourceName}' ended without a matching line.");
+        throw new InvalidOperationException($"The log stream of '{resourceId}' ended without a matching line.");
     }
 }
