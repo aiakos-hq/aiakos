@@ -32,6 +32,9 @@ Call out which interfaces (`ISessionHost`, `ISandbox`, …) are touched.
 Unit, integration (real tmux/Docker where relevant), and the manual demo.
 
 ## Risks and open questions
+Open questions with a recommendation each (Q1, …), resolved into decisions (D1, …) in review.
+Risks get stable IDs (RK1, …) with how and when each is checked, and are indexed in
+[`docs/risks.md`](../risks.md) (register and "Open risks by issue") in the same PR.
 - …
 
 ## Changes after acceptance

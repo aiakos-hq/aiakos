@@ -23,7 +23,25 @@ never reused.
    `accepted` (checked, the risk stays and the maintainer accepts it) or `superseded` (the design
    changed so it no longer applies). Name the PR or doc that did it.
 
-New risks are added in the source doc first and then indexed here in the same PR.
+New risks are added in the source doc first and then indexed here in the same PR, together with
+the issue's line in [Open risks by issue](#open-risks-by-issue).
+
+## Open risks by issue
+
+The quick view for "before each implementation PR": the IDs to check, by owner issue. The
+[register](#register) below has the details. A row with several owners appears under each.
+
+| Issue | Open risks to check |
+|---|---|
+| [#9](https://github.com/aiakos-hq/aiakos/issues/9) solution skeleton | 0001-RK1, 0001-RK2, 0001-RK3, 0001-RK5 |
+| [#10](https://github.com/aiakos-hq/aiakos/issues/10) gRPC contract | 0002-RK1, 0002-RK2, 0006-RK6, 0006-RK9 |
+| [#11](https://github.com/aiakos-hq/aiakos/issues/11) tmux session host | 0003-RK1, 0004-RK1, 0004-RK2, 0004-RK3, 0004-RK4, 0004-RK8, 0005-RK14, 0004-FU1 (validation test) |
+| [#12](https://github.com/aiakos-hq/aiakos/issues/12) Claude Code adapter | 0004-RK6, 0004-RK7, 0005-RK1 to 0005-RK12, 0006-RK2, 0006-RK5, 0006-RK7, 0006-RK10, 0008-RK8, S0001-1; M6 follow-up 0005-RK13 |
+| [#13](https://github.com/aiakos-hq/aiakos/issues/13) SeatActor | 0001-RK4, 0005-RK3, 0005-RK9, 0005-RK12, 0006-RK1, 0006-RK3, 0006-RK4, 0006-RK8, 0006-RK11 |
+| [#14](https://github.com/aiakos-hq/aiakos/issues/14) rig file format | 0003-RK2 |
+| [#15](https://github.com/aiakos-hq/aiakos/issues/15) CLI and released instance | 0004-RK5, 0005-RK3, 0005-RK5, 0007-RK1 to 0007-RK9 |
+| [#16](https://github.com/aiakos-hq/aiakos/issues/16) aiakos-dev rig, M1 acceptance | 0003-RK1, 0007-RK4, 0008-RK1 to 0008-RK9, S0005-4 |
+| No issue yet (M2, M6) | S0001-2, S0004-1, S0004-2, S0004-3, S0005-1, S0005-2, S0005-3 |
 
 ## Register
 
@@ -36,14 +54,14 @@ New risks are added in the source doc first and then indexed here in the same PR
 | 0001-RK5 | Node publish on every AppHost start may be too slow | [0001 Risks](specs/0001-solution-skeleton.md#risks) | Measure in the implementation PR | [#9](https://github.com/aiakos-hq/aiakos/issues/9) | M1 | open |
 | 0002-RK1 | statusLine event volume may dominate the stream despite rate limiting | [0002 Risks](specs/0002-orchestrator-node-grpc-contract.md#risks) | Event volume in the #12 end-to-end run and the M1 demo; if too high, a separate unsequenced message in a minor revision | [#10](https://github.com/aiakos-hq/aiakos/issues/10) | M1 | open |
 | 0002-RK2 | Secrets travel over h2c, safe only on loopback | [0002 Risks](specs/0002-orchestrator-node-grpc-contract.md#risks) | R43 startup refusal test in M1; TLS before any remote node | [#10](https://github.com/aiakos-hq/aiakos/issues/10) | M1, M6 | open |
-| 0003-RK1 | Seat roots of two Aiakos instances (release and dev) may collide on one node | [0003 Risks](specs/0003-rig-file-format-v1.md#risks) | Ownership marker in each seat directory; dev tests use their own rig names and `seat_root` | [#11](https://github.com/aiakos-hq/aiakos/issues/11) | M1 | open |
+| 0003-RK1 | Seat roots of two Aiakos instances (release and dev) may collide on one node | [0003 Risks](specs/0003-rig-file-format-v1.md#risks) | Ownership marker in each seat directory; dev tests use their own rig names and `seat_root` | [#11](https://github.com/aiakos-hq/aiakos/issues/11), [#16](https://github.com/aiakos-hq/aiakos/issues/16) (never `up` aiakos-dev on a dev instance, spec 0008 R14) | M1 | open |
 | 0003-RK2 | The projected header and roster mention identity in text | [0003 Risks](specs/0003-rig-file-format-v1.md#risks) | Golden projection (AC7) states the text carries no authority; authority stays the environment token | [#14](https://github.com/aiakos-hq/aiakos/issues/14) | M1 | open |
 | 0003-RK3 | The `--add-dir` projection mechanism was unverified | [0003 Risks](specs/0003-rig-file-format-v1.md#risks) | Spec 0005's verification experiment (E1–E8) | [#12](https://github.com/aiakos-hq/aiakos/issues/12) | M1 | resolved (spec 0005) |
 | 0004-RK1 | 1 MiB in one bracketed paste may fail; only 28 KB was verified | [0004 Risks](specs/0004-tmux-session-host.md#risks) | AC3 (1 MiB byte-exact through real tmux); on failure apply D3 (lower and advertise the limit) | [#11](https://github.com/aiakos-hq/aiakos/issues/11) | M1 | open |
 | 0004-RK2 | A `/tmp` cleaner can delete the socket file, leaving a running but unreachable server | [0004 Risks](specs/0004-tmux-session-host.md#risks) | AC16 (socket deleted in an integration test; host recovers it with `SIGUSR1`) | [#11](https://github.com/aiakos-hq/aiakos/issues/11) | M1 | open |
 | 0004-RK3 | tmux argument parsing (trailing `;`, `--`, single vs multi-argument commands) is assumed, not spiked | [0004 Risks](specs/0004-tmux-session-host.md#risks) | AC3 and AC13 on tmux 3.4 and 3.6 | [#11](https://github.com/aiakos-hq/aiakos/issues/11) | M1 | open |
 | 0004-RK4 | `pane_dead_signal` may be empty on some tmux versions (reported as absent) | [0004 Risks](specs/0004-tmux-session-host.md#risks) | AC7 on tmux 3.4 and 3.6; versions recorded under "Changes after acceptance" | [#11](https://github.com/aiakos-hq/aiakos/issues/11) | M1 | open |
-| 0004-RK5 | WSL may idle out after the node stops and take the tmux server with it | [0004 Risks](specs/0004-tmux-session-host.md#risks) | AC15 plus a manual check of how long WSL stays up with no node; keeping WSL alive is the released tool's job | [#15](https://github.com/aiakos-hq/aiakos/issues/15) | M1 | open |
+| 0004-RK5 | WSL may idle out after the node stops and take the tmux server with it | [0004 Risks](specs/0004-tmux-session-host.md#risks) | The released instance host keeps the node's `wsl.exe` attached (ADR 0034); checked with 0007-RK2 (AC4, AC11, an overnight run); AC15 for node restarts | [#15](https://github.com/aiakos-hq/aiakos/issues/15) | M1 | open |
 | 0004-RK6 | The pane `PATH` inherited from `wsl.exe --exec` may not suit the harness's shell tool | [0004 Risks](specs/0004-tmux-session-host.md#risks) | Spec 0005 manual demo (`dotnet --version`, `gh --version` in a seat); 0005 sets `PATH` if needed | [#12](https://github.com/aiakos-hq/aiakos/issues/12) | M1 | open |
 | 0004-RK7 | Same-user access: a seat's shell tool can reach any seat's pane through the node's socket | [0004 Risks](specs/0004-tmux-session-host.md#risks) | Spec 0005's `Bash(tmux:*)` deny rule, verified in its tests; fixed by sandboxing | [#12](https://github.com/aiakos-hq/aiakos/issues/12) (M1 mitigation) | M1, M6 | open |
 | 0004-RK8 | Process-tree tracking by `/proc` snapshot can miss a detached fork; small PID-reuse window before `pidfd` | [0004 Risks](specs/0004-tmux-session-host.md#risks) | AC8 (`setsid` grandchild gone after stop); manual demo `pgrep -u $USER -a claude` after `aiakos down` | [#11](https://github.com/aiakos-hq/aiakos/issues/11) | M1, M7 | open |
@@ -81,4 +99,4 @@ New risks are added in the source doc first and then indexed here in the same PR
 | S0005-1 | PENDING API-key verifier: nonce recall after `docker restart`, and the key absent from `docker inspect` and `docker events` | [Spike 0005 Pending](spikes/0005-docker-seat.md#pending-real-api-key) | The maintainer places a real key and runs `verify-pending.sh`; "Resume after restart: PASS/FAIL" recorded in the spike | — (M6 Docker sandbox) | M6 | open |
 | S0005-2 | Egress control (allowlisting proxy) for Docker seats was not tested | [Spike 0005](spikes/0005-docker-seat.md#decision--follow-ups) | Experiment when the Docker `ISandbox` is specified | — (M6 Docker sandbox) | M6 | open |
 | S0005-3 | Unknown whether `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` suppresses the remote-managed-settings fetch | [Spike 0005](spikes/0005-docker-seat.md#decision--follow-ups) | Experiment when the Docker `ISandbox` is specified | — (M6 Docker sandbox) | M6 | open |
-| S0005-4 | Docker Desktop WSL integration for `Ubuntu` is a dev prerequisite not yet confirmed in the environment notes | [Spike 0005](spikes/0005-docker-seat.md#decision--follow-ups) | Confirm on the maintainer's PC and add it to CLAUDE.md next to mirrored networking | — (M6 Docker sandbox) | M6 | open |
+| S0005-4 | Docker Desktop WSL integration for `Ubuntu` is a dev prerequisite not yet confirmed in the environment notes; seats need it for the database tests | [Spike 0005](spikes/0005-docker-seat.md#decision--follow-ups) | Now listed in CLAUDE.md's environment notes; confirmed on the machine by `check-prereqs.sh` (spec 0008 AC6, see 0008-RK5) | [#16](https://github.com/aiakos-hq/aiakos/issues/16) | M1 | open |

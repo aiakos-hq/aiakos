@@ -966,4 +966,12 @@ The design decisions this spec makes rather than asks about are recorded in ADRs
 
 ## Changes after acceptance
 
-*(none yet)*
+- **2026-10-01 — wave 3 amendments** (spec 0007, accepted in review of PR #36):
+  - **Attach command.** The socket name, config path and session name come from one helper,
+    `TmuxNames`, in `Aiakos.Core`; `GetAttachCommand` and the CLI's `aiakos attach` both use it,
+    so the two cannot drift (spec 0007 R50).
+  - **R16 validator.** The lead and body validation of R16 lives in `Aiakos.Core`, so the CLI can
+    check a body before sending (spec 0007 R43); the node's check stays authoritative.
+  - **RK5 owner.** Keeping WSL alive is done by the released instance host, which keeps the node's
+    `wsl.exe` attached ([ADR 0034](../adr/0034-released-instance-host.md)); the check is tracked
+    together with spec 0007 RK2.

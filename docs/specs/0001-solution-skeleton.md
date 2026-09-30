@@ -148,10 +148,13 @@ Specs written in parallel own neighbouring parts. This spec only reserves their 
 - **R13** The orchestrator gRPC endpoint is **unproxied, on a fixed port, bound to localhost**, and
   serves **HTTP/2 only without TLS (h2c)**. The port comes from configuration and is passed to the
   node as `AIAKOS_ORCHESTRATOR_URL=http://127.0.0.1:<port>` (spike 0003 §2, pitfalls 4 and 5).
-- **R14** The orchestrator has a second endpoint, `http`, which Aspire allocates and proxies, for
-  `/health` and `/alive` over HTTP/1.1. Protocols are set per endpoint, not through
-  `Kestrel__EndpointDefaults__Protocols`, because an HTTP/2-only endpoint would fail Aspire's
-  HTTP/1.1 health probe. gRPC services are only reachable on the `grpc` endpoint.
+- **R14** The orchestrator has a second endpoint, `http`, on a fixed port (port base + 1, dev
+  5181), for `/health`, `/alive` and the CLI's local API `/v1`
+  ([ADR 0035](../adr/0035-local-api.md)) over HTTP/1.1. The AppHost generates an API token
+  parameter and writes `%USERPROFILE%\.aiakos-dev\connection.json` and the token file on start, so
+  the development CLI can target the dev stack (spec 0007 R29). Protocols are set per endpoint,
+  not through `Kestrel__EndpointDefaults__Protocols`, because an HTTP/2-only endpoint would fail
+  Aspire's HTTP/1.1 health probe. gRPC services are only reachable on the `grpc` endpoint.
 - **R15** The dashboard UI, the dashboard OTLP (gRPC) endpoint and the resource service use fixed
   ports from the launch profile (15180, 19180, 20180 for the dev instance). No WSL-side listener
   may use a port that a Windows-side listener uses, because mirrored networking shares one port
@@ -339,7 +342,8 @@ Aiakos.AppHost ──► Aiakos.Hosting.Wsl, Aiakos.Core
 Aiakos.Orchestrator ──► Aiakos.ServiceDefaults, Aiakos.Contracts, Aiakos.Data, Aiakos.Core
 Aiakos.Node ──► Aiakos.ServiceDefaults, Aiakos.Contracts, Aiakos.Core
 Aiakos.Data ──► Aiakos.Core
-Aiakos.Cli  ──► (none in the skeleton; #15 adds its references)
+Aiakos.Cli  ──► (none in the skeleton; spec 0007 adds Aiakos.Orchestrator, Aiakos.Spec,
+                Aiakos.Api.Contracts, Aiakos.Wsl, Aiakos.Core)
 ```
 
 Reserved names, not created by this spec: `src/Aiakos.HookRelay` (only
@@ -401,11 +405,12 @@ Ports, from the port base (dev values):
 | Offset | Dev port | Listener | Side |
 |---|---|---|---|
 | +0 | 5180 | orchestrator `grpc` (h2c, localhost, unproxied) | Windows |
+| +1 | 5181 | orchestrator `http` (`/health`, `/alive`, CLI API `/v1`; spec 0007) | Windows |
 | +10 | 5190 | node hook ingest (Kestrel, `127.0.0.1`; spec 0005, #12) | WSL |
 | — | 15180 | dashboard UI (launch profile) | Windows |
 | — | 19180 | dashboard OTLP gRPC (launch profile) | Windows |
 | — | 20180 | dashboard resource service (launch profile) | Windows |
-| — | dynamic | orchestrator `http` (`/health`, `/alive`), Postgres | Windows |
+| — | dynamic | Postgres | Windows |
 
 Launch profile (`Properties/launchSettings.json`):
 
@@ -462,6 +467,7 @@ var nodeToken = builder.AddParameter("node-token", secret: true /* generated def
 
 var orchestrator = builder.AddProject<Projects.Aiakos_Orchestrator>("orchestrator")
     .WithHttpEndpoint(name: "grpc", port: cfg.PortBase, isProxied: false)   // R13, h2c set per endpoint
+    .WithHttpEndpoint(name: "http", port: cfg.PortBase + 1)                 // R14, fixed: CLI API
     .WithHttpHealthCheck("/health", endpointName: "http")                   // R14
     .WithEnvironment("Aiakos__Orchestrator__GrpcPort", cfg.PortBase.ToString(CultureInfo.InvariantCulture))
     .WithEnvironment("Aiakos__Instance", cfg.Instance)
@@ -710,14 +716,15 @@ settings; not part of the PR).
 
 ### Side by side with the released tool
 
-| | Dev AppHost (this spec) | Released tool (#15, proposed defaults) |
+| | Dev AppHost (this spec) | Released tool ([spec 0007](0007-cli-and-released-instance.md)) |
 |---|---|---|
 | Instance name | `dev` | `release` (reserved; R18) |
 | WSL home | `~/.aiakos-dev` | `~/.aiakos` |
 | Port base | `5180` (gRPC 5180, hooks 5190) | `7180` (gRPC 7180, hooks 7190) |
-| Database | Aspire container, volume `aiakos-dev-pgdata` | its own Postgres/database (#15) |
+| Windows home | `%USERPROFILE%\.aiakos-dev` (connection file, API token) | `%USERPROFILE%\.aiakos` |
+| Database | Aspire container, volume `aiakos-dev-pgdata` | container `aiakos-release-postgres`, volume `aiakos-release-pgdata`, port 7182 |
 | Node lock | `~/.aiakos-dev/node.lock` | `~/.aiakos/node.lock` |
-| Dashboard | 15180 / 19180 / 20180 | not Aspire's dev dashboard (#15) |
+| Dashboard | 15180 / 19180 / 20180 | optional standalone dashboard 17180 / 21180 |
 
 The released defaults are constants in `Aiakos.Core.InstanceDefaults`, which the AppHost guard
 (R18) checks against and which #15 consumes, so a later change to them is one edit. Everything
@@ -925,3 +932,21 @@ recommendation in the review of PR #26; they are folded into the requirements an
   base plus 10. R40 now allows ASP.NET Core in the node while still forbidding `Aiakos.Orchestrator`,
   `Aiakos.Data`, Akka and Npgsql (AC16 unchanged apart from that note); R41's rationale, the
   layout, the package table, the port table and [Design → Node](#node) follow. No ADR.
+- **2026-10-01 — wave 3 amendments** (spec 0007, accepted in review of PR #36):
+  - **R14, fixed `http` port.** The orchestrator's `http` endpoint has the fixed port base + 1
+    (dev 5181) because it also serves the CLI's local API; the AppHost generates an API token and
+    writes the dev `connection.json`, so `dotnet run --project src/Aiakos.Cli -- --instance dev`
+    works (spec 0007 R29, [ADR 0035](../adr/0035-local-api.md)). The port table and the AppHost
+    sketch follow.
+  - **D8 answered.** The released instance logs to rolling files with Serilog's file sink in the
+    instance host only; the node keeps logging to stdout (spec 0007 D10, R21).
+  - **D9 final.** The released defaults in `InstanceDefaults` are final and gain the Windows home
+    (`%USERPROFILE%\.aiakos`) and the database container (`aiakos-release-postgres`, volume
+    `aiakos-release-pgdata`, port 7182); see [side by side](#side-by-side-with-the-released-tool)
+    and [ADR 0034](../adr/0034-released-instance-host.md).
+  - **Layout.** Spec 0007 adds `src/Aiakos.Api.Contracts` (API types), `src/Aiakos.Wsl` (WSL
+    helpers without Aspire, also used by `Aiakos.Hosting.Wsl` for the preflight and `WSLENV`) and
+    `tests/Aiakos.Cli.Tests`; `Aiakos.Cli` references the orchestrator, the spec loader, the API
+    contracts, `Aiakos.Wsl` and `Aiakos.Core`, and packs the `linux-x64` node. The orchestrator
+    exposes `AddAiakosOrchestrator`/`MapAiakosOrchestrator` so the instance host can run it
+    in-process. No new ADR beyond 0034–0036.
