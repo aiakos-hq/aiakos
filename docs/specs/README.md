@@ -10,3 +10,4 @@ and test plan. The *what/why* and status live in the linked GitHub issue.
 | # | Title | Status | Milestone |
 |---|---|---|---|
 | [0001](0001-solution-skeleton.md) | Solution skeleton | accepted | M1 |
+| [0003](0003-rig-file-format-v1.md) | Rig file format v1 | accepted | M1 |
