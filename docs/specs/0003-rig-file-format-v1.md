@@ -1,7 +1,7 @@
 ---
 id: 0003
 title: Rig file format v1
-status: draft            # draft | accepted | implemented | superseded
+status: accepted         # draft | accepted | implemented | superseded
 issue: https://github.com/aiakos-hq/aiakos/issues/14
 milestone: M1
 owner: "@bsakel"
@@ -91,7 +91,7 @@ Deferred to M2 (v1 must not block them; see [Forward compatibility](#forward-com
 
 Deferred further:
 
-- Checkout policies `shared-readonly` (see [Q2](#risks-and-open-questions)) and `task-worktree`
+- Checkout policies `shared-readonly` (see [D2](#decisions-resolved-in-review)) and `task-worktree`
   (M8). The names are reserved.
 - `channels` (M4), secret stores (`store:` source, M6), egress declarations (M6), bundles (M5),
   `aiakos import openrig` (M5).
@@ -112,7 +112,8 @@ Owned elsewhere:
   `rig.env.yaml` file, by default at `<rig root>/rig.env.yaml`, overridable by the CLI (#15).
 - **R2** Every file starts with `apiVersion: aiakos.dev/v1` and a `kind` of `Rig`, `Agent` or
   `RigEnv` respectively. A missing or unknown `apiVersion`, or a `kind` that does not match the
-  file's role, is an error naming the versions this tool supports.
+  file's role, is an error naming the versions this tool supports
+  ([ADR 0013](../adr/0013-rig-file-header-and-compatibility.md)).
 - **R3** Files are UTF-8 YAML 1.2, a single document each, at most 256 KiB. A UTF-8 BOM is
   accepted and ignored. Duplicate keys, anchors/aliases, merge keys (`<<`) and custom tags are
   errors.
@@ -129,7 +130,8 @@ Owned elsewhere:
   `workspace.repos` list and a `seats` list, with the schema in [Design](#rigyaml).
 - **R7** Seat IDs are unique within the rig. A seat's address is `<seat id>@<rig name>`. Seats
   exist only inside a `rig.yaml`: there is no way to reference, include or share a seat defined
-  in another rig, so every seat is owned by exactly one rig.
+  in another rig, so every seat is owned by exactly one rig. v1 has no pods; seat addresses stay
+  flat ([ADR 0014](../adr/0014-flat-seat-addresses.md)).
 - **R8** A seat is `kind: agent` (default) or `kind: human`. A human seat has only `id`, `kind`
   and `description`; any other field on it is an error. Human seats are recorded and listed but
   never launched in M1.
@@ -181,7 +183,7 @@ Owned elsewhere:
 - **R21** Secret sources in v1 are `file:` only (a node-local path). A `value:` (or any inline
   secret) is an error. The secret value is read on the node at launch and delivered to the seat as
   a file; it never passes through the CLI, the orchestrator, the database, logs, argv or
-  environment variables.
+  environment variables ([ADR 0016](../adr/0016-secrets-as-node-file-references.md)).
 - **R22** Shared files (`rig.yaml`, `agent.yaml`, guidance, culture, skills) must contain no
   node names, node paths or secret values. The loader rejects strings that match known credential
   patterns (for example `sk-ant-`, `ghp_`, `github_pat_`, `xox[bp]-`, PEM private-key headers) and
@@ -197,7 +199,8 @@ Owned elsewhere:
   absolute paths and symbolic links are errors.
 - **R25** The loader embeds the content of every referenced file in the resolved rig (guidance and
   culture normalised to LF without BOM; skill files byte-exact) with its SHA-256. Nothing
-  downstream reads rig files from disk again.
+  downstream reads rig files from disk again. A seat's projected content is at most 2 MiB
+  (AIK3005; D9). See [ADR 0017](../adr/0017-resolved-rig-and-hashes.md).
 - **R26** The resolved rig has a `spec_hash` (SHA-256 of the canonical form of the shared part)
   and a `binding_hash` (SHA-256 of the canonical form of the binding). The same shared files give
   the same `spec_hash` on Windows and Linux, independent of YAML key order, comments, `x-` fields
@@ -210,7 +213,11 @@ Owned elsewhere:
   outside every repository checkout: `<projection root>/CLAUDE.md` and
   `<projection root>/.claude/skills/<name>/…`. Projection never writes, modifies or deletes
   files inside a repository checkout, so the repo's own `CLAUDE.md` and `.claude/` stay intact
-  and the worktree stays clean.
+  and the worktree stays clean ([ADR 0015](../adr/0015-projection-outside-checkouts.md)). #12
+  verifies the loading mechanism (`--add-dir` + `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`)
+  before relying on it. If it fails, `seat-worktree` seats use the seat directory as the
+  projection root (an ancestor of the worktree), and launching a `shared` seat fails with a clear
+  error (D3).
 - **R29** The projected `CLAUDE.md` is generated deterministically: a generated header (seat
   address, rig, `spec_hash`, "do not edit"), the rig roster, the culture file, then the agent's
   guidance files in listed order, each preceded by a source comment. Same inputs give
@@ -228,7 +235,9 @@ Owned elsewhere:
   `aiakos.dev/v2`, and the tool keeps reading v1.
 - **R32** Nothing in the files selects which Aiakos build runs the rig. Changes to
   `rigs/aiakos-dev/` must stay loadable by the currently pinned release (ADR 0008); the PR
-  that uses a new field is the PR after the release that introduced it.
+  that uses a new field is the PR after the release that introduced it. Once CI exists, a CI job
+  loads `rigs/aiakos-dev/` with the pinned release (D5;
+  [ADR 0013](../adr/0013-rig-file-header-and-compatibility.md)).
 
 ## Design
 
@@ -467,7 +476,7 @@ Loading: the adapter adds the projection root with `--add-dir <projection root>`
 `CLAUDE.md` and `.claude/skills/` from it while the working directory stays the repo checkout
 (whose own `CLAUDE.md` and `.claude/` still apply). This works identically for `shared` and
 `seat-worktree`. **The spikes did not cover this mechanism**; #12 must verify it first (see
-[Q3](#risks-and-open-questions) for the fallback).
+[D3](#decisions-resolved-in-review) for the fallback).
 
 The permission fragment goes into the per-seat settings file that the adapter already passes with
 `--settings` (spike 0002): `permissions.allow/ask/deny` and `permissions.defaultMode`
@@ -598,7 +607,7 @@ without a format break:
 | `profiles`, `uses:` | New optional keys on agent and seat; absent means the v1 behaviour |
 | Delivery hints (`startup`) | New optional agent key; v1 projection is the default hint (`guidance_merge: claude-md`, `skill_install: dir`) |
 | Culture | Already a v1 key (`culture_file`); M2 may add more culture options |
-| Pods, edges | Pods as an optional grouping; seat IDs stay rig-unique so addresses do not change (Q1) |
+| Pods, edges | Pods as an optional grouping; seat IDs stay rig-unique so addresses do not change (D1, [ADR 0014](../adr/0014-flat-seat-addresses.md)) |
 | OpenCode / Codex | `harnesses.<name>` sections and harness enum values |
 | JSON Schema, `spec validate`, `up --plan` | The tables above are the schema source; the loader is the reference validator; `spec validate` is `RigLoader.Load` plus output |
 | `shared-readonly`, `task-worktree`, secret stores, channels, egress | Reserved values and keys |
@@ -640,7 +649,7 @@ seats:
     description: Reviews the exact diff against the spec and acceptance criteria.
     harness: claude-code
     model: opus
-    checkout: seat-worktree          # read-only intent is enforced by permissions (Q2)
+    checkout: seat-worktree          # read-only intent is enforced by permissions (D2)
     requires: { auth: subscription }
 ```
 
@@ -756,7 +765,7 @@ launched. The `impl` resolved parameters are the example in
 [Resolved seat parameters](#resolved-seat-parameters).
 
 Note for #16: `rigs/aiakos-dev/README.md` currently plans `review` as `shared-readonly`; with this
-spec it is `seat-worktree` plus deny rules (Q2). #16 updates the README when it adds the files.
+spec it is `seat-worktree` plus deny rules (D2). #16 updates the README when it adds the files.
 
 ## Acceptance criteria
 
@@ -821,7 +830,7 @@ Fixtures/
 fixtures).** Launch the `aiakos-dev` fixture's `impl` seat on a node: the worktree is created at
 the fixed path on the fixed branch; a second `up` reuses it untouched (a dirty file survives);
 Claude Code in the seat lists the projected skill and follows a sentinel instruction from the
-projected `CLAUDE.md` (verifies the `--add-dir` mechanism, Q3); the repo's `git status` stays
+projected `CLAUDE.md` (verifies the `--add-dir` mechanism, D3); the repo's `git status` stays
 clean after projection.
 
 **Manual demo.** On the maintainer's machine: write the worked-example files into a scratch rig
@@ -831,63 +840,87 @@ launched), `impl` and `review` with node, harness, model and short `spec_hash`; 
 
 ## Risks and open questions
 
-Each with a recommendation.
+No questions remain open. The maintainer accepted every recommendation in review (PR #25).
 
-- **Q1 — Flat seats or pods?** Plan §5 sketches pods with pod-qualified addresses (`dev.impl`).
-  *Recommendation:* flat, rig-unique seat IDs in v1 (`impl@aiakos-dev`); in M2 pods become an
-  optional grouping attribute, not a namespace, so addresses never change when pods are
-  introduced. This deviates from the plan's `dev.impl` example and deserves an ADR.
-- **Q2 — `shared-readonly` for the reviewer in M1?** The `aiakos-dev` README plans it, but M1
-  scope is `shared` + `seat-worktree`, and "read-only" cannot be enforced without a sandbox.
-  *Recommendation:* no. The reviewer uses `seat-worktree` (it can `gh pr checkout` the exact diff
-  without disturbing anyone) plus deny rules for edits and pushes. Revisit `shared-readonly` with
-  the sandbox in M6, where it can be a read-only mount.
-- **Q3 — Projection mechanism not yet verified.** `--add-dir` +
-  `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` is documented Claude Code behaviour but no spike
-  exercised it. *Recommendation:* #12 verifies it first. Fallback if it fails: for
-  `seat-worktree`, put the projection at the seat directory (an ancestor of the worktree, so
-  `CLAUDE.md` loads as a parent memory file) and skills via `--add-dir`; for `shared`, reject
-  projection with a clear error until a mechanism exists. Never write into the checkout.
-- **Q4 — Culture in v1?** The plan lists culture under M2, but #16 needs `CULTURE.md`.
-  *Recommendation:* include `culture_file` in v1 as plain Markdown projected into every seat
-  (as specified); M2 can add options without changing it.
-- **Q5 — Strict unknown fields vs a pinned older tool.** Strictness catches typos but means a
-  file using a newer field fails on an older tool. *Recommendation:* keep strict (the error names
-  the field; honest-state rule 3) plus the `x-` escape hatch and R32 for `aiakos-dev`. Later, a
-  CI job loads `rigs/aiakos-dev` with the pinned release.
-- **Q6 — `auth: api-key` in M1?** Not needed for the local subscription path.
-  *Recommendation:* keep it in the format (cheap, and it proves the secret model); the adapter
-  implements it with `apiKeyHelper` + file. It is not part of M1 acceptance.
-- **Q7 — Model: verbatim string or model class?** *Recommendation:* verbatim in v1 (Claude
-  aliases like `opus`), recorded as given; `null` for "harness default". An M2 `model_class`
-  can map classes per harness if sharing across harnesses needs it.
-- **Q8 — YAML anchors?** *Recommendation:* reject in v1 (simpler golden tests, no alias
-  expansion attacks); relaxing later is compatible, tightening is not.
-- **Q9 — Size limits vs gRPC message size.** Projection content travels in the seat parameters.
-  *Recommendation:* cap per-seat projection at 2 MiB (below gRPC's 4 MiB default) and let spec
-  0002 decide whether content is chunked or fetched by hash.
-- **Q10 — Seat branch name.** *Recommendation:* `aiakos/<rig>/<seat>`, so two rigs with the same
-  seat ID sharing a base clone do not collide.
-- **Q11 — Where `rig.env.yaml` lives.** *Recommendation:* next to `rig.yaml`, git-ignored, with a
-  CLI override (#15); warn when tracked (AIK5010). Per-`AIAKOS_HOME` locations can come later.
-- **Risk — seat root collisions between two Aiakos instances** (released team vs a development
+### Decisions (resolved in review)
+
+- **D1 — Flat seats or pods?** Plan §5 sketches pods with pod-qualified addresses (`dev.impl`).
+  *Decision:* v1 uses flat, rig-unique seat IDs (`impl@aiakos-dev`). In M2, pods become an
+  optional grouping attribute, not a namespace. *Rationale:* seat addresses never change when
+  pods are introduced. Recorded in
+  [ADR 0014](../adr/0014-flat-seat-addresses.md); reflected in R7 and in
+  [Forward compatibility](#forward-compatibility-and-m2-extensions).
+- **D2 — `shared-readonly` for the reviewer in M1?** *Decision:* no. The reviewer uses
+  `seat-worktree` plus deny rules for edits and pushes. `shared-readonly` stays reserved until
+  M6, where the sandbox can enforce it as a read-only mount. *Rationale:* read-only cannot be
+  enforced without a sandbox, and a worktree lets the reviewer `gh pr checkout` the exact diff
+  without disturbing anyone. Reflected in R11 and the worked example. #16 updates
+  `rigs/aiakos-dev/README.md`.
+- **D3 — Projection loading mechanism.** *Decision:* the mechanism is `--add-dir <projection root>`
+  with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`, and #12 verifies it before building on it.
+  If it fails, `seat-worktree` falls back to putting the projection at the seat directory. That
+  directory is an ancestor of the worktree, so `CLAUDE.md` loads as a parent memory file, and
+  skills come in via `--add-dir`. A `shared` seat's launch then fails with a clear error until a
+  mechanism exists. In no case is anything written into the checkout. *Rationale:* the mechanism
+  is documented but no spike exercised it, and the fallback keeps the no-write rule. Recorded in
+  [ADR 0015](../adr/0015-projection-outside-checkouts.md); reflected in R28 and
+  [Projection for Claude Code](#projection-for-claude-code).
+- **D4 — Culture in v1?** *Decision:* yes. `culture_file` is plain Markdown projected into every
+  agent seat. *Rationale:* #16 needs `CULTURE.md`, and M2 can add options without changing the
+  v1 meaning. Reflected in R6 and R29.
+- **D5 — Strict unknown fields vs a pinned older tool.** *Decision:* unknown fields are errors,
+  and `x-` fields are an escape hatch. The `aiakos-dev` files must load with the pinned release
+  (R32). Once CI exists, a CI job loads `rigs/aiakos-dev` with the pinned release. *Rationale:*
+  typos fail loudly and the error names the field (rule 3). Recorded in
+  [ADR 0013](../adr/0013-rig-file-header-and-compatibility.md); reflected in R4, R31 and R32.
+- **D6 — `auth: api-key` in M1?** *Decision:* the format supports it, and the adapter implements
+  it with `apiKeyHelper` reading the delivered key file. It is not part of M1 acceptance.
+  *Rationale:* it is cheap and proves the secret model before M6. Reflected in R13, R21 and
+  [Secrets](#secrets).
+- **D7 — Model value.** *Decision:* the model is a string passed verbatim to the harness (e.g.
+  `opus`) and recorded as given. `null` means the harness's own default. A `model_class` may come
+  in M2. *Rationale:* v1 needs no mapping layer, and recording `null` keeps the harness default
+  from being guessed. Reflected in R10 and
+  [Resolution and defaults](#resolution-and-defaults).
+- **D8 — YAML anchors?** *Decision:* anchors, aliases and merge keys are rejected in v1.
+  *Rationale:* golden tests stay simpler, alias expansion cannot be abused, and relaxing the rule
+  later is compatible while tightening it would not be. Reflected in R3.
+- **D9 — Size limits vs gRPC message size.** *Decision:* each seat's projection is capped at
+  2 MiB (AIK3005), below gRPC's 4 MiB default. Spec 0002 decides whether content is chunked or
+  fetched by hash. *Rationale:* the projection content travels in the seat parameters. Reflected
+  in R25 and the size limits under [`agent.yaml`](#agentyaml).
+- **D10 — Seat branch name.** *Decision:* `aiakos/<rig>/<seat>`. *Rationale:* two rigs that use
+  the same seat ID on one clone do not collide. Reflected in R30.
+- **D11 — Where `rig.env.yaml` lives.** *Decision:* next to `rig.yaml`, git-ignored, with a CLI
+  override (#15). The CLI warns when the file is tracked (AIK5010). *Rationale:* this is the
+  simplest discovery rule, and the warning catches leaks. Locations per `AIAKOS_HOME` may come
+  later. Reflected in R1 and [`rig.env.yaml`](#rigenvyaml).
+
+ADRs recording the cross-cutting decisions of this spec:
+
+1. [ADR 0013](../adr/0013-rig-file-header-and-compatibility.md): the `apiVersion: aiakos.dev/v1`
+   + `kind` header, strict unknown fields with `x-` extensions, and additive-only evolution of a
+   version (R2–R5, R31).
+2. [ADR 0014](../adr/0014-flat-seat-addresses.md): a flat, rig-unique seat namespace, with pods
+   as a grouping and not a namespace (D1).
+3. [ADR 0015](../adr/0015-projection-outside-checkouts.md): projection never writes into a
+   repository checkout, and uses a per-seat projection root owned by Aiakos (R28, D3).
+4. [ADR 0016](../adr/0016-secrets-as-node-file-references.md): shared files name secrets,
+   bindings reference files on the node, and values are delivered only as files, never through
+   the orchestrator or database (R21, spike 0005).
+5. [ADR 0017](../adr/0017-resolved-rig-and-hashes.md): the resolved rig is self-contained and
+   content-addressed, with separate `spec_hash` and `binding_hash` (R25, R26).
+
+### Risks
+
+- **Seat root collisions between two Aiakos instances** (the released team vs a development
   build under test) on the same node. Seat directories include the rig name, and development
-  tests should use their own rig names and `seat_root`; the node should keep an ownership marker
+  tests should use their own rig names and `seat_root`. The node should keep an ownership marker
   in each seat directory (#11/#12).
-- **Risk — the guidance roster and header mention identity in text.** That is information for the
-  model, not authority; authority is the environment token (rule 2). The header says so.
-
-Decisions that deserve an ADR (not written here):
-
-1. Envelope and compatibility policy: `apiVersion: aiakos.dev/v1` + `kind`, strict unknown
-   fields with `x-` extensions, additive-only minor evolution (R2–R5, R31).
-2. Flat, rig-unique seat namespace; pods as grouping, not namespace (Q1).
-3. Projection never writes into repository checkouts; a per-seat, Aiakos-owned projection root
-   (R28, Q3).
-4. Secrets: names in shared files, node-local file references in bindings, file delivery only,
-   values never through orchestrator/DB (R21, spike 0005).
-5. Resolved rig is self-contained and content-addressed, with separate `spec_hash` and
-   `binding_hash` (R25, R26).
+- **The projected header and roster mention identity in text.** That text informs the model and
+  carries no authority; authority comes from the environment token (rule 2). The header says so.
+- **The projection mechanism is unverified until #12** (D3). The fallback covers
+  `seat-worktree`, which is all `aiakos-dev` needs.
 
 ## Changes after acceptance
 

@@ -9,4 +9,4 @@ and test plan. The *what/why* and status live in the linked GitHub issue.
 
 | # | Title | Status | Milestone |
 |---|---|---|---|
-| [0003](0003-rig-file-format-v1.md) | Rig file format v1 | draft | M1 |
+| [0003](0003-rig-file-format-v1.md) | Rig file format v1 | accepted | M1 |
