@@ -10,6 +10,12 @@
     <IsAotCompatible>true</IsAotCompatible>
     <!-- Source-generated configuration binding keeps options binding trim- and AOT-safe. -->
     <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+    <!-- Required by the LibraryImport source generator: InstanceLock reads the holder's pid
+         through a raw open(2), because every FileStream open on Linux takes a flock. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The WSL distro has no libicu by default and a self-contained .NET fails fast without it.
+         The node needs no culture data, so it runs with invariant globalization. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>
