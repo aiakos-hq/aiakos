@@ -48,19 +48,13 @@ else ships as containers or native-AOT binaries (see §0.5).
 1. Sign in at https://www.nuget.org (Microsoft account), enable 2FA.
 2. Optional but recommended: create a nuget.org **organization** `aiakos` to own the packages.
 3. API Keys → Create: scope *Push new packages and package versions*, glob `Aiakos*`.
-4. Publish an honest early-preview package (first publish owns the ID):
+4. Publish an honest early-preview package (first publish owns the ID). The package is
+   [`src/Aiakos.Cli`](../src/Aiakos.Cli/): a placeholder `dotnet tool` (`PackageId=Aiakos`,
+   command `aiakos`, `0.0.1-preview.1`) that prints a greeting and its version. The real CLI
+   (#15) replaces it under the same ID.
 
    ```powershell
-   dotnet new classlib -n Aiakos -o aiakos-placeholder
-   ```
-
-   Add to the csproj `<PropertyGroup>`: `PackageId=Aiakos`, `Version=0.0.1-preview.1`,
-   `Authors`, a real `Description` ("Early preview; not yet functional"), `PackageProjectUrl` /
-   `RepositoryUrl` → the GitHub repo, `PackageLicenseExpression`, `PackageReadmeFile=README.md`
-   (and include the README in the package).
-
-   ```powershell
-   dotnet pack aiakos-placeholder -c Release -o .\nupkg
+   dotnet pack src/Aiakos.Cli -c Release -o .\nupkg
    ```
 
    ```powershell

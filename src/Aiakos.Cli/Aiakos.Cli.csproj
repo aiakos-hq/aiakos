@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>aiakos</AssemblyName>
+    <RootNamespace>Aiakos.Cli</RootNamespace>
+    <!-- Run on newer .NET runtimes too, so the tool installs wherever the SDK is 10 or later. -->
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+
+  <!-- Packaged as a .NET tool: dotnet tool install -g aiakos -->
+  <PropertyGroup>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>aiakos</ToolCommandName>
+    <PackageId>Aiakos</PackageId>
+    <Version>0.0.1-preview.1</Version>
+    <!-- Keep the reported version clean (no +commit suffix). -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Authors>Aiakos contributors</Authors>
+    <Description>Early preview placeholder for the Aiakos CLI, a file-defined control plane for teams of AI coding agents. Not yet functional: it prints a greeting and its version.</Description>
+    <PackageTags>ai;agents;claude-code;control-plane;cli</PackageTags>
+    <PackageProjectUrl>https://github.com/aiakos-hq/aiakos</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/aiakos-hq/aiakos</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
