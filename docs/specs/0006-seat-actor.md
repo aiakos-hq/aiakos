@@ -1,7 +1,7 @@
 ---
 id: 0006
 title: "SeatActor: lifecycle and three-axis state"
-status: draft            # draft | accepted | implemented | superseded
+status: accepted         # draft | accepted | implemented | superseded
 issue: https://github.com/aiakos-hq/aiakos/issues/13
 milestone: M1
 owner: "@bsakel"
@@ -53,31 +53,41 @@ Evidence from the spikes that shapes the state machine:
 
 ### Depends on wave 1 decisions
 
-These drafts are not merged yet. If one of them changes, this spec changes with it.
+Specs 0001–0003 are accepted on main. If one of them changes, this spec changes with it.
 
 - **Spec 0001 (solution skeleton, #9)**: the SeatActor lives in `Aiakos.Orchestrator`, hosted by
   Akka.Hosting with no remoting, clustering or persistence (R27); migrations are embedded
-  `Migrations/NNNN_snake_case.sql` in `Aiakos.Data`, schema `aiakos`, forward-only (R30–R33);
-  `aiakos.tenant` and the default tenant UUID; `uuid` keys from `Guid.CreateVersion7()`, composite
-  foreign keys that include `tenant_id`; Dapper repositories per aggregate taking `tenantId`
-  first, SQL inline with explicit columns; tests on xUnit v3 + Microsoft.Testing.Platform with
-  Testcontainers `postgres:18`, and its **Q5 risk that Akka.TestKit may not support xUnit v3**;
-  `ActivitySource`/`Meter` named `Aiakos.Orchestrator`.
+  `Migrations/NNNN_snake_case.sql` in `Aiakos.Data`, schema `aiakos`, forward-only (R30–R33), with
+  the DbUp journal in `aiakos_meta` exempt from rule 6 (D4); `aiakos.tenant` and the default
+  tenant UUID (D3, [ADR 0012](../adr/0012-tenant-keys.md)); `uuid` keys from
+  `Guid.CreateVersion7()`, composite foreign keys that include `tenant_id`; Dapper repositories
+  per aggregate taking `tenantId` first, SQL inline with explicit columns; tests on xUnit v3 +
+  Microsoft.Testing.Platform with Testcontainers `postgres:18` (D5), and its risk that
+  **Akka.TestKit may not support xUnit v3** (tracked here as RK1); `ActivitySource`/`Meter` named
+  `Aiakos.Orchestrator`.
 - **Spec 0002 (gRPC contract, #10)**: the `SeatEvent` envelope and its bodies (`CommandResult`,
   `HarnessEvent`, `SessionObserved`, `ProcessExited`, `ObservationGap`); the normalized
   `HarnessEventKind` values and the Claude/OpenCode mapping table; `seq` per
   `(node_instance_id, seat_id)` with the dedupe key `(tenant_id, node_instance_id, seat_id, seq)`
-  and `EventAck` only after commit (R27–R30); `source_seq` for emission order (R28); gap detection
+  and `EventAck` only after commit (R27–R30, [ADR 0019](../adr/0019-node-link-delivery-model.md));
+  `source_seq` for emission order, stamped by the hook relay (R28, D3); an in-memory node buffer
+  with no spool in M1 (D2); gap detection
   and `ObservationGap` reasons (R32, R33) and `origin = RESYNC`; `LaunchResult`
   READY / FAILED / UNKNOWN with reasons, `DeliveryResult` outcomes, at-most-once resend only to the
-  same node instance (R18, R21, R22); node liveness timeout (R10); `Hello.seats` inventory;
-  command IDs persisted before sending (R13); the node reports observations and the SeatActor
-  derives state, with readiness disagreements becoming health findings (Q5); and the list of what
-  #13 must do ("Assumptions for dependent specs").
+  same node instance (R18, R21, R22), with resume as a launch mode (D4); node liveness timeout
+  (R10); `Hello.seats` inventory, with unknown seats on a node becoming findings and never being
+  stopped automatically (R31, D9); command IDs persisted before sending (R13); the adapter split,
+  where the node normalizes and the orchestrator interprets (D1,
+  [ADR 0018](../adr/0018-harness-adapter-split.md)); the node decides readiness and resume
+  verification in `LaunchResult`, and the SeatActor turns disagreements with the raw events into
+  health findings (R21, D5); and the list of what #13 must do ("Assumptions for dependent
+  specs").
 - **Spec 0003 (rig file format, #14)**: seat identity is the address `<seat id>@<rig name>`, flat
-  and rig-unique (R7, Q1); human seats are recorded but never launched in M1 (R8); the loader's
+  and rig-unique (R7, D1, [ADR 0014](../adr/0014-flat-seat-addresses.md)); human seats are recorded but never launched in M1 (R8); the loader's
   resolved seat parameter set is the launch input (R27) and contains **no session ID** (that is
-  orchestrator-owned); `spec_hash` and `binding_hash` per rig instance (R26); running seats are
+  orchestrator-owned); `spec_hash` and `binding_hash` per rig instance (R26,
+  [ADR 0017](../adr/0017-resolved-rig-and-hashes.md)), with table design left to the orchestrator
+  specs; running seats are
   never hot-reloaded, and how a changed spec is applied is #15's decision.
 
 Neighbouring work, in parallel:
@@ -111,7 +121,7 @@ Neighbouring work, in parallel:
 - **Work queue, handoff, routing, work items, humans as active seats** (M3). The design leaves
   room for them (see [Extension points](#extension-points-for-m2m3)); nothing here implements them.
 - **Automatic relaunch or reconciliation** of `desired = up` seats after an unexpected exit, and
-  watchdog-driven refocus or handover (M7). M1 reports the exit as a finding (Q7).
+  watchdog-driven refocus or handover (M7). M1 reports the exit as a finding (D7).
 - **Answering permission prompts** through the orchestrator (`AnswerInput`, M2/M4). A human
   answers in the pane.
 - **Chat delivery** and "deliver when idle" queuing (M4). M1 rejects a send that cannot be
@@ -122,12 +132,15 @@ Neighbouring work, in parallel:
   orchestrator process; see [Actor topology](#actor-topology).
 - **Claude-specific parsing** (spec 0005), **tmux mechanics** (spec 0004), **wire format**
   (spec 0002), **CLI rendering** (#15), **dashboard** (M5).
-- **Retention and pruning** of the event log (Q17).
+- **Retention and pruning** of the event log (D17).
 - **Fork** (`LAUNCH_MODE_FORK`): not needed in M1. The tables accept it; no command issues it.
 
 ## Requirements
 
 ### Actor model
+
+R4–R7 are recorded in [ADR 0032](../adr/0032-seat-actor-sole-writer.md) (the SeatActor as sole
+writer, evidence and conclusions in one transaction; D4).
 
 - **R1** Each agent seat has exactly one `SeatActor` in the orchestrator process, addressed by
   `seat_id`. Human seats (spec 0003 R8) have no actor and are never launched.
@@ -150,6 +163,9 @@ Neighbouring work, in parallel:
   committed ([Supervision](#supervision-and-failure)). No input is half-applied.
 
 ### State axes
+
+R8–R20 are recorded in [ADR 0031](../adr/0031-three-axis-seat-state.md) (the three-axis model
+with the reporting overlay; D1–D3, D9).
 
 - **R8** The three axes and their only values are:
   - **session**: `absent`, `starting`, `present`, `exited`, `unknown`;
@@ -197,6 +213,10 @@ Neighbouring work, in parallel:
 
 ### Lifecycle commands
 
+R21–R24 and the no-relaunch rule (D7) are recorded in
+[ADR 0033](../adr/0033-no-unrecorded-relaunch.md): the orchestrator never relaunches a seat or
+starts a fresh conversation without a recorded decision.
+
 - **R21** `up` records `desired = up` and, if session is `absent` or `exited`, starts a launch in
   the mode chosen by resumability ([Launch mode decision](#launch-mode-decision)). It is a
   successful no-op when session is `starting` or `present`. It is rejected with
@@ -241,7 +261,7 @@ Neighbouring work, in parallel:
   after a reconnect is the `NodeProxyActor`'s job and only to the same node instance (spec 0002
   R18); a delivery that was dispatched to a node instance that is gone becomes `unknown`.
 - **R32** A `confirmed` delivery whose `turn_id` has no matching `PROMPT_SUBMITTED` event in the
-  current launch after the next commit opens a `sources-disagree` finding (spec 0002 Q5).
+  current launch after the next commit opens a `sources-disagree` finding (spec 0002 D5).
   Activity follows the harness events, not the delivery result.
 
 ### Persistence and restart
@@ -289,6 +309,10 @@ Neighbouring work, in parallel:
 - **R43** The SeatActor consumes only spec 0002's normalized inputs plus an
   `IHarnessStateProfile` per harness ([Harness profile](#harness-profile-what-the-adapter-must-provide)).
   It contains no harness name comparisons and never parses raw payloads.
+- **R47** A readiness event that the profile classifies as a session rotation
+  (`IsSessionRotation`, e.g. Claude `/clear`) adopts the harness's new native ID as a new
+  `seat_session` with decision `harness-cleared` and resumability `fresh-only` (U8, D14). It is a
+  recorded harness action, not a mismatch.
 
 ### Observability
 
@@ -318,12 +342,13 @@ ActorSystem "aiakos"
 
 - **Why `SeatRegion` and not a `RigActor` parent (plan §3 diagram).** In M1 nothing needs live
   per-rig state: `up`/`down` on a rig is a loop over its seats in the API layer. A `RigActor` is
-  added when rig-level live behaviour appears (routing, M3). See Q10.
+  added when rig-level live behaviour appears (routing, M3). See D10.
 - **Envelope.** `SeatEnvelope(Guid TenantId, Guid SeatId, object Message)`. The region derives
   the child name from `SeatId`. This is the same shape as Akka.Cluster.Sharding's message
   extractor (entity ID `"{tenant}:{seat}"`, shard ID from a hash of the tenant), so M8 can put a
   `ShardRegion` behind `/user/seats` without changing SeatActor code. Because state is rebuilt from
-  Postgres (R35), sharding needs neither Akka.Persistence nor remember-entities.
+  Postgres (R35), sharding needs neither Akka.Persistence nor remember-entities (D11). The ADR for
+  this path is written when clustering is adopted (M8), not now.
 - **Startup.** A hosted service registered after the migration step (spec 0001) starts the
   region, which loads the IDs of seats with a current launch or `desired = up` and creates their
   actors (R35). Other seats get an actor on their first message.
@@ -443,7 +468,7 @@ transition of the last-known value.
 | S15 | `NodeAttached`, new instance, inventory LAUNCHING / RUNNING / EXITED / UNKNOWN (same `launch_id`) | — | `starting` / `present` / `exited` / `unknown` | same mapping | same mapping | same mapping |
 | S16 | `NodeAttached`, new instance, seat missing from inventory or other `launch_id` | — | `unknown`/inventory-missing +F(inventory-mismatch) | same | — | same |
 
-`exited` while `desired = up` and not caused by a `down` opens `unexpected-exit` (Q7).
+`exited` while `desired = up` and not caused by a `down` opens `unexpected-exit` (D7).
 `CapturePane` never appears in the table (R28).
 
 #### Activity
@@ -505,7 +530,7 @@ ones) updates `last_event_at` and resets the quiet timer.
 
 **`RESYNC` events** (spec 0002 R33, OpenCode) are applied like live events. They are the reason a
 gap on OpenCode seats heals by itself; Claude has no resync source, so a gap on an idle Claude
-seat stays `unknown` until the next turn (Q16).
+seat stays `unknown` until the next turn (D16).
 
 #### Resumability
 
@@ -524,6 +549,7 @@ stateDiagram-v2
     resumable --> fresh_only: up --fresh (new ID, decision recorded)
     lost --> fresh_only: up --fresh (new ID, decision recorded)
     unknown --> fresh_only: up --fresh (new ID, decision recorded)
+    resumable --> fresh_only: harness rotation, e.g. Claude /clear (new session, decision harness-cleared)
 ```
 
 | # | Input | `none` | `fresh-only` | `resumable` | `lost` | `unknown` |
@@ -534,7 +560,20 @@ stateDiagram-v2
 | U4 | `LaunchResult FAILED` reason `RESUME_SESSION_NOT_FOUND` | n/a | n/a | `lost` +F(resume-lost) | — | `lost` |
 | U5 | `LaunchResult FAILED` for a FRESH relaunch that reused the ID | n/a | `unknown`/fresh-relaunch-failed +F(launch-failed) | n/a | n/a | — |
 | U6 | gap / new node instance (R18) | — | `unknown`/observation-gap | — | — | — |
-| U7 | `SessionObserved.matches_expected = false`, or a readiness event with another native ID | n/a | `unknown`/session-id-mismatch +F(session-id-mismatch) | same | same | +F only |
+| U7 | `SessionObserved.matches_expected = false`, or a readiness event with another native ID that is **not** a rotation (U8) | n/a | `unknown`/session-id-mismatch +F(session-id-mismatch) | same | same | +F only |
+| U8 | session rotation (`profile.IsSessionRotation`; Claude `/clear`, D14): readiness event with a new valid native ID whose `previous_session_id` equals the current one | n/a | `fresh-only` (new `seat_session`, decision `harness-cleared`) | same | same | same |
+
+**Rotation (U8).** Spec 0005's experiment showed that Claude's `/clear` emits
+`SessionEnd{session_id: old, reason: clear}` (mapped to `OTHER`, so S12 does not fire) and then
+`SessionStart{session_id: new, source: clear}` (mapped to `SESSION_STARTED` with attribute
+`previous_session_id`). The SeatActor then, in one transaction: marks the old `seat_session`
+abandoned (reason `harness-cleared`), inserts a new `seat_session` with the harness-chosen ID
+(validated with `IsValidNativeSessionId`; an invalid ID is U7 instead), decision
+`harness-cleared` and `previous_session_id`, points `current_session_id` at it, and sets
+resumability `fresh-only`. Session stays `present`, activity follows A1 (`idle`). The launch keeps
+its original `session_id`; later resumes use the new one. Rotation is applied even when the event
+is late (R13), because every later event carries the new ID. Aiakos itself never sends `/clear`
+in M1 (spec 0005).
 
 Other `LaunchResult FAILED` reasons during a resume (`HARNESS_EXITED`, `SESSION_ID_MISMATCH`)
 leave resumability unchanged apart from U7 and open `launch-failed`. `LaunchResult UNKNOWN` never
@@ -596,7 +635,7 @@ disagreement.
 Why a stale guard and not a reorder buffer: every state-changing Claude kind maps to a fixed
 target, so "the newest emitted event wins" gives the same final state as sorting (property-tested,
 see Test plan), without timers. The history-dependent rules (A3/A4 stickiness, A9) only matter for
-OpenCode's single ordered SSE stream. See Q5.
+OpenCode's single ordered SSE stream. See D5.
 
 ### Supervision and failure
 
@@ -619,7 +658,7 @@ OpenCode's single ordered SSE stream. See Q5.
 
 ### Harness profile (what the adapter must provide)
 
-The orchestrator side of `IHarnessAdapter` (spec 0002 Q1) gives the SeatActor one immutable
+The orchestrator side of `IHarnessAdapter` (spec 0002 D1, [ADR 0018](../adr/0018-harness-adapter-split.md)) gives the SeatActor one immutable
 profile per harness:
 
 ```csharp
@@ -632,6 +671,7 @@ public interface IHarnessStateProfile
     bool IsValidNativeSessionId(string id);                   // Claude: canonical lowercase UUID only (spike 0002 F3)
     bool IsReadiness(HarnessEventKind kind, IReadOnlyDictionary<string, string> attributes);
     bool IsConversationEvidence(HarnessEventKind kind, IReadOnlyDictionary<string, string> attributes);
+    bool IsSessionRotation(HarnessEventKind kind, IReadOnlyDictionary<string, string> attributes); // U8; proposed by spec 0005
     bool FreshRelaunchReusesSessionId { get; }                // Claude: true (spike 0002 F5)
     bool EmitsInputResolved { get; }                          // Claude: false; OpenCode: true
     TimeSpan ReadyTimeout { get; }                            // Claude: 15 s (spike 0002 F9)
@@ -645,7 +685,8 @@ Expected values for Claude Code, which **spec 0005 confirms or corrects**:
 | Member | Claude Code (spec 0005) | OpenCode (M2, from spike 0004) |
 |---|---|---|
 | `IsReadiness` | `SESSION_STARTED` with `source` ∈ {`startup`, `resume`, `fork`, `clear`} | `SESSION_STARTED` |
-| `IsConversationEvidence` | `PROMPT_SUBMITTED`, `TURN_ENDED`, `TURN_FAILED` for the session (the transcript exists after the first prompt, spike 0002 F5 and spike 0005 F7) | `SESSION_STARTED` (the session is stored when created) |
+| `IsConversationEvidence` | `PROMPT_SUBMITTED`, `TURN_ENDED`, `TURN_FAILED` for the event's own `native_session_id` (the transcript exists after the first prompt, spike 0002 F5 and spike 0005 F7; after `/clear` evidence counts for the new ID only) | `SESSION_STARTED` (the session is stored when created) |
+| `IsSessionRotation` | `SESSION_STARTED` with `source = clear` and a `previous_session_id` attribute (spec 0005) | `false` (no rotation observed in spike 0004) |
 | `FreshRelaunchReusesSessionId` | `true` | `false` |
 | `EmitsInputResolved` | `false` (resolution inferred per A5) | `true` (`permission.replied`) |
 
@@ -659,7 +700,9 @@ Spec 0005 must also provide, through the node-side mapping (spec 0002's table):
    where the payload has one.
 4. `source_seq` stamped by the hook relay, strictly increasing per seat **across launches**
    (a counter in the seat home), so R13 works after a relaunch.
-5. The answer to Q14: what `/clear` does to the native session ID.
+5. The rotation mapping for `/clear` (answered by spec 0005, D14): `SessionEnd reason=clear` as
+   `OTHER`, `SessionStart source=clear` as `SESSION_STARTED` with the new ID and
+   `previous_session_id`, and no mismatching `SessionObserved` for it.
 
 ### Findings
 
@@ -682,7 +725,7 @@ Spec 0005 must also provide, through the node-side mapping (spec 0002's table):
 | `actor-stopped` | error | supervision limit | next successful commit |
 
 Node-scoped findings that spec 0002 raises (events for unassigned seats R12, unknown seats on a
-node Q9) use the same table with `seat_id` null and `node_name` set.
+node R31 and D9) use the same table with `seat_id` null and `node_name` set.
 
 ### Schema
 
@@ -717,7 +760,7 @@ CREATE TABLE aiakos.seat (
     address       text        NOT NULL,            -- member@rig
     kind          text        NOT NULL CHECK (kind IN ('agent', 'human')),
     harness       text,                            -- null for human seats
-    node_name     text,                            -- from the binding; null for human seats (Q13)
+    node_name     text,                            -- from the binding; null for human seats (D13)
     desired       text        NOT NULL DEFAULT 'down' CHECK (desired IN ('up', 'down')),
     desired_at    timestamptz,
     desired_by    text,                            -- CallerContext user
@@ -740,7 +783,9 @@ CREATE TABLE aiakos.seat_session (
     session_id         uuid        PRIMARY KEY,
     seat_id            uuid        NOT NULL,
     harness            text        NOT NULL,
-    native_session_id  text        NOT NULL,       -- orchestrator-generated (spike 0002)
+    native_session_id  text        NOT NULL,       -- orchestrator-generated (spike 0002); harness-chosen on rotation (U8)
+    decision           text        NOT NULL CHECK (decision IN ('new-session', 'fresh-explicit', 'harness-cleared')),
+    previous_session_id uuid,                      -- set for 'harness-cleared' (U8)
     conversation_at    timestamptz,                -- first conversation evidence (U2/U3)
     lost_at            timestamptz,                -- U4
     abandoned_at       timestamptz,                -- replaced by an explicit fresh start (R24)
@@ -748,7 +793,8 @@ CREATE TABLE aiakos.seat_session (
     created_at         timestamptz NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, session_id),
     UNIQUE (tenant_id, harness, native_session_id),
-    FOREIGN KEY (tenant_id, seat_id) REFERENCES aiakos.seat (tenant_id, seat_id)
+    FOREIGN KEY (tenant_id, seat_id) REFERENCES aiakos.seat (tenant_id, seat_id),
+    FOREIGN KEY (tenant_id, previous_session_id) REFERENCES aiakos.seat_session (tenant_id, session_id)
 );
 
 -- One row per launch attempt (StartSeat.launch_id).
@@ -1060,7 +1106,7 @@ moves to exemplars or logs to keep metric cardinality bounded.
 ## Acceptance criteria
 
 - [ ] **AC1** `dotnet test --filter "FullyQualifiedName~Seats"` passes, including every row of the
-  transition tables (one test per row id S1–S16, A1–A16, U1–U7, plus the delivery table).
+  transition tables (one test per row id S1–S16, A1–A16, U1–U8, plus the delivery table).
 - [ ] **AC2** The property tests pass with at least 1 000 generated cases each: for any
   permutation of a Claude-shaped event stream, the final axes equal those of the `source_seq`
   sorted stream; any duplication of events leaves state and row counts equal to the stream
@@ -1100,6 +1146,14 @@ moves to exemplars or logs to keep metric cardinality bounded.
   `ps` shows `absent / none / resumable`; `up` → launch decision `resume`, outcome `ready`;
   a permission prompt shows `needs-input` until approved in the pane; `wsl --shutdown` while up
   shows `unknown (node-link-lost)` within 20 s.
+- [ ] **AC13** Rotation (U8, D14): a golden script with spec 0005's `/clear` sequence
+  (`SessionEnd reason=clear`, then `SessionStart source=clear` with a new ID and
+  `previous_session_id`) leaves session `present`, activity `idle`, resumability `fresh-only`,
+  a new `seat_session` with decision `harness-cleared`, the old one abandoned, and no
+  `session-id-mismatch` finding; the next `up` after a `down` resumes the new ID once a prompt was
+  seen.
+- [ ] **AC14** Before the first actor test is written, the Akka.TestKit/xUnit v3 check (RK1) is
+  done and its result is recorded in the implementation PR description.
 
 ## Test plan
 
@@ -1114,10 +1168,11 @@ here because `SeatStateMachine.Apply` has no Akka dependency (R3):
   (`UserPromptSubmit`, `PreToolUse`, `Notification` +6 s, `PostToolUse`, `Stop`, `PreCompact`,
   `SessionStart compact`), spike 0002's kill-and-resume and failed-resume (orphan `SessionEnd`,
   exit 1), spike 0005's `StopFailure` after silence and `docker restart` without `SessionEnd`
-  (`ProcessExited`). OpenCode's spike 0004 permission timeline (`busy` re-emitted while pending)
-  as an M2 golden script against a test profile.
+  (`ProcessExited`), and spec 0005's `/clear` rotation and Escape denial (no hook; the seat stays
+  `needs-input` until the next prompt). OpenCode's spike 0004 permission timeline (`busy`
+  re-emitted while pending) as an M2 golden script against a test profile.
 
-**Property tests (CsCheck; Q15).** Generators build valid Claude-shaped turn sequences (turns,
+**Property tests (CsCheck; D15).** Generators build valid Claude-shaped turn sequences (turns,
 tool calls with optional permission prompts, compactions, statusLine ticks), assign `seq` and
 `source_seq`, then perturb them:
 
@@ -1143,7 +1198,7 @@ link messages; an in-memory repository fake stands in for Postgres:
 - `SeatRegion` routing and eager creation at startup (R35).
 - TestKit and xUnit v3: use `Akka.TestKit.Xunit` if its current release supports xUnit v3; if
   not, derive from `Akka.TestKit.TestKitBase` with a small `ITestKitAssertions` adapter over
-  xUnit v3's `Assert`; last resort, this one project stays on xUnit v2 (spec 0001 Q5). Check
+  xUnit v3's `Assert`; last resort, this one project stays on xUnit v2 (spec 0001 D5, RK1). Check
   before implementation starts.
 
 **Persistence and restart tests (Testcontainers `postgres:18`, `Aiakos.Data.Tests` and
@@ -1167,86 +1222,105 @@ Code.
 
 ## Risks and open questions
 
-Each question has a recommendation; the reviewer confirms or changes it before `accepted`.
+No questions remain open. The review on PR #29 accepted every recommendation; the outcomes are
+folded into the requirements and design above.
 
-- **Q1 — Is `starting` a session value?** The issue lists present / exited / absent. Between
-  `StartSeat` and readiness the harness may sit on a dialog for 15 s or forever, input must be
-  refused, and `ps` should say so. *Recommendation:* yes, `starting` as specified. No `stopping`:
-  a stop is a pending command shown in `pending_op`.
-- **Q2 — `none` for activity without a session, or null?** *Recommendation:* the explicit value
-  `none`. `unknown` would claim ignorance where there is certainty, and null invites "treat as
-  idle" bugs.
-- **Q3 — Resumability values.** *Recommendation:* `none`, `fresh-only`, `resumable`, `lost`,
-  `unknown` as specified. `fresh-only` encodes spike 0002 F5 honestly; `lost` makes "never fall
-  back" enforceable by a rejection instead of a convention.
-- **Q4 — Who writes events: NodeProxy or SeatActor?** *Recommendation:* the SeatActor, in the
-  same transaction as the resulting state (R5), with the NodeProxy acking only after
-  `EventsCommitted`. Evidence and conclusion can never disagree, and restart needs no log replay.
-  The cost is one transaction per batch per seat, which is fine for M1. **ADR-worthy.**
-- **Q5 — Stale guard or reorder window for out-of-order hooks?** A window (hold events ~500 ms and
-  sort) handles history-dependent rules but adds timers and latency. *Recommendation:* the stale
-  guard (R13) in M1, proven by the permutation property. Revisit if real traces show flapping or
-  if a harness needs history-dependent rules on an unordered source.
-- **Q6 — Send only when idle?** *Recommendation:* yes in M1, plus `--force` for `unknown` only
-  (for a Claude seat after a gap, see Q16). Never into `needs-input` (a paste can answer the
-  dialog) or `working` (typeahead during a turn is untested). Queuing is M3/M4.
-- **Q7 — Relaunch automatically when `desired = up` and the seat exited?** *Recommendation:* no in
-  M1; open `unexpected-exit` and let a human run `up`. Automatic restarts belong to the M7
-  watchdogs and need a restart budget. **ADR-worthy** together with the no-fallback rule:
-  "the orchestrator never changes a seat's process or conversation without a recorded decision".
-- **Q8 — What does silence while `working` mean?** Long tool calls are silent (spike 0001), and
-  auth failures are silent for ~3 min (spike 0005). *Recommendation:* `unknown/quiet-timeout`
-  after 10 min (profile value), with a finding; any event restores the state. Tune from real
-  traces.
-- **Q9 — Disagreement: unknown, or trust the node's `LaunchResult`?** *Recommendation:*
-  `unknown` + finding, as plan §7 says ("never a guess"). In the normal path the node emits the
-  readiness event before the result, so disagreements should be rare and worth investigating.
-- **Q10 — A `RigActor` now (plan §3 diagram)?** *Recommendation:* not in M1; `SeatRegion` only.
-  Add `RigActor` with the first rig-level live behaviour (routing in M3). No ADR needed; update
-  the plan diagram when it lands.
-- **Q11 — Sharding and persistence for later.** *Recommendation:* M1 `SeatRegion` with a
-  sharding-shaped envelope; M8 Akka.Cluster.Sharding with entity ID `"{tenant}:{seat}"`, state
-  from Postgres, no Akka.Persistence, no remember-entities. **ADR-worthy** when clustering is
-  adopted (it refines ADR 0002).
-- **Q12 — Who owns the `rig` table?** Spec 0003 leaves table design to "the orchestrator spec".
-  *Recommendation:* this spec creates the minimal `rig` table the seats need; #15 adds revision
-  history or blob storage in its own migration if `up` needs it.
-- **Q13 — Node reference.** Spec 0002 has no node table yet. *Recommendation:* `seat.node_name`
-  as text from the binding; add a foreign key when the node registry table exists (#10).
-- **Q14 — Claude `/clear`.** If `/clear` starts a new native session ID (with `SessionStart
-  source=clear`), R12/U7 make resumability `unknown` and open `session-id-mismatch`.
-  *Recommendation:* spec 0005 verifies the behaviour; if the ID changes, the profile reports it
-  and the SeatActor adopts the new ID as a new `seat_session` with decision `harness-cleared`
-  (a new decision value, additive).
-- **Q15 — Property-testing library.** *Recommendation:* CsCheck (C#-first, framework-agnostic, no
-  xUnit version coupling). FsCheck is the alternative if the team prefers it.
-- **Q16 — Resync for idle Claude seats after a gap.** Claude has no state query; after a node
-  restart an idle seat stays `unknown` until someone sends. *Recommendation:* `send --force`
-  (recorded) in M1, with `capture` as the human's evidence. Spec 0005 may evaluate reading a
-  validated `~/.claude/sessions/<pid>.json` (pid and `procStart` checked, spike 0002 F4) as a
-  `RESYNC` source later; not in M1.
-- **Q17 — Event log growth.** statusLine ticks are rate-limited to 1/s per seat (spec 0002 R39)
-  and fire only around events, so M1 volume is small. *Recommendation:* keep everything in M1;
-  add retention (drop `raw` of `TELEMETRY` events older than N days) with the dashboard in M5.
+### Decisions (resolved in review)
 
-Risks:
+- **D1 — Is `starting` a session value?** The issue lists present / exited / absent.
+  *Decision:* yes, `starting` is a session value (R8); there is no `stopping`, a stop shows as a
+  pending command in `pending_op`. *Rationale:* between `StartSeat` and readiness the harness may
+  sit on a dialog, input must be refused, and `ps` should say so. Part of
+  [ADR 0031](../adr/0031-three-axis-seat-state.md).
+- **D2 — `none` for activity without a session, or null?** *Decision:* the explicit value `none`
+  (R8, R10, enforced by a check constraint). *Rationale:* `unknown` would claim ignorance where
+  there is certainty, and null invites "treat as idle" bugs. Part of ADR 0031.
+- **D3 — Resumability values.** *Decision:* `none`, `fresh-only`, `resumable`, `lost`, `unknown`
+  (R8, [Resumability](#resumability)). *Rationale:* `fresh-only` encodes spike 0002 F5 honestly,
+  and `lost` makes "never fall back" enforceable by a rejection instead of a convention. Part of
+  ADR 0031.
+- **D4 — Who writes events: NodeProxy or SeatActor?** *Decision:* the SeatActor, in the same
+  transaction as the resulting state; the NodeProxy acks only after `EventsCommitted` (R4, R5,
+  R7, R35). *Rationale:* evidence and conclusion can never disagree, and a restart needs no log
+  replay; one transaction per batch per seat is cheap enough for M1 (RK3). Recorded in
+  [ADR 0032](../adr/0032-seat-actor-sole-writer.md).
+- **D5 — Stale guard or reorder window for out-of-order hooks?** *Decision:* the stale guard on
+  `source_seq` (R13, [Event handling pipeline](#event-handling-pipeline)). *Rationale:* every
+  state-changing Claude kind maps to a fixed target, so "newest emitted wins" gives the sorted
+  result without timers or latency; the permutation property test proves it. Revisit if real
+  traces show flapping (RK4).
+- **D6 — Send only when idle?** *Decision:* yes in M1, plus `force` for `unknown` only (R29).
+  Never into `needs-input` or `working`; queuing is M3/M4. *Rationale:* a paste can answer a
+  permission dialog, and typeahead during a turn is untested; `force` covers idle Claude seats
+  after a gap (D16).
+- **D7 — Relaunch automatically when `desired = up` and the seat exited?** *Decision:* no in M1;
+  `unexpected-exit` opens and a human runs `up` (S-table note, [Findings](#findings)).
+  *Rationale:* automatic restarts belong to the M7 watchdogs and need a restart budget; together
+  with R23/R24 this is "never change a seat's process or conversation without a recorded
+  decision", recorded in [ADR 0033](../adr/0033-no-unrecorded-relaunch.md).
+- **D8 — What does silence while `working` mean?** *Decision:* `unknown/quiet-timeout` after the
+  profile's `QuietTimeout` (default 10 min), with an `activity-stale` finding; any event restores
+  the state (R19, A15). *Rationale:* long tool calls are silent (spike 0001) and auth failures
+  are silent for ~3 min (spike 0005), so silence is neither "working fine" nor a failure. The
+  value is tuned from real traces (RK5).
+- **D9 — Disagreement: unknown, or trust the node's `LaunchResult`?** *Decision:* the affected
+  axis becomes `unknown/sources-disagree` and a finding opens (R20, S5–S7, S11). *Rationale:*
+  plan §7 says "never a guess", and spec 0002 D5 makes disagreements findings; the node emits the
+  readiness event before the result, so they should be rare (RK6). Part of ADR 0031.
+- **D10 — A `RigActor` now (plan §3 diagram)?** *Decision:* not in M1; `SeatRegion` only
+  ([Actor topology](#actor-topology)). *Rationale:* nothing needs live per-rig state yet;
+  `RigActor` arrives with the first rig-level live behaviour (routing in M3), and the plan diagram
+  is updated then. No ADR.
+- **D11 — Sharding and persistence for later.** *Decision:* M1 uses a local `SeatRegion` with a
+  sharding-shaped envelope (R2); M8 moves to Akka.Cluster.Sharding with entity ID
+  `"{tenant}:{seat}"`, state from Postgres, no Akka.Persistence and no remember-entities.
+  *Rationale:* the rebuild path (R35) already works from Postgres, so clustering is a hosting
+  change, not a rewrite. **Its ADR is deferred until clustering is adopted** (it will refine
+  ADR 0002).
+- **D12 — Who owns the `rig` table?** *Decision:* this spec creates the minimal `rig` table the
+  seats need ([Schema](#schema)); #15 adds revision history or blob storage in its own migration
+  if `up` needs it. *Rationale:* spec 0003 leaves table design to the orchestrator specs, and the
+  seat rows need a parent now.
+- **D13 — Node reference.** *Decision:* `seat.node_name` is text from the binding; a foreign key
+  is added when the node registry table exists (#10). *Rationale:* spec 0002 defines no node
+  table, and a text reference is honest about that.
+- **D14 — Claude `/clear`.** *Answered by spec 0005's experiment:* `/clear` rotates the session ID.
+  It emits `SessionEnd{session_id: old, reason: clear}` and then
+  `SessionStart{session_id: new, source: clear}`; Claude chooses the new ID and both transcripts
+  exist. *Decision:* the profile member `IsSessionRotation` (proposed by spec 0005) identifies
+  the rotation, and the SeatActor adopts the new ID as a new `seat_session` with decision
+  `harness-cleared`, resumability `fresh-only`, and no `session-id-mismatch` finding (R47, U8).
+  *Rationale:* the rotation is a known harness action, not a mismatch; recording it keeps the
+  old conversation in history and makes the next resume use the right ID.
+- **D15 — Property-testing library.** *Decision:* CsCheck ([Test plan](#test-plan)).
+  *Rationale:* C#-first and framework-agnostic, so it has no xUnit version coupling (RK1).
+- **D16 — Resync for idle Claude seats after a gap.** *Decision:* M1 has no Claude resync source;
+  `send --force` (recorded on the delivery) plus `capture` as the human's evidence (R29,
+  A16 note). Reading a validated `~/.claude/sessions/<pid>.json` as a `RESYNC` source may be
+  evaluated later, not in M1. *Rationale:* Claude has no state query, and the sessions file goes
+  stale (spike 0002 F4); a recorded human decision is honest (RK7).
+- **D17 — Event log growth.** *Decision:* keep every event in M1; retention (dropping `raw` of
+  `TELEMETRY` events older than N days) comes with the dashboard in M5 (Non-goals).
+  *Rationale:* statusLine ticks are rate-limited to 1/s per seat (spec 0002 R39) and fire only
+  around events, so M1 volume is small (RK8).
 
-- **Parallel tool calls in Claude** can clear `needs-input` early when the permission
-  notification has no tool ID (A5). Spec 0005's `PermissionRequest` evaluation may fix it.
-- **Transaction per batch** could become a bottleneck with many seats; batching per seat (up to
-  100 events, spec 0002 R30) keeps M1 far below any limit.
-- **Wave 1 drift**: the enum names and reasons here mirror spec 0002's draft proto. A rename there
-  must be applied here before either is accepted.
+### Risks
 
-**Decisions that deserve an ADR** (not written here):
+Stable IDs; a central register links to them.
 
-1. The three-axis state model with fixed value sets, reasons for `unknown`, and reported vs
-   last-known values under an overlay (R8–R20).
-2. Evidence and conclusion committed in one transaction by the SeatActor as the single writer;
-   acks after commit; restart from the snapshot, not by log replay (Q4, R5, R35).
-3. No automatic relaunch or fresh start without a recorded decision (R23, R24, Q7).
-4. The sharding path: `SeatRegion` now, Akka.Cluster.Sharding keyed by tenant and seat later,
-   still without Akka.Persistence (Q11).
+| ID | Risk | How and when it is checked | Owner |
+|---|---|---|---|
+| **RK1** | **Akka.TestKit may not support xUnit v3** (spec 0001 D5). Actor tests could not run in the xUnit v3 test project. | Before the first actor test (AC14): try `Akka.TestKit.Xunit` on xUnit v3; if unsupported, derive from `TestKitBase` with an `ITestKitAssertions` adapter; last resort, one xUnit v2 project. The state machine and property tests (D15) do not depend on it. Result recorded in the implementation PR. | #13 |
+| **RK2** | **Parallel tool calls in Claude** can clear `needs-input` early, because the permission request carries no tool ID and resolves on any `TOOL_FINISHED` (A5, `*`). Spec 0005 found `PermissionRequest` also has no `tool_use_id`. | Golden script with two parallel tools and one permission prompt in the state machine tests; observed in the manual demo (AC12). If it happens in practice, spec 0005 correlates `PermissionRequest` with `PreToolUse` by tool name and input. | #12 |
+| **RK3** | **One transaction per batch per seat** (D4) could become a bottleneck with many seats. | `aiakos.seat.apply.duration` histogram in the manual demo (AC11) and during stage B; batching up to 100 events per seat (spec 0002 R30) keeps M1 far below any limit. | #13 |
+| **RK4** | **The stale guard (D5) could flap** if a harness needs history-dependent rules on an unordered source. | Permutation property test (AC2); `aiakos.seat.events{disposition=late}` counter reviewed in stage B. Switch to a reorder window only with evidence. | #13 |
+| **RK5** | **Quiet timeout mis-tuned** (D8): too short gives false `unknown` during long tool calls, too long detects hung seats late. | `activity-stale` findings and their resolution times reviewed after the first week of stage B; the value is a profile setting. | #12 |
+| **RK6** | **Disagreement as `unknown` (D9) could be noisy** if the node sends `LaunchResult` before the readiness event. | Integration test with a real node and the fake harness (spec 0002 ordering), asserting no `sources-disagree` on the normal path. | #10 |
+| **RK7** | **Idle Claude seats stay `unknown` after a node restart** (D16) until someone uses `send --force`. | AC6 covers the state; the manual demo restarts the node once; friction is reviewed in stage B. | #12 |
+| **RK8** | **Event log growth** (D17). | Rows per seat per day measured during stage B; retention lands with the dashboard (M5). | #13 |
+| **RK9** | **NodeProxy re-forwarding after a SeatActor restart** (R7) lives on spec 0002's side. Without it, events stay unacked until the next reconnect. | AC8 (crash test with the real NodeProxy). | #10 |
+| **RK10** | **Escape denial of a Claude permission emits no hook** (spec 0005), so the seat stays `needs-input` until the next prompt in the pane. Honest, but it blocks `send`. | Golden script in the state machine tests; noted in the manual demo. | #12 |
+| **RK11** | **Vocabulary drift** between spec 0002's proto enums and the strings stored here. | A unit test maps every proto enum value (`HarnessEventKind`, outcomes, reasons) to its stored string exhaustively and fails on an unmapped value. | #13 |
 
 ## Changes after acceptance
 
