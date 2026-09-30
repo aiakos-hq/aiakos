@@ -12,4 +12,5 @@ and test plan. The *what/why* and status live in the linked GitHub issue.
 | [0001](0001-solution-skeleton.md) | Solution skeleton | accepted | M1 |
 | [0002](0002-orchestrator-node-grpc-contract.md) | Orchestrator ↔ node gRPC contract v1 | accepted | M1 |
 | [0003](0003-rig-file-format-v1.md) | Rig file format v1 | accepted | M1 |
+| [0004](0004-tmux-session-host.md) | Node agent: tmux session host | accepted | M1 |
 | [0006](0006-seat-actor.md) | SeatActor: lifecycle and three-axis state | accepted | M1 |
