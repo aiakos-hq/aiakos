@@ -38,3 +38,8 @@ ADR that supersedes the old one instead. Template: [`TEMPLATE.md`](TEMPLATE.md).
 | [0031](0031-three-axis-seat-state.md) | Three-axis seat state with fixed values, reasoned unknowns and a reporting overlay | accepted |
 | [0032](0032-seat-actor-sole-writer.md) | The SeatActor is the sole writer of seat state; one transaction per input | accepted |
 | [0033](0033-no-unrecorded-relaunch.md) | No relaunch or fresh start without a recorded decision | accepted |
+| [0034](0034-released-instance-host.md) | The released instance is one host process that runs the orchestrator and supervises the WSL node | accepted |
+| [0035](0035-local-api.md) | The CLI talks to the orchestrator through a loopback HTTP/JSON API with a token file | accepted |
+| [0036](0036-release-and-versioning-policy.md) | Releases are tagged from main with approval; versions are `0.<milestone>.<patch>` | accepted |
+| [0037](0037-team-pin-in-local-tool-manifest.md) | The team's release is pinned in the repository's local tool manifest | accepted |
+| [0038](0038-seat-attribution-under-shared-github-identity.md) | In M1, seats act under the maintainer's GitHub identity; attribution is by trailer and prefix | accepted |
