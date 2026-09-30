@@ -26,6 +26,12 @@ public sealed class TelemetryShutdownOptions
 internal sealed class TelemetryShutdownService(IServiceProvider services, IOptions<TelemetryShutdownOptions> options)
     : IHostedLifecycleService
 {
+    // Resolved when the service is created, so a host that failed to start (and whose container
+    // is already being disposed) can still be stopped without touching the service provider.
+    private readonly TracerProvider? tracer = services.GetService<TracerProvider>();
+    private readonly MeterProvider? meter = services.GetService<MeterProvider>();
+    private readonly LoggerProvider? logger = services.GetService<LoggerProvider>();
+
     public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -43,17 +49,17 @@ internal sealed class TelemetryShutdownService(IServiceProvider services, IOptio
         // Shutdown flushes pending data first. Each provider gets the bound and they run in parallel,
         // so the total stays near one bound.
         var flushes = new List<Task>(3);
-        if (services.GetService<TracerProvider>() is { } tracer)
+        if (tracer is not null)
         {
             flushes.Add(Task.Run(() => tracer.Shutdown(timeoutMs), CancellationToken.None));
         }
 
-        if (services.GetService<MeterProvider>() is { } meter)
+        if (meter is not null)
         {
             flushes.Add(Task.Run(() => meter.Shutdown(timeoutMs), CancellationToken.None));
         }
 
-        if (services.GetService<LoggerProvider>() is { } logger)
+        if (logger is not null)
         {
             flushes.Add(Task.Run(() => logger.Shutdown(timeoutMs), CancellationToken.None));
         }
