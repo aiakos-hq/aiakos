@@ -7,24 +7,31 @@ do not reopen them without writing a new ADR that supersedes the old one.
 
 ## Current stage
 
-**Stage A (manual).** There is no code yet. Work is done by a human with a single agent
-session. Milestone **M1** is the self-hosting threshold; after it, this repository is developed
-by an Aiakos-managed rig defined in [`rigs/aiakos-dev/`](rigs/aiakos-dev/).
+**Stage A (manual).** Work is done by a human with a single agent session. The only code so far
+is a placeholder `aiakos` .NET tool in [`src/Aiakos.Cli`](src/Aiakos.Cli/). It is published on
+nuget.org as `Aiakos` 0.0.1-preview.1 to reserve the ID (#6). Milestone **M1** is the
+self-hosting threshold; after it, this repository is developed by an Aiakos-managed rig defined
+in [`rigs/aiakos-dev/`](rigs/aiakos-dev/).
 
 **M0 (spikes) is done.** All five spikes are in [`docs/spikes/`](docs/spikes/): Claude Code in
 WSL tmux, session resume, Aspire launching a WSL node, the OpenCode API, and a Docker seat.
-Specs and code build on their findings.
 
-**Next up: the M1 specs**, in three waves that follow the dependencies:
-1. #9 (solution skeleton), #10 (orchestrator ↔ node gRPC contract) and #14 (rig file format).
-2. #11 (tmux session host), #12 (Claude Code adapter) and #13 (SeatActor).
-3. #15 (CLI) and #16 (the `aiakos-dev` rig, which is M1's acceptance test).
+**M1 specs:** waves 1 and 2 are accepted. These are specs 0001–0006 in [`docs/specs/`](docs/specs/),
+for #9, #10, #14, #11, #12 and #13. The decisions are in ADRs 0012–0033 in
+[`docs/adr/`](docs/adr/).
 
-Implementation of an issue starts once its spec is merged, beginning with #9. Specs go to
-`docs/specs/NNNN-*.md` from [`docs/specs/TEMPLATE.md`](docs/specs/TEMPLATE.md).
+**Next up, in parallel:**
+- **Wave 3 specs:** #15 (CLI) and #16 (the `aiakos-dev` rig, which is M1's acceptance test).
+- **Implementation of #9 (solution skeleton, spec 0001).** It adds CI and the commands below.
+
+Then implement #10, then #11/#12/#13, then #15, then #16. Implementation of an issue starts once
+its spec is merged. Before implementing an issue, check its rows in [`docs/risks.md`](docs/risks.md).
+Specs go to `docs/specs/NNNN-*.md` from [`docs/specs/TEMPLATE.md`](docs/specs/TEMPLATE.md).
 
 **Environment:** Windows 11 host; WSL2 distro `Ubuntu` (agents, tmux, Claude Code run there);
-Docker Desktop (`docker-desktop` WSL distro). Keep repos that agents edit on the WSL filesystem
+Docker Desktop (`docker-desktop` WSL distro) with **WSL integration enabled for `Ubuntu`**, so
+`docker` works inside WSL and WSL paths can be bind-mounted
+(see [spike 0005](docs/spikes/0005-docker-seat.md)). Keep repos that agents edit on the WSL filesystem
 when working inside WSL (performance, file watching); this repo itself is checked out on Windows.
 **WSL mirrored networking is required** for local development: `%USERPROFILE%\.wslconfig` must
 contain `[wsl2]` / `networkingMode=mirrored` (apply with `wsl --shutdown`). WSL and Windows then
@@ -76,7 +83,12 @@ Milestones `M0`–`M8` follow the roadmap in `docs/plan.md` §10.
 
 ## Commands
 
-No code yet. When the solution exists, build/test/run commands go here.
+The solution skeleton (#9) brings the build/test/run commands (see spec 0001). Until then, the
+only project is the placeholder tool:
+
+```bash
+dotnet pack src/Aiakos.Cli -c Release -o ./nupkg
+```
 
 ## Commits and PRs
 
