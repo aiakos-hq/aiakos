@@ -16,4 +16,5 @@ Commands run and their results (tests, manual demo against acceptance criteria).
 - [ ] Tests added/updated and passing
 - [ ] Docs under `docs/` updated
 - [ ] No new build warnings
+- [ ] Risk rows of the linked issue checked (`docs/risks.md`, "Open risks by issue"): list the IDs and their new status
 - [ ] Reviewer checked the exact diff against the acceptance criteria

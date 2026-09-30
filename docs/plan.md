@@ -100,10 +100,10 @@ The `aiakos.dev` workflow checks out both repos, renders docs via a `DocsPipelin
 
 | Component | Channel |
 |---|---|
-| Orchestrator | Container image; `aspire publish` → Docker Compose |
+| Orchestrator | M1: inside the `aiakos` tool, run in-process by the instance host on Windows ([ADR 0034](adr/0034-released-instance-host.md)); M6: container image, `aspire publish` → Docker Compose |
 | Node agent | Native-AOT binaries (GitHub Releases), baked into seat images |
 | Hook relay | POSIX `sh` script projected into each seat home (M1); native-AOT binary in seat images (M6) ([ADR 0028](adr/0028-hook-transport.md)) |
-| CLI | `dotnet tool` (NuGet) + binaries/winget/Homebrew |
+| CLI | `dotnet tool` (NuGet; the team pins it in `.config/dotnet-tools.json`, [ADR 0037](adr/0037-team-pin-in-local-tool-manifest.md)) + binaries/winget/Homebrew later; releases per [ADR 0036](adr/0036-release-and-versioning-policy.md) |
 | Extension SDK, templates | NuGet, only if/when opened to plugins |
 
 ---
@@ -224,6 +224,7 @@ A seat = **harness × session host × sandbox** (× node).
 | Database | **Postgres** from day one (row-level security, `SKIP LOCKED`, `LISTEN/NOTIFY`) |
 | Data access | **DbUp** (embedded `.sql` migrations) + **Dapper** (thin repositories) |
 | Orchestrator ↔ node | gRPC bidirectional stream, node dials out; Tailscale + node token |
+| CLI ↔ orchestrator | HTTP/JSON `/v1` on loopback with a bearer token file ([ADR 0035](adr/0035-local-api.md)) |
 | Session host | tmux ≥ 3.4 first (WSL/Linux), a private server per instance ([ADR 0022](adr/0022-private-tmux-server-per-instance.md), [ADR 0026](adr/0026-minimum-tmux-version.md)); herdr/tuios later (native Windows via ConPTY) |
 | Sandbox | Docker/nerdctl first; brig later |
 | Harnesses | Claude Code (M1, needed to self-host) → OpenCode (M2) → Codex |

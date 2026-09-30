@@ -1324,4 +1324,9 @@ Stable IDs; a central register links to them.
 
 ## Changes after acceptance
 
-*(none yet)*
+- **2026-10-01 — wave 3 amendment** (spec 0007 D15, accepted in review of PR #36):
+  - **D12 answered.** Spec 0007 adds the append-only `rig_revision` table and
+    `rig.current_revision_id` in its own migration, so every `spec_hash`/`binding_hash` a launch
+    used is stored with its resolved files. The API layer that resolves addresses, builds
+    `CallerContext` and sends `SeatEnvelope`s is spec 0007's local API
+    ([ADR 0035](../adr/0035-local-api.md)).

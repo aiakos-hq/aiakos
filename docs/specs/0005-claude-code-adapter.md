@@ -303,8 +303,9 @@ listed here change with it.
 - **R10** `ready_timeout` is 15 s and `confirm_timeout` is 5 s by default, both from the state
   profile. `terminal` is 160×45.
 - **R11** For `send`, the orchestrator half builds the lead `[aiakos from <sender> #<d>]`, followed
-  by one space. `<sender>` is the sender's address from `CallerContext` (rule 2) and `<d>` is the
-  first 8 hex characters of the delivery's `command_id`. It sets `expect_confirmation = true`. A body
+  by one space. `<sender>` is the sender from `CallerContext` (rule 2; in M1 the operator name, see
+  "Changes after acceptance") and `<d>` is the first 8 hex characters of the delivery's
+  `command_id`. It sets `expect_confirmation = true`. A body
   that is a single slash command gets an **empty** lead and `expect_confirmation = false`, and in M1
   it must be on the allowlist `{/compact}`; anything else is rejected with
   `SLASH_COMMAND_NOT_ALLOWED` (D13).
@@ -1051,4 +1052,7 @@ and which issue owns it.
 
 ## Changes after acceptance
 
-*(none yet)*
+- **2026-10-01 — wave 3 amendment** (spec 0007 D6, accepted in review of PR #36):
+  - **R11, `<sender>`.** In M1 the caller of `send` is the operator identified by the API token,
+    not a seat, so `<sender>` is the operator name from `CallerContext` (for example
+    `[aiakos from bsakel #1a2b3c4d]`). It becomes a seat address when M3 maps humans to seats.

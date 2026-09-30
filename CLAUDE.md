@@ -16,16 +16,16 @@ in [`rigs/aiakos-dev/`](rigs/aiakos-dev/).
 **M0 (spikes) is done.** All five spikes are in [`docs/spikes/`](docs/spikes/): Claude Code in
 WSL tmux, session resume, Aspire launching a WSL node, the OpenCode API, and a Docker seat.
 
-**M1 specs:** waves 1 and 2 are accepted. These are specs 0001–0006 in [`docs/specs/`](docs/specs/),
-for #9, #10, #14, #11, #12 and #13. The decisions are in ADRs 0012–0033 in
-[`docs/adr/`](docs/adr/).
+**M1 specs are all accepted.** Specs 0001–0008 in [`docs/specs/`](docs/specs/) cover #9, #10,
+#14, #11, #12, #13, #15 (CLI and the released instance) and #16 (the `aiakos-dev` rig and the M1
+acceptance procedure). The decisions are in ADRs 0012–0038 in [`docs/adr/`](docs/adr/).
 
-**Next up, in parallel:**
-- **Wave 3 specs:** #15 (CLI) and #16 (the `aiakos-dev` rig, which is M1's acceptance test).
-- **Implementation of #9 (solution skeleton, spec 0001).** It adds CI and the commands below.
-
-Then implement #10, then #11/#12/#13, then #15, then #16. Implementation of an issue starts once
-its spec is merged. Before implementing an issue, check its rows in [`docs/risks.md`](docs/risks.md).
+**Next up: implementation**, starting with #9 (solution skeleton, spec 0001), which adds CI and
+the commands below. Then #10, then #11/#12/#13, then #14 and #15, then cut release `0.1.0`
+(ADR 0036), then #16, whose acceptance run on the released tool closes M1 (spec 0008).
+Implementation of an issue starts once its spec is merged. Before implementing an issue, check
+its line in [`docs/risks.md` → Open risks by issue](docs/risks.md#open-risks-by-issue) and say in
+the PR which risks it checks or closes.
 Specs go to `docs/specs/NNNN-*.md` from [`docs/specs/TEMPLATE.md`](docs/specs/TEMPLATE.md).
 
 **Environment:** Windows 11 host; WSL2 distro `Ubuntu` (agents, tmux, Claude Code run there);
