@@ -16,3 +16,13 @@ ADR that supersedes the old one instead. Template: [`TEMPLATE.md`](TEMPLATE.md).
 | [0009](0009-work-management.md) | Tickets in GitHub Issues; specs and ADRs in the repository | accepted |
 | [0010](0010-apache-2-license.md) | Apache License 2.0 | accepted |
 | [0011](0011-aspire-for-local-development.md) | Aspire for local development and telemetry | accepted |
+| [0012](0012-tenant-keys.md) | Tenant keys are UUIDs with a unique slug; fixed default tenant | accepted |
+| [0013](0013-rig-file-header-and-compatibility.md) | Rig file header, strict fields and additive-only v1 | accepted |
+| [0014](0014-flat-seat-addresses.md) | Flat, rig-unique seat addresses; pods are grouping only | accepted |
+| [0015](0015-projection-outside-checkouts.md) | Guidance and skills are projected outside repository checkouts | accepted |
+| [0016](0016-secrets-as-node-file-references.md) | Secrets are node-local file references, delivered as files | accepted |
+| [0017](0017-resolved-rig-and-hashes.md) | Self-contained resolved rig with separate spec and binding hashes | accepted |
+| [0018](0018-harness-adapter-split.md) | Harness adapter split into orchestrator adapter and node driver | accepted |
+| [0019](0019-node-link-delivery-model.md) | Node link delivery model | accepted |
+| [0020](0020-node-contract-versioning.md) | Node contract versioning: package major, negotiated minor, capabilities | accepted |
+| [0021](0021-buf-for-proto-tooling.md) | buf for proto lint and breaking checks; Grpc.Tools for C# codegen | accepted |

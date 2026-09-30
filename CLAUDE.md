@@ -58,7 +58,8 @@ Milestones `M0`–`M8` follow the roadmap in `docs/plan.md` §10.
    silently start a fresh session).
 4. Terminals are transport, the database is the record.
 5. Host-specific concerns (terminals, sandboxes, harnesses, chat) stay behind interfaces
-   (`ISessionHost`, `ISandbox`, `IHarnessAdapter`, `ISeatChannel`, `IChatConnector`).
+   (`ISessionHost`, `ISandbox`, `IHarnessAdapter` on the orchestrator and `IHarnessDriver` on
+   the node (ADR 0018), `ISeatChannel`, `IChatConnector`).
 6. Every table has `tenant_id` from its first migration (single default tenant for now).
 7. Line endings are LF (see `.gitattributes`); code is edited both on Windows and in WSL.
 
