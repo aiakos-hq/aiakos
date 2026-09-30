@@ -100,7 +100,8 @@ The `aiakos.dev` workflow checks out both repos, renders docs via a `DocsPipelin
 | Component | Channel |
 |---|---|
 | Orchestrator | Container image; `aspire publish` → Docker Compose |
-| Node agent, hook relay | Native-AOT binaries (GitHub Releases), baked into seat images |
+| Node agent | Native-AOT binaries (GitHub Releases), baked into seat images |
+| Hook relay | POSIX `sh` script projected into each seat home (M1); native-AOT binary in seat images (M6) ([ADR 0028](adr/0028-hook-transport.md)) |
 | CLI | `dotnet tool` (NuGet) + binaries/winget/Homebrew |
 | Extension SDK, templates | NuGet, only if/when opened to plugins |
 
@@ -177,14 +178,17 @@ host files), and much of its process machinery is specific to its own agent-driv
 - **Node agent** owns the machine: sessions, sandboxes, files, probes, local event ingest.
   No business logic.
 - **SeatActor** is the single place a seat's truth lives; merges hook events, heartbeats,
-  sandbox events and pane liveness into the three state axes.
+  sandbox events and pane liveness into the three state axes
+  ([ADR 0031](adr/0031-three-axis-seat-state.md)). It is the only writer of seat state and
+  commits each input's events and conclusions in one transaction
+  ([ADR 0032](adr/0032-seat-actor-sole-writer.md)).
 
 ### Core interfaces
 ```csharp
 interface IHarnessAdapter  { Project(...); BuildLaunch(fresh|resume|fork); InterpretEvent(...); }   // orchestrator
 interface IHarnessDriver   { readiness; delivery + confirmation; resume verification; NormalizeEvent (raw payload forwarded); }   // node
 interface ISeatChannel     { SendAsync; Events; AnswerPermissionAsync; }   // API-driven or terminal-driven
-interface ISessionHost     { CreateAsync; SendTextAsync; SendKeysAsync; CaptureAsync; IsAliveAsync; EventsAsync; }
+interface ISessionHost     { StartAsync; DeliverAsync (lead + paste + submit + confirm); SendKeysAsync; CaptureAsync; GetStatusAsync; StopAsync; ListAsync/AdoptAsync; WatchAsync; }   // node
 interface ISandbox         { EnsureAsync; Wrap(cmd); Paths (PathMap); OrchestratorUrlFromInside; FileSystem; }
 interface ISeatProbe       { GetNativeSessionIdAsync; GetHarnessProcessAsync; }
 interface IChatConnector   { inbound messages; SendAsync; buttons/approvals; }
@@ -192,7 +196,8 @@ interface IChatConnector   { inbound messages; SendAsync; buttons/approvals; }
 Each harness has two halves ([ADR 0018](adr/0018-harness-adapter-split.md)): the orchestrator's
 `IHarnessAdapter` builds launches and interprets events into state; the node's `IHarnessDriver`
 handles readiness, delivery, confirmation and resume verification, and normalizes events while
-always forwarding the raw payload.
+always forwarding the raw payload. The session host never sends input on its own; delivery is
+one composite operation ([ADR 0023](adr/0023-no-self-initiated-input.md)).
 A seat = **harness × session host × sandbox** (× node).
 
 ### Two harness styles
@@ -218,11 +223,11 @@ A seat = **harness × session host × sandbox** (× node).
 | Database | **Postgres** from day one (row-level security, `SKIP LOCKED`, `LISTEN/NOTIFY`) |
 | Data access | **DbUp** (embedded `.sql` migrations) + **Dapper** (thin repositories) |
 | Orchestrator ↔ node | gRPC bidirectional stream, node dials out; Tailscale + node token |
-| Session host | tmux first (WSL/Linux); herdr/tuios later (native Windows via ConPTY) |
+| Session host | tmux ≥ 3.4 first (WSL/Linux), a private server per instance ([ADR 0022](adr/0022-private-tmux-server-per-instance.md), [ADR 0026](adr/0026-minimum-tmux-version.md)); herdr/tuios later (native Windows via ConPTY) |
 | Sandbox | Docker/nerdctl first; brig later |
 | Harnesses | Claude Code (M1, needed to self-host) → OpenCode (M2) → Codex |
 | Agent-facing API | MCP server (official C# SDK, HTTP transport) + `aiakos` CLI in seat images |
-| Hook relay | tiny native-AOT binary or curl, fire-and-forget to node agent |
+| Hook relay | POSIX `sh` script (curl + flock) to the node's loopback ingest, always exits 0, per-seat `source_seq`; native-AOT binary deferred to M6 ([ADR 0028](adr/0028-hook-transport.md)) |
 | Spec format | YAML (YamlDotNet) + JSON Schema for editor validation |
 | CLI | System.CommandLine |
 | UI | Blazor (interactive server) + SignalR |
@@ -353,11 +358,17 @@ Signal sources, most to least authoritative:
 4. **Sandbox events** — Docker Engine API (die/OOM/restart, stats) or brig/containerd status.
 5. **Session host** — pane alive/exited, capture as evidence, herdr/tuios state as cross-check.
 
-SeatActor merges them: hook events win (sequence numbers); heartbeat timeout ⇒ `unknown`;
-sandbox death ⇒ `exited`; disagreement ⇒ health finding, never a guess.
+SeatActor merges them: hook events win (sequence numbers); heartbeat timeout ⇒ reported
+`unknown` (an overlay over the last-known values, [ADR 0031](adr/0031-three-axis-seat-state.md));
+sandbox death ⇒ `exited`; disagreement ⇒ health finding, never a guess. Pane text only explains
+an outcome, it never triggers input ([ADR 0030](adr/0030-screen-classification-never-acts.md)).
+An unexpected exit becomes a finding; a relaunch or fresh start always needs a recorded
+decision, and automatic restarts wait for the M7 watchdogs
+([ADR 0033](adr/0033-no-unrecorded-relaunch.md)).
 
 Sandbox specifics: hook config projected into the per-seat home volume; hooks POST to the node
-agent (`host.docker.internal` / bridge IP); per-seat token; egress allowlist; seat homes kept on
+agent (`host.docker.internal` / bridge IP); per-seat token as a file
+([ADR 0025](adr/0025-secrets-never-through-tmux.md)); egress allowlist; seat homes kept on
 the host so the node agent can read session files directly.
 
 ### brig (later `ISandbox`)
