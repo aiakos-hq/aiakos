@@ -1,7 +1,7 @@
 ---
 id: 0004
 title: "Node agent: tmux session host"
-status: draft            # draft | accepted | implemented | superseded
+status: accepted         # draft | accepted | implemented | superseded
 issue: https://github.com/aiakos-hq/aiakos/issues/11
 milestone: M1
 owner: "@bsakel"
@@ -24,6 +24,8 @@ Decisions this spec implements (not reopened here):
   capture is evidence, never a state signal.
 - [ADR 0004](../adr/0004-orchestrator-node-split.md): the node owns the machine (sessions,
   processes) and has no business logic. The orchestrator never touches tmux.
+- [ADR 0018](../adr/0018-harness-adapter-split.md): harness mechanics on the node live in an
+  `IHarnessDriver`; this spec's session host is what that driver drives.
 - CLAUDE.md rules 3 (honest state: `unknown` is a valid answer, no silent fallbacks), 4 (terminals
   are transport, the database is the record) and 5 (host-specific concerns behind interfaces).
 - [Plan §3](../plan.md#3-architecture) (the `ISessionHost` sketch; a seat = harness × session host
@@ -42,63 +44,64 @@ Evidence from the M0 spikes:
 
 ### Depends on wave 1 decisions
 
-These decisions come from draft specs that are still in review. If one changes, the listed parts of
-this spec change with it.
+These decisions come from the wave 1 specs 0001–0003 (accepted). The IDs `W1`–`W21` let a later
+change to one of them be traced to the parts of this spec that depend on it.
 
 - **Spec 0001 (solution skeleton)**
-  - D1: the tmux socket is named after the instance, `tmux -L aiakos-<instance>` (dev:
+  - W1: the tmux socket is named after the instance, `tmux -L aiakos-<instance>` (dev:
     `aiakos-dev`, released: `aiakos-release`) → R6, [Server and socket](#server-socket-and-configuration).
-  - D2: the node has a per-instance `AIAKOS_HOME` and a single-instance lock (`node.lock`, R38) →
+  - W2: the node has a per-instance `AIAKOS_HOME` and a single-instance lock (`node.lock`, R38) →
     the registry location (R31) and "one node process writes the registry".
-  - D3: the node treats SIGHUP as a graceful stop (R36) → R35 (node shutdown never stops seats).
-  - D4: `ISessionHost` exists as an empty placeholder in `Aiakos.Core` (R43), and later specs may
+  - W3: the node treats SIGHUP as a graceful stop (R36) → R35 (node shutdown never stops seats).
+  - W4: `ISessionHost` exists as an empty placeholder in `Aiakos.Core` (R43), and later specs may
     move it → R1 moves it into `Aiakos.Node`.
-  - D5: `Aiakos.Node` is AOT-compatible and must not reference orchestrator code (R40) → P/Invoke
+  - W5: `Aiakos.Node` is AOT-compatible and must not reference orchestrator code (R40) → P/Invoke
     through `LibraryImport`, source-generated JSON.
-  - D6: telemetry uses `ActivitySource`/`Meter` `Aiakos.Node` (R42) → R40.
-  - D7: opt-in tests follow the `AIAKOS_E2E_WSL=1` pattern with xUnit v3 dynamic skip → the
+  - W6: telemetry uses `ActivitySource`/`Meter` `Aiakos.Node` (R42) → R40.
+  - W7: opt-in tests follow the `AIAKOS_E2E_WSL=1` pattern with xUnit v3 dynamic skip → the
     `AIAKOS_TEST_TMUX=1` switch in the test plan.
-  - D8: the node's own environment contains `AIAKOS_NODE_TOKEN` and `OTEL_*` → R9 (the tmux server
+  - W8: the node's own environment contains `AIAKOS_NODE_TOKEN` and `OTEL_*` → R9 (the tmux server
     must not inherit them).
 - **Spec 0002 (gRPC contract)**
-  - D9: the command set `StartSeat` / `DeliverInput` / `SendKeys` / `CapturePane` / `StopSeat`, with
+  - W9: the command set `StartSeat` / `DeliverInput` / `SendKeys` / `CapturePane` / `StopSeat`, with
     per-seat serialization of the first three and a bypass for capture and stop (R16) → R17, R24, R26.
-  - D10: `DeliverInput` = one-line `lead` + `body` (≤ 1 MiB), outcomes `CONFIRMED` /
+  - W10: `DeliverInput` = one-line `lead` + `body` (≤ 1 MiB), outcomes `CONFIRMED` /
     `SUBMITTED_UNCONFIRMED` / `NOT_DELIVERED`, `SEAT_BUSY`, and **at-most-once** resend (R18, R22,
     R38) → R14–R20.
-  - D11: the `SendKeys` allowlist (`Enter`, `Escape`, `Tab`, arrows, `C-c`, `C-d`), for humans only
+  - W11: the `SendKeys` allowlist (`Enter`, `Escape`, `Tab`, arrows, `C-c`, `C-d`), for humans only
     (R23) → R21.
-  - D12: `CapturePane` = visible pane + up to `history_lines`, plain text, ≤ 1 MiB, `truncated`,
+  - W12: `CapturePane` = visible pane + up to `history_lines`, plain text, ≤ 1 MiB, `truncated`,
     `pane_dead` (R24, R38) → R22–R24.
-  - D13: `StopSeat` = graceful, wait `grace`, then kill; outcomes `STOPPED` / `KILLED` /
+  - W13: `StopSeat` = graceful, wait `grace`, then kill; outcomes `STOPPED` / `KILLED` /
     `NOT_RUNNING` (R25) → R25.
-  - D14: `ProcessExited` with `optional` exit code and signal, source `PANE_DEAD` (R37);
+  - W14: `ProcessExited` with `optional` exit code and signal, source `PANE_DEAD` (R37);
     `SessionLifecycle.UNKNOWN` for a pane found after a node restart; `ObservationGap{NODE_RESTARTED}`
     (R33) → R29–R33.
-  - D15: "Assumptions for dependent specs", #11 part: a launch registry in the node home, pane death
+  - W15: "Assumptions for dependent specs", #11 part: a launch registry in the node home, pane death
     with exit status (`remain-on-exit`), plain-text capture, capture/stop while a launch waits → R31,
     R12, R22, R24, R26.
-  - D16: seats unknown to the orchestrator are a health finding and are never stopped automatically
-    (Q9) → R33.
-  - D17: error reasons `SESSION_HOST_ERROR`, `ORPHAN_HARNESS_DETECTED`, `SEAT_ALREADY_RUNNING`,
+  - W16: seats unknown to the orchestrator are a health finding and are never stopped automatically
+    (spec 0002 D9) → R33.
+  - W17: error reasons `SESSION_HOST_ERROR`, `ORPHAN_HARNESS_DETECTED`, `SEAT_ALREADY_RUNNING`,
     `PAYLOAD_TOO_LARGE`, `UNSUPPORTED` → [Mapping to spec 0002](#mapping-to-spec-0002).
-  - D18: the per-seat token reaches the harness through the pane environment in M1 (R45). **This
-    spec proposes changing that** (Q1).
-  - D19: `StartSeat.seat_address` is `member@rig` and `StartSeat.terminal` carries the size.
+  - W18: the per-seat token reaches the harness (R45). As first written, R45 put it in the pane
+    environment; this spec's decision D1 changes that to a file, and R45 is amended accordingly.
+  - W19: `StartSeat.seat_address` is `member@rig` and `StartSeat.terminal` carries the size.
 - **Spec 0003 (rig file format)**
-  - D20: identifier patterns: rig `^[a-z][a-z0-9-]{1,39}$`, seat `^[a-z][a-z0-9-]{0,23}$` → the
+  - W20: identifier patterns: rig `^[a-z][a-z0-9-]{1,39}$`, seat `^[a-z][a-z0-9-]{0,23}$` → the
     session name `<rig>_<seat>` (R7).
-  - D21: seat directory `<seat_root>/<rig>/<seat>` and the workdir are computed upstream and arrive
+  - W21: seat directory `<seat_root>/<rig>/<seat>` and the workdir are computed upstream and arrive
     as absolute paths; creating worktrees is a workspace step before the session host is called
-    (spec 0002 Q6), not part of it.
+    (spec 0002 D6), not part of it.
 
-### Neighbouring specs (written in parallel)
+### Neighbouring specs
 
 - **Spec 0005 (#12, Claude Code adapter)** owns everything Claude-specific: argv (`--session-id`,
   `--resume`, `--settings`), readiness via the `SessionStart` hook, the lead-line text, the trust
   prompt, resume verification, what counts as a confirmation (`UserPromptSubmit`), and the hook
   relay/ingest. This spec provides the mechanics it needs; the contract is in
-  [Contract with the harness driver](#contract-with-the-harness-driver).
+  [Contract with the harness driver](#contract-with-the-harness-driver) (Claude Code's
+  `IHarnessDriver`, ADR 0018).
 - **Spec 0006 (#13, SeatActor)** owns state derivation. The session host reports observations
   (alive, exited with code, vanished); it never decides `working`/`idle`/`needs-input`.
 
@@ -142,33 +145,38 @@ this spec change with it.
 
 - **R1** `ISessionHost` and its types live in `Aiakos.Node`, namespace `Aiakos.Node.Sessions`. The
   empty placeholder in `Aiakos.Core` (spec 0001 R43) is removed, because only the node uses it
-  (ADR 0004). The members are those in [Interface](#interface); plan §3's one-line sketch is
+  (ADR 0004; D8). The members are those in [Interface](#interface); plan §3's one-line sketch is
   updated in the implementation PR.
 - **R2** The interface is harness-neutral: no member or type names a harness, a hook or a harness
   screen. Harness-specific behaviour enters only through values and callbacks supplied by the
-  harness driver (argv, environment, `IDeliveryConfirmer`, `IOrphanProbe`, `GracefulStop`).
+  harness's `IHarnessDriver` (ADR 0018): argv, environment, `IDeliveryConfirmer`,
+  `IOrphanProbe`, `GracefulStop`.
 - **R3** The session host **never sends input on its own initiative**: no key, no text, no Enter on
   startup, on a timeout, on an unknown screen or during adoption. Every byte written to a pane is
   the result of an explicit `DeliverAsync`, `SendKeysAsync` or a confirmer's `ResubmitAsync`
-  (spike 0002 F3, spike 0001 pitfall 6).
+  (spike 0002 F3, spike 0001 pitfall 6; [ADR 0023](../adr/0023-no-self-initiated-input.md)).
 - **R4** Operations that fail before touching a pane throw `SessionHostException` with a
   `SessionHostErrorCode` (see [Errors](#errors)). `DeliverAsync` and `StopAsync` return a report
   instead of throwing once they have changed the pane, so partial progress is never lost.
 
 ### tmux, server and naming
 
-- **R5** tmux **3.4 or later** is required. At node start the host runs `tmux -V`, parses
+- **R5** tmux **3.4 or later** is required: the oldest version CI tests on (D9,
+  [ADR 0026](../adr/0026-minimum-tmux-version.md)). At node start the host runs `tmux -V`, parses
   `tmux <major>.<minor>[suffix]`, and records the version. A lower or unparseable version, or no
   tmux binary, makes the host `Unavailable`: it does not advertise capability
   `session-host.tmux`, every operation throws `Unavailable` with the found version and the
   requirement in the message, and the node keeps running (rule 3; M2 API-driven seats do not need
   tmux). The tmux binary path is configurable (`Aiakos:Node:SessionHost:TmuxPath`, default: the
   first `tmux` on `PATH`, resolved once at start and logged).
-- **R6** Every tmux invocation uses the instance socket `-L aiakos-<instance>` (D1), the node's
+- **R6** Every tmux invocation uses the instance socket `-L aiakos-<instance>` (W1), the node's
   generated configuration `-f $AIAKOS_HOME/tmux/tmux.conf` and `-u` (UTF-8). The user's
-  `~/.tmux.conf` is therefore never loaded into the node's server.
+  `~/.tmux.conf` is therefore never loaded into the node's server. The node owns this private
+  server per instance, and sessions outlive the node
+  ([ADR 0022](../adr/0022-private-tmux-server-per-instance.md)). The socket stays `-L`, not `-S`
+  (D7).
 - **R7** One tmux session per seat, named `<rig>_<seat>` from the seat address `<seat>@<rig>`
-  (D20; `_` cannot occur in either identifier, and tmux forbids `.` and `:` in session names).
+  (W20; `_` cannot occur in either identifier, and tmux forbids `.` and `:` in session names).
   An address that does not match the 0003 patterns is rejected with `InvalidArgument`. Targets are
   always the pane ID (`%N`) returned at creation; a session name is only used as an exact target
   (`-t '=<name>'`).
@@ -181,11 +189,12 @@ this spec change with it.
   (`HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH`, `TMUX_TMPDIR`, `XDG_RUNTIME_DIR`, and `LANG=C.UTF-8`
   when `LANG`/`LC_ALL` are unset or not UTF-8), never the node's full environment. Since the first
   client starts the server and the server's global environment becomes every pane's base
-  environment, this keeps `AIAKOS_NODE_TOKEN`, `OTEL_*` and `DOTNET_*` out of every pane (D8). At
+  environment, this keeps `AIAKOS_NODE_TOKEN`, `OTEL_*` and `DOTNET_*` out of every pane (W8). At
   node start, if a server already runs, the host removes any global variable outside the allowlist
   (`set-environment -g -u`) and logs each name it removed.
 - **R10** The generated `tmux.conf` sets at least: `remain-on-exit on`, `history-limit 10000`,
-  `window-size manual`, `update-environment ""`, `allow-rename off`, `automatic-rename off`. The
+  `window-size manual` (D6: an attaching human never resizes the seat; the size comes from
+  `StartSeat.terminal`), `update-environment ""`, `allow-rename off`, `automatic-rename off`. The
   node rewrites it at every start; when a server is already running, the node applies the same
   options with `set-option -g` so an old server converges.
 
@@ -199,7 +208,7 @@ this spec change with it.
     another directory when `-c` does not exist; rule 3);
   - `Environment` names match `^[A-Z_][A-Z0-9_]*$`, values contain no NUL or newline, names are not
     reserved (`TMUX`, `TMUX_PANE`, `AIAKOS_NODE_*`), and no name contains `TOKEN`, `SECRET`,
-    `PASSWORD` or `API_KEY` (secrets never go through tmux: R38, Q1);
+    `PASSWORD` or `API_KEY` (secrets never go through tmux: R38, D1);
   - the packed size of argv plus environment is at most 12 KiB (tmux sends a command to its
     server in one message of about 16 KiB; larger configuration belongs in projected files);
   - `Size` is within 80–500 columns and 24–200 rows.
@@ -212,7 +221,8 @@ this spec change with it.
   with the running launch ID (spec 0002 R20: never kill a running seat to satisfy a start); if the
   pane is dead, emit its `PaneExited` event if not yet emitted, remove the session, and continue.
   If the driver supplied an `IOrphanProbe` and a matching process runs outside every live managed
-  pane, throw `OrphanDetected` with the PIDs (spike 0005 F4). `StartAsync` returns after the pane
+  pane, throw `OrphanDetected` with the PIDs (spike 0005 F4). The probe runs at start only (D11).
+  `StartAsync` returns after the pane
   exists and is labelled; it does not wait for readiness.
 
 ### Delivery
@@ -225,8 +235,8 @@ this spec change with it.
   deleted.
 - **R15** The body is pasted as **one** bracketed paste, never split into several pastes (the
   harness would see several pastes, and could act on a partial one). The host streams it to tmux's
-  stdin in 64 KiB writes; that is the only chunking. The body limit is 1 MiB of UTF-8 (D10); larger
-  is `PayloadTooLarge`.
+  stdin in 64 KiB writes; that is the only chunking. The body limit is 1 MiB of UTF-8 (W10, D3);
+  larger is `PayloadTooLarge`. AC3 proves the limit (RK1).
 - **R16** Input validation, with rejection (`InputNotAllowed`) rather than silent repair, except for
   line endings:
   - Lead: at most 1 KiB of UTF-8, one line, no C0 control characters, DEL or C1 controls. A lead
@@ -269,7 +279,7 @@ this spec change with it.
   Trailing whitespace is trimmed per line and trailing empty lines are dropped; invalid UTF-8 is
   replaced with U+FFFD; control characters other than LF and TAB are removed. Wrapped lines are
   kept as displayed (no `-J`), so the text matches what a human sees.
-- **R23** The text is capped at `MaxBytes` (default and maximum 1 MiB, D12). When over the cap,
+- **R23** The text is capped at `MaxBytes` (default and maximum 1 MiB, W12). When over the cap,
   the **oldest** lines are dropped first, the visible screen is always kept whole, and `Truncated`
   is set.
 - **R24** A snapshot also reports the pane size, the cursor position, whether the pane is dead and
@@ -278,7 +288,7 @@ this spec change with it.
 
 ### Stop and process tree
 
-- **R25** `StopAsync(handle, StopRequest)`:
+- **R25** `StopAsync(handle, StopRequest)` ([ADR 0024](../adr/0024-process-tree-stop.md)):
   1. If the pane is dead or gone: outcome `NotRunning`, with the recorded exit status.
   2. Snapshot the pane's process tree: the pane PID and all descendants (walking `/proc` parent
      links), plus every process whose session ID equals the pane PID; each identified by PID and
@@ -306,22 +316,26 @@ this spec change with it.
   `Missing` (the session or pane is gone, for example the server was killed) or `Unknown` (tmux
   did not answer within its timeout, with the reason). `Missing` and `Unknown` are distinct: a
   timeout is never reported as dead or alive.
-- **R29** A watcher polls `list-panes -a` every 1 s (configurable) and publishes
+- **R29** A watcher polls `list-panes -a` every 1 s (configurable; D2) and publishes
   `PaneExited{exit_code?, signal?}` exactly once per launch when a managed pane turns dead, and
   `SessionVanished` when a managed session disappears without being stopped. Exit code and signal
   come from `#{pane_dead_status}` / `#{pane_dead_signal}`; an empty value means "unknown" and is
-  reported as absent, never as 0 (D14).
+  reported as absent, never as 0 (W14). A dead pane (screen and exit status) is kept until the
+  seat is started or stopped again (D4).
 - **R30** A tmux invocation that times out or fails does not produce an event; the watcher marks
-  the host degraded (metric and log) and retries on the next tick.
+  the host degraded (metric and log) and retries on the next tick. If tmux answers "no server
+  running" while the registry lists running sessions and a tmux server process for this socket
+  name still exists (its socket file was deleted, for example by a `/tmp` cleaner), the host sends
+  that server `SIGUSR1` once, which makes tmux recreate the socket, and logs it (D7).
 
 ### Registry, restart and adoption
 
 - **R31** The host keeps a launch registry in `$AIAKOS_HOME/sessions/` (directory `0700`), one JSON
-  file per seat (`<rig>_<seat>.json`, mode `0600`), written atomically (temp file, `fsync`,
+  file per seat (D5) (`<rig>_<seat>.json`, mode `0600`), written atomically (temp file, `fsync`,
   rename). The entry is written **before** `new-session` with state `starting`, and updated to
   `running` with the tmux IDs, pane PID and pane start time once the pane exists. It also holds
   the caller's opaque `Attributes` (for example the native session ID and the seat token hash
-  that spec 0002 D15 needs for hook attribution; never a token). The entry is deleted when the
+  that hook attribution needs, W15; never a token). The entry is deleted when the
   session is removed.
 - **R32** `ListAsync` joins the tmux listing with the registry and classifies each session on the
   socket:
@@ -333,13 +347,13 @@ this spec change with it.
   and each registry entry without a session as `Vanished`.
 - **R33** On node start the host reconciles once, before the node sends `Hello`:
   - `Managed` and alive → adopted: the handle is restored and watched; the seat is reported with
-    lifecycle `UNKNOWN` (D14) because readiness cannot be re-established from the pane;
+    lifecycle `UNKNOWN` (W14) because readiness cannot be re-established from the pane;
   - `Managed` and dead → adopted and `PaneExited` is emitted with the recorded status;
   - `Vanished` → `SessionVanished` is emitted (exit code absent) and the entry is kept until the
     orchestrator stops or restarts the seat;
   - `ManagedUnregistered` → adopted read-only (status, capture, stop only; `DeliverAsync` throws
     `NotFound`), reported under its labelled seat ID so the orchestrator raises the health finding
-    (D16);
+    (W16);
   - `Foreign` → never touched; logged with its name and counted in a metric.
   Nothing is stopped, killed or sent keys during reconciliation.
 - **R34** `AdoptAsync` restores a handle only after verifying the pane PID's start time against the
@@ -359,7 +373,11 @@ this spec change with it.
   ("no server running", "can't find session/pane", "duplicate session"); unclassified stderr is
   kept (truncated to 1 KiB) in the error.
 - **R38** Secret values never pass through the session host: not in argv, not in `-e`, not in
-  labels, not in the registry, not in logs or traces. `SessionSpec` has no field for them.
+  labels, not in the registry, not in logs or traces. `SessionSpec` has no field for them
+  ([ADR 0025](../adr/0025-secrets-never-through-tmux.md)). The per-seat token reaches the harness
+  as a file (D1): the node writes it with mode `0600` under the seat home before `StartAsync`
+  (spec 0002 `SeatSecret.file_path`), and the pane environment carries only its path in the
+  non-secret variable `AIAKOS_SEAT_TOKEN_FILE`, which the hook relay reads (spec 0005).
 
 ### Observability and testing
 
@@ -370,6 +388,8 @@ this spec change with it.
 - **R41** `FakeSessionHost` (in-memory, in a test-support project) implements `ISessionHost` with
   the same validation, gate, stage and status semantics, and a shared contract test suite runs
   against both the fake and real tmux so the two cannot drift.
+- **R42** The real-tmux integration tests are opt-in locally (`AIAKOS_TEST_TMUX=1`), and the Linux
+  CI job installs tmux and sets the variable from the implementation PR on (D10).
 
 ## Design
 
@@ -528,8 +548,8 @@ only processes of its own UID and excludes every process in a live managed pane'
 
 | Spec 0002 | Session host |
 |---|---|
-| `StartSeat` (after workspace and files are prepared) | `StartAsync`; `AlreadyRunning` → `SEAT_ALREADY_RUNNING`; `OrphanDetected` → `ORPHAN_HARNESS_DETECTED`; `PayloadTooLarge` → `PAYLOAD_TOO_LARGE`; `InvalidArgument` → `INVALID_ARGUMENT` (reason `INVALID_LAUNCH`, proposed); `Unavailable` → `SESSION_HOST_UNAVAILABLE` (proposed); tmux errors → `SESSION_HOST_ERROR` |
-| `DeliverInput` | `DeliverAsync`. `Submitted` + `Confirmed` → `CONFIRMED` (turn ID); `Submitted` + `Unconfirmed`/`NotRequested` → `SUBMITTED_UNCONFIRMED`; stage `None`/`BufferLoaded` → `NOT_DELIVERED`, retryable; stage `LeadTyped`/`BodyPasted` with an error → status `FAILED`, `SESSION_HOST_ERROR`, `metadata.stage`, not retryable; `Busy` → `SEAT_BUSY`; `InputNotAllowed` → `INPUT_NOT_ALLOWED` (proposed) |
+| `StartSeat` (after workspace and files are prepared) | `StartAsync`; `AlreadyRunning` → `SEAT_ALREADY_RUNNING`; `OrphanDetected` → `ORPHAN_HARNESS_DETECTED`; `PayloadTooLarge` → `PAYLOAD_TOO_LARGE`; `InvalidArgument` → `INVALID_ARGUMENT` (reason `INVALID_LAUNCH`); `Unavailable` → `SESSION_HOST_UNAVAILABLE`; tmux errors → `SESSION_HOST_ERROR` |
+| `DeliverInput` | `DeliverAsync`. `Submitted` + `Confirmed` → `CONFIRMED` (turn ID); `Submitted` + `Unconfirmed`/`NotRequested` → `SUBMITTED_UNCONFIRMED`; stage `None`/`BufferLoaded` → `NOT_DELIVERED`, retryable; stage `LeadTyped`/`BodyPasted` with an error → status `FAILED`, `SESSION_HOST_ERROR`, `metadata.stage`, not retryable; `Busy` → `SEAT_BUSY`; `InputNotAllowed` → `INPUT_NOT_ALLOWED` |
 | `SendKeys` | `SendKeysAsync`; the wire key names map 1:1 onto `NamedKey` |
 | `CapturePane` | `CaptureAsync(history_lines, 1 MiB)`; `PaneSnapshot` → `PaneCapture{text, truncated, captured_at, size, pane_dead}` |
 | `StopSeat` | `StopAsync(grace)`; `Stopped`/`Killed`/`NotRunning` → `STOP_OUTCOME_*`; `LeftoverProcesses` → `SESSION_HOST_ERROR` with the PIDs in `metadata` |
@@ -537,15 +557,14 @@ only processes of its own UID and excludes every process in a live managed pane'
 | `Hello.seats` | registry + reconciliation (R33): adopted live → `UNKNOWN`, dead/vanished → `EXITED` |
 | `ObservationGap{NODE_RESTARTED}` | emitted by the node for every adopted seat (the host reports adoption; the node emits the gap) |
 
-**Proposed additions to spec 0002** (additive, catalogue of reasons): `INPUT_NOT_ALLOWED`
-(`INVALID_ARGUMENT`), `INVALID_LAUNCH` (`INVALID_ARGUMENT`), `SESSION_HOST_UNAVAILABLE`
-(`FAILED_PRECONDITION`, not retryable), and the capability string `session-host.tmux`. If 0002
-prefers to keep its catalogue closed, the fallbacks are `INVALID_ARGUMENT`/`UNSUPPORTED` with the
-detail in `message`.
+**Additions to spec 0002** (additive, accepted in review and applied to spec 0002's catalogue):
+`INPUT_NOT_ALLOWED` (`INVALID_ARGUMENT`), `INVALID_LAUNCH` (`INVALID_ARGUMENT`),
+`SESSION_HOST_UNAVAILABLE` (`FAILED_PRECONDITION`, not retryable), and the capability string
+`session-host.tmux`.
 
 ### Server, socket and configuration
 
-- Socket: `-L aiakos-<instance>` (D1), so the path is `$TMUX_TMPDIR/tmux-<uid>/aiakos-<instance>`
+- Socket: `-L aiakos-<instance>` (W1), so the path is `$TMUX_TMPDIR/tmux-<uid>/aiakos-<instance>`
   (default `/tmp/tmux-<uid>/…`, directory mode 0700, created by tmux). The dev stack and the
   released tool never see each other's sessions.
 - The server is started implicitly by the first `new-session` with `-f` (R6); nothing else starts
@@ -599,7 +618,7 @@ single `ArgumentList` elements; nothing is joined or quoted.
 sequenceDiagram
     autonumber
     participant X as Command executor (node)
-    participant D as Harness driver (spec 0005)
+    participant D as IHarnessDriver (spec 0005)
     participant H as TmuxSessionHost
     participant T as tmux server
     participant P as Harness in pane
@@ -632,10 +651,11 @@ happens while the pane is still untouched and the delivery can be retried safely
 
 ### Contract with the harness driver
 
-The node-side harness driver (spec 0002 Q1; for Claude Code, spec 0005) and the session host
+The node-side harness driver, `IHarnessDriver` ([ADR 0018](../adr/0018-harness-adapter-split.md);
+for Claude Code, spec 0005), and the session host
 divide the work like this:
 
-| Concern | Harness driver provides / decides | Session host guarantees |
+| Concern | `IHarnessDriver` provides / decides | Session host guarantees |
 |---|---|---|
 | Launch | absolute argv (fresh/resume/fork), cwd, non-secret env (`AIAKOS_SEAT`, hook URL, …), size, attributes for the registry, orphan probe | exact argv without a shell (R12), labels and registry (R8, R31), refusal of a live or orphaned seat (R13) |
 | Readiness | the rule (Claude: `SessionStart` for this launch) and its timeout; may call `CaptureAsync` for a prompt check or evidence | never sends keys while waiting (R3); capture and stop work during the wait (R24, R26) |
@@ -676,7 +696,7 @@ pane is dead, so `PaneExited` is emitted exactly once even across node restarts.
 
 - `/proc` is read directly (`stat` for PID, parent PID, session ID and start time; `cmdline` for
   argv). Only processes of the node's UID are considered.
-- `kill(2)` is called through `LibraryImport` (AOT-safe, D5). Immediately before each signal the
+- `kill(2)` is called through `LibraryImport` (AOT-safe, W5). Immediately before each signal the
   host re-reads the start time; a mismatch means the PID was reused and the process is skipped.
 - Process groups are not used for targeting: children of a harness can create their own groups
   or sessions (spike 0005's in-container case is the extreme). The snapshot of descendants taken
@@ -795,6 +815,10 @@ Metrics (`Meter` `Aiakos.Node`):
   Aspire dashboard and start it again; `tmux -L aiakos-dev ls` shows the seat's session throughout,
   the node log shows "adopted aiakos-dev_impl (alive)", and `Hello.seats` reports it with
   lifecycle `UNKNOWN`.
+- [ ] AC16 — With a managed session running, deleting the socket file
+  (`rm $TMUX_TMPDIR/tmux-<uid>/<socket>`) makes the next watcher tick send `SIGUSR1` to that
+  server once; afterwards `tmux -L <socket> ls` lists the session again and no `SessionVanished`
+  was published.
 
 ## Test plan
 
@@ -829,7 +853,8 @@ otherwise; Linux or WSL with tmux ≥ 3.4):
   can also print scripted output, trap or ignore SIGTERM, spawn a `setsid` grandchild and exit
   with a given code. Real Claude Code is only in the manual demo (it needs a login).
 - The same `SessionHostContractTests` run against `TmuxSessionHost`.
-- AC2–AC13 as individual tests.
+- AC2–AC13 and AC16 as individual tests.
+- Opt-in locally; the Linux CI job installs tmux and sets `AIAKOS_TEST_TMUX=1` (R42, D10).
 
 **Manual demo** (WSL, together with spec 0005): AC15, plus: attach read-only with the command from
 `GetAttachCommand` and watch a delivery arrive; `aiakos down` leaves no `claude` process
@@ -837,81 +862,103 @@ otherwise; Linux or WSL with tmux ≥ 3.4):
 
 ## Risks and open questions
 
-Each question has a recommendation; the reviewer confirms or changes it before `accepted`.
+No questions remain open. The review on PR #28 accepted every recommendation; the outcomes are
+folded into the requirements and design above.
 
-- **Q1 — How does the per-seat token reach the harness?** Spec 0002 R45 puts it in the pane
-  environment (D18), but `-e` makes it part of the tmux client's argv (readable in `/proc`), and
-  `set-environment` would store it in the server. *Recommendation:* in M1 too, deliver it as a
-  file (`SeatSecret.file_path`, mode 0600 under the seat home), and let the hook relay read it from
-  the file named by a non-secret variable (`AIAKOS_SEAT_TOKEN_FILE`). That is also the M6
-  mechanism (spike 0005), so there is one path. Requires a small change to 0002 R45 and to spec
-  0005's relay. If 0002 keeps the environment variable, the fallback is tmux's
-  `update-environment` (the token travels in the client's environment, never its argv), which
-  needs a short verification first.
-- **Q2 — How are pane deaths detected?** Options: poll `list-panes -a`; a `pane-died` tmux hook
-  (runs a shell command); tmux control mode (`-C`, a long-lived client that streams events).
-  *Recommendation:* poll every 1 s in M1 (one cheap process per second per node, no shell, no
-  long-lived client to supervise). Revisit control mode in M5/M7 if latency or process churn
-  matters.
-- **Q3 — Is 1 MiB in one bracketed paste safe?** Spike 0001 verified 28 KB. *Recommendation:* keep
-  the 1 MiB contract (D10) and let AC3 prove it with the fake harness. If tmux or the pty fails
-  below that, lower the host limit to the verified size and advertise it in `Hello.limits`
-  (additive field in 0002). Whether Claude Code handles a very large paste well is spec 0005's
-  question; its guidance should prefer file paths for large content anyway.
-- **Q4 — What happens to dead panes?** *Recommendation:* keep each dead pane (screen and exit
-  status) until the seat is started or stopped again, so the evidence is there when a human looks.
-  Only one pane per seat exists, so nothing accumulates.
-- **Q5 — Registry format.** *Recommendation:* one JSON file per seat with atomic rename. It is
-  tiny, diffable, needs no dependency and fits AOT with source-generated JSON. SQLite would be
-  overkill for tens of entries.
-- **Q6 — `window-size manual`?** A human who attaches with `latest` would resize the seat's TUI
-  and change what captures look like. *Recommendation:* `manual` with the size from
-  `StartSeat.terminal`; resizing is a later, explicit operation.
-- **Q7 — `-L` (socket under `TMUX_TMPDIR`/`/tmp`) or `-S` (a path under `$AIAKOS_HOME`)?** `-L` is
-  what spec 0001 decided (D1) and what humans type. A `/tmp` cleaner can delete an old socket
-  file, which makes the server unreachable (tmux recreates it on `SIGUSR1`). *Recommendation:*
-  keep `-L`; if the watcher finds "no server running" while the registry lists running sessions
-  and a tmux server process for this socket name still exists, send it `SIGUSR1` once and log it.
-- **Q8 — Where does the interface live?** *Recommendation:* `Aiakos.Node` (R1). The orchestrator
-  never calls it (ADR 0004), and the M6 sandbox and M2 harness drivers are node-side too.
-- **Q9 — Minimum tmux version.** Ubuntu 22.04 ships 3.2a, 24.04 ships 3.4 (the CI runner), and the
-  dev distro has 3.6. *Recommendation:* 3.4, the oldest version the tests run on. Supporting 3.2
-  would need tests on it and checks for format variables that may be missing
-  (`pane_dead_signal`).
-- **Q10 — Integration tests in CI.** *Recommendation:* opt-in locally, as asked for (D7), but the
-  Linux CI job installs tmux and sets `AIAKOS_TEST_TMUX=1` from the implementation PR on. They are
-  fast (seconds), and the tmux layer is exactly where regressions would otherwise hide until the
-  manual demo.
-- **Q11 — Orphan detection outside tmux.** *Recommendation:* a generic `/proc` argv scan with a
-  harness-supplied predicate (R13, `IOrphanProbe`), run at start only. Periodic scanning is a
+### Decisions (resolved in review)
+
+- **D1 — How does the per-seat token reach the harness?** *Decision:* as a file in M1 too
+  (`SeatSecret.file_path`, mode `0600` under the seat home); the pane environment carries only its
+  path in `AIAKOS_SEAT_TOKEN_FILE`, and the hook relay reads it (R38). Spec 0002 R45 and spec
+  0005's relay follow this. *Rationale:* `-e` would put the token in the tmux client's argv
+  (readable in `/proc`) and `set-environment` would store it in the server; a file is also the M6
+  mechanism (spike 0005), so there is one path. Recorded in
+  [ADR 0025](../adr/0025-secrets-never-through-tmux.md).
+- **D2 — How are pane deaths detected?** *Decision:* poll `list-panes -a` every 1 s in M1 (R29);
+  revisit tmux control mode in M5/M7 if latency or process churn matters. *Rationale:* one cheap
+  process per second per node, no shell (unlike a `pane-died` hook) and no long-lived control
+  client to supervise.
+- **D3 — Is 1 MiB in one bracketed paste safe?** *Decision:* keep the 1 MiB contract (R15, W10)
+  and prove it with AC3. If tmux or the pty fails below that, lower the host limit to the
+  verified size and advertise it in `Hello.limits` (additive in spec 0002) (RK1). *Rationale:*
+  spike 0001 verified 28 KB only; the test settles it before anything depends on the limit.
+  Large content should go by file path anyway (spec 0005).
+- **D4 — What happens to dead panes?** *Decision:* each dead pane (screen and exit status) is kept
+  until the seat is started or stopped again (R13, R29). *Rationale:* the evidence is there when a
+  human looks, and with one pane per seat nothing accumulates.
+- **D5 — Registry format?** *Decision:* one JSON file per seat, written atomically (R31).
+  *Rationale:* tiny, diffable, no dependency, AOT-friendly with source-generated JSON; SQLite
+  would be overkill for tens of entries.
+- **D6 — `window-size manual`?** *Decision:* yes, with the size from `StartSeat.terminal` (R10);
+  resizing is a later, explicit operation. *Rationale:* a human attaching with `latest` would
+  resize the seat's TUI and change what captures look like.
+- **D7 — Socket with `-L` or `-S`?** *Decision:* keep `-L aiakos-<instance>` (R6, W1), and recover
+  a deleted socket file with one `SIGUSR1` to the server (R30) (RK2). *Rationale:* it is what spec
+  0001 decided and what humans type; the only downside, a `/tmp` cleaner deleting the socket, has
+  a documented tmux remedy.
+- **D8 — Where does the interface live?** *Decision:* `Aiakos.Node`, namespace
+  `Aiakos.Node.Sessions` (R1). *Rationale:* the orchestrator never calls it (ADR 0004), and the M6
+  sandbox and the `IHarnessDriver`s (ADR 0018) are node-side too.
+- **D9 — Minimum tmux version?** *Decision:* 3.4 (R5). *Rationale:* the oldest version the tests
+  run on (the `ubuntu-24.04` CI runner; the dev distro has 3.6). Supporting Ubuntu 22.04's 3.2a
+  would need tests on it and checks for format variables that may be missing. Recorded in
+  [ADR 0026](../adr/0026-minimum-tmux-version.md).
+- **D10 — Integration tests in CI?** *Decision:* opt-in locally with `AIAKOS_TEST_TMUX=1` (W7), and
+  the Linux CI job installs tmux and sets the variable from the implementation PR on (R42).
+  *Rationale:* they take seconds, and the tmux layer is exactly where regressions would otherwise
+  hide until the manual demo.
+- **D11 — Orphan detection outside tmux?** *Decision:* a generic `/proc` argv scan with a
+  harness-supplied predicate (`IOrphanProbe`), run at start only (R13). *Rationale:* argv is
+  readable even when a harness is not dumpable (spike 0005 F3); periodic scanning is a
   health-watchdog feature (M7).
-- **Risk — tmux argument parsing.** The exact handling of a trailing `;` in an argument, `--`
-  before the command, and single- versus multi-argument commands (`sh -c` versus direct exec) is
-  based on the tmux 3.x documentation and source, not on a spike. AC3 and AC13 pin it for the
-  versions we support.
-- **Risk — `pane_dead_signal` availability** differs between tmux versions. An empty value is
-  reported as absent (R29), so the worst case is less information, never wrong information.
-- **Risk — WSL idles out.** If no `wsl.exe` session is attached, WSL may shut the distro down some
-  time after the node stops, and the tmux server with it. Adoption then finds `Vanished` sessions
-  and says so; the orchestrator resumes them (spec 0006). Keeping WSL alive is #15's concern.
-- **Risk — the pane `PATH`.** A node started with `wsl.exe --exec` inherits WSL's default `PATH`
-  plus appended Windows paths, and that `PATH` becomes the panes' base (R9). Harness argv is
-  absolute (R11), but the harness's shell tool uses `PATH`. Spec 0005 should set `PATH` explicitly
-  in the seat environment if the inherited one is not suitable.
-- **Risk — same-user access to the socket** (see [Security notes](#security-notes)).
 
-**Decisions that deserve an ADR** (not written here):
+The design decisions this spec makes rather than asks about are recorded in ADRs:
 
-1. The node owns a private tmux server per instance, started with a generated configuration and a
-   scrubbed environment; sessions outlive the node and are re-adopted through labels plus a
-   registry (R6–R10, R31–R35).
-2. The session host never sends input on its own initiative; delivery is a single composite
-   operation whose confirmation belongs to the harness driver (R3, R14–R20).
-3. Stop is signal-based process-tree termination with verification, never `kill-session` on a live
-   harness (R25, R27).
-4. Secrets never pass through tmux; per-seat tokens are files in M1 as in M6 (R38, Q1). This
-   amends spec 0002 R45 if accepted.
-5. Minimum tmux version policy: the oldest version CI tests on (R5, Q9).
+- The node owns a private tmux server per instance, with a generated configuration and a scrubbed
+  environment; sessions outlive the node and are re-adopted through labels plus a registry
+  (R6–R10, R31–R35): [ADR 0022](../adr/0022-private-tmux-server-per-instance.md).
+- The session host never sends input on its own initiative; delivery is one composite operation
+  whose confirmation belongs to the `IHarnessDriver` (R3, R14–R20):
+  [ADR 0023](../adr/0023-no-self-initiated-input.md).
+- Stop is signal-based process-tree termination with verification, never `kill-session` on a live
+  harness (R25, R27): [ADR 0024](../adr/0024-process-tree-stop.md).
+- Secrets and tokens never pass through tmux (R38, D1):
+  [ADR 0025](../adr/0025-secrets-never-through-tmux.md).
+- Minimum tmux version policy: the oldest version CI tests on (R5, D9):
+  [ADR 0026](../adr/0026-minimum-tmux-version.md).
+
+### Risks
+
+- **RK1 — 1 MiB in one bracketed paste may fail.** Only 28 KB was verified (spike 0001).
+  *Check:* AC3 (1 MiB byte-exact through real tmux); on failure apply D3 (lower the limit,
+  advertise it). *Owner:* #11.
+- **RK2 — The socket file can be deleted by a `/tmp` cleaner,** leaving a running but unreachable
+  server. *Check:* AC16 (delete the socket file in an integration test; the host recovers it with
+  `SIGUSR1`). *Owner:* #11.
+- **RK3 — tmux argument parsing is assumed, not spiked:** a trailing `;` in an argument, `--`
+  before the command, and single- versus multi-argument commands (`sh -c` versus direct exec)
+  follow the tmux 3.x documentation and source. *Check:* AC3 (lead ending in `;`) and AC13
+  (single-element argv without `sh -c`) on tmux 3.4 and 3.6. *Owner:* #11.
+- **RK4 — `pane_dead_signal` may be empty** on some tmux versions. An empty value is reported as
+  absent (R29), so the worst case is less information, never wrong information. *Check:* AC7 on
+  tmux 3.4 and 3.6; record in "Changes after acceptance" which versions report the signal.
+  *Owner:* #11.
+- **RK5 — WSL may idle out** after the node stops (no attached `wsl.exe`) and take the tmux server
+  with it. Adoption then reports `Vanished` sessions honestly and the orchestrator resumes them.
+  *Check:* AC15 (node restart from the dashboard keeps the session) plus a manual check of how
+  long WSL stays up with no node; keeping WSL alive is the released tool's job. *Owner:* #15.
+- **RK6 — The pane `PATH`** is inherited from a node started with `wsl.exe --exec` (WSL default
+  plus appended Windows paths) and may not suit the harness's shell tool. *Check:* the spec 0005
+  manual demo (the seat runs `dotnet --version` and `gh --version`); spec 0005 sets `PATH`
+  explicitly in the seat environment if needed. *Owner:* #12.
+- **RK7 — Same-user access to the socket:** in M1 a seat's shell tool can reach any seat's pane
+  through the node's socket ([Security notes](#security-notes)). *Check:* spec 0005 projects a
+  `Bash(tmux:*)` deny rule, verified in its tests; removed for real by sandboxing in M6.
+  *Owner:* #12 (M1 mitigation), M6 (fix).
+- **RK8 — Process-tree tracking by `/proc` snapshot** can miss a process forked and detached
+  between rescans, and has a small PID-reuse window before `pidfd` (M7). *Check:* AC8 (a `setsid`
+  grandchild is gone after stop) and the manual demo's `pgrep -u $USER -a claude` after
+  `aiakos down`. *Owner:* #11.
 
 ## Changes after acceptance
 
