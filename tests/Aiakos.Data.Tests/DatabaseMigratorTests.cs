@@ -61,7 +61,7 @@ public sealed class DatabaseMigratorTests(DatabaseFixture db) : IClassFixture<Da
     [Fact]
     public async Task FailingScriptIsRolledBackAndReportedByName()
     {
-        const string broken = "Aiakos.Data.Migrations.9999_broken.sql";
+        const string broken = "9999_broken.sql";
         var connectionString = await db.Postgres.CreateDatabaseAsync(Ct);
         await using var dataSource = NpgsqlDataSource.Create(connectionString);
         var options = new DatabaseMigratorOptions();

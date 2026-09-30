@@ -10,7 +10,7 @@ namespace Aiakos.Orchestrator.Tests;
 /// <summary>A failing migration stops startup; nothing is served (spec 0001 R28).</summary>
 public sealed class BrokenMigrationTests(DatabaseFixture db) : IClassFixture<DatabaseFixture>
 {
-    private const string BrokenScript = "Aiakos.Data.Migrations.9999_broken.sql";
+    private const string BrokenScript = "9999_broken.sql";
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -23,7 +23,7 @@ public sealed class BrokenMigrationTests(DatabaseFixture db) : IClassFixture<Dat
         };
 
         var error = Record.Exception(() => factory.CreateClient());
-        await DisposeFailedFactoryAsync(factory);
+        await factory.DisposeAsync();
 
         var migrationError = FindMigrationException(error);
         Assert.NotNull(migrationError);
@@ -53,7 +53,7 @@ public sealed class BrokenMigrationTests(DatabaseFixture db) : IClassFixture<Dat
 
         await stopProbe.CancelAsync();
         var (samples, listening) = await probe;
-        await DisposeFailedFactoryAsync(factory);
+        await factory.DisposeAsync();
 
         Assert.NotNull(error);
         Assert.True(samples > 10, $"The probe sampled only {samples} times.");
@@ -65,21 +65,6 @@ public sealed class BrokenMigrationTests(DatabaseFixture db) : IClassFixture<Dat
         var options = new DatabaseMigratorOptions();
         options.AdditionalScripts.Add(new MigrationScript(BrokenScript, sql));
         return options;
-    }
-
-    private static async Task DisposeFailedFactoryAsync(OrchestratorFactory factory)
-    {
-        try
-        {
-            await factory.DisposeAsync();
-        }
-        catch (ObjectDisposedException)
-        {
-            // WebApplicationFactory stops a host whose start failed after its service provider is
-            // disposed, and ServiceDefaults' TelemetryShutdownService resolves the telemetry
-            // providers lazily in StoppedAsync. Only this test path hits it; a real process does
-            // not stop a host that failed to start (RunAsync disposes it).
-        }
     }
 
     private static DatabaseMigrationException? FindMigrationException(Exception? error) => error switch

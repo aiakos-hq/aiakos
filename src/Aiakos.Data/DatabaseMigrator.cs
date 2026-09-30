@@ -66,10 +66,7 @@ public sealed partial class DatabaseMigrator(
     {
         var builder = DeployChanges.To
             .PostgresqlDatabase(new PostgresqlConnectionManager(dataSource))
-            .WithScriptsEmbeddedInAssembly(
-                typeof(DatabaseMigrator).Assembly,
-                static name => name.StartsWith(EmbeddedPrefix, StringComparison.Ordinal)
-                    && name.EndsWith(".sql", StringComparison.Ordinal))
+            .WithScripts(LoadEmbeddedScripts())
             .JournalToPostgresqlTable(JournalSchema, JournalTable)
             .WithTransactionPerScript()
             // DbUp's $name$ variables would clash with Postgres dollar quoting ($body$ ... $body$).
@@ -82,6 +79,34 @@ public sealed partial class DatabaseMigrator(
         }
 
         return builder.Build().PerformUpgrade();
+    }
+
+    /// <summary>
+    /// Names of the embedded migrations as recorded in the journal, in order: the file name
+    /// (<c>NNNN_snake_case.sql</c>) without the resource namespace, so renaming the assembly or
+    /// its namespace never makes scripts look new.
+    /// </summary>
+    public static IReadOnlyList<string> EmbeddedScriptNames { get; } =
+        [.. EmbeddedResourceNames().Select(static n => n[EmbeddedPrefix.Length..])];
+
+    private static IEnumerable<string> EmbeddedResourceNames() =>
+        typeof(DatabaseMigrator).Assembly.GetManifestResourceNames()
+            .Where(static n => n.StartsWith(EmbeddedPrefix, StringComparison.Ordinal) && n.EndsWith(".sql", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal);
+
+    private static List<SqlScript> LoadEmbeddedScripts()
+    {
+        var assembly = typeof(DatabaseMigrator).Assembly;
+        var scripts = new List<SqlScript>();
+        foreach (var resource in EmbeddedResourceNames())
+        {
+            using var stream = assembly.GetManifestResourceStream(resource)
+                ?? throw new InvalidOperationException($"Embedded migration '{resource}' could not be read.");
+            using var reader = new StreamReader(stream);
+            scripts.Add(new SqlScript(resource[EmbeddedPrefix.Length..], reader.ReadToEnd()));
+        }
+
+        return scripts;
     }
 
     private MigrationResult ToMigrationResult(DatabaseUpgradeResult result)

@@ -5,7 +5,7 @@ namespace Aiakos.Data;
 /// none; tests use it to inject scripts (for example a broken one).
 /// </summary>
 /// <param name="Name">Script name as recorded in the journal. Scripts run in name order together
-/// with the embedded ones, which are named <c>Aiakos.Data.Migrations.NNNN_snake_case.sql</c>.</param>
+/// with the embedded ones, which are journaled by file name (<c>NNNN_snake_case.sql</c>).</param>
 /// <param name="Sql">Script text.</param>
 public sealed record MigrationScript(string Name, string Sql);
 

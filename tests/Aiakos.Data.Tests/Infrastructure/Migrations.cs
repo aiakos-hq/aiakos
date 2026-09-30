@@ -7,13 +7,10 @@ namespace Aiakos.Data.Tests.Infrastructure;
 internal static class Migrations
 {
     /// <summary>Journal name of the first migration.</summary>
-    public const string TenantScript = "Aiakos.Data.Migrations.0001_tenant.sql";
+    public const string TenantScript = "0001_tenant.sql";
 
     /// <summary>Names of every embedded migration, in order.</summary>
-    public static IReadOnlyList<string> Embedded { get; } =
-        [.. typeof(DatabaseMigrator).Assembly.GetManifestResourceNames()
-            .Where(static n => n.StartsWith("Aiakos.Data.Migrations.", StringComparison.Ordinal) && n.EndsWith(".sql", StringComparison.Ordinal))
-            .Order(StringComparer.Ordinal)];
+    public static IReadOnlyList<string> Embedded => DatabaseMigrator.EmbeddedScriptNames;
 
     public static DatabaseMigrator CreateMigrator(NpgsqlDataSource dataSource, DatabaseMigratorOptions? options = null) =>
         new(dataSource, NullLogger<DatabaseMigrator>.Instance, options);
