@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- ASP.NET Core + Akka.Hosting + gRPC server (spec 0001 R27–R29). -->
+
+  <ItemGroup>
+    <PackageReference Include="Akka.Hosting" />
+    <PackageReference Include="Aspire.Npgsql" />
+    <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Grpc.AspNetCore.HealthChecks" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Aiakos.Contracts\Aiakos.Contracts.csproj" />
+    <ProjectReference Include="..\Aiakos.Core\Aiakos.Core.csproj" />
+    <ProjectReference Include="..\Aiakos.Data\Aiakos.Data.csproj" />
+    <ProjectReference Include="..\Aiakos.ServiceDefaults\Aiakos.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+</Project>

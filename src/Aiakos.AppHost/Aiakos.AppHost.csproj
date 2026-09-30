@@ -1,0 +1,23 @@
+<Project Sdk="Aspire.AppHost.Sdk">
+
+  <!-- Dev-only Aspire AppHost; never shipped (spec 0001 R9). The SDK version is pinned in
+       global.json (msbuild-sdks). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UserSecretsId>aiakos-apphost-dev</UserSecretsId>
+    <!-- ASPIRE010: we standardize on `dotnet run` rather than the Aspire CLI (spec 0001 D1);
+         spike 0003 pitfall 11 showed this warning is the only cost. -->
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Aiakos.Core\Aiakos.Core.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="..\Aiakos.Hosting.Wsl\Aiakos.Hosting.Wsl.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="..\Aiakos.Orchestrator\Aiakos.Orchestrator.csproj" />
+  </ItemGroup>
+
+</Project>

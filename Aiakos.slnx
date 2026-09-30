@@ -1,0 +1,20 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Aiakos.AppHost/Aiakos.AppHost.csproj" />
+    <Project Path="src/Aiakos.Cli/Aiakos.Cli.csproj" />
+    <Project Path="src/Aiakos.Contracts/Aiakos.Contracts.csproj" />
+    <Project Path="src/Aiakos.Core/Aiakos.Core.csproj" />
+    <Project Path="src/Aiakos.Data/Aiakos.Data.csproj" />
+    <Project Path="src/Aiakos.Hosting.Wsl/Aiakos.Hosting.Wsl.csproj" />
+    <Project Path="src/Aiakos.Node/Aiakos.Node.csproj" />
+    <Project Path="src/Aiakos.Orchestrator/Aiakos.Orchestrator.csproj" />
+    <Project Path="src/Aiakos.ServiceDefaults/Aiakos.ServiceDefaults.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Aiakos.AppHost.Tests/Aiakos.AppHost.Tests.csproj" />
+    <Project Path="tests/Aiakos.Data.Tests/Aiakos.Data.Tests.csproj" />
+    <Project Path="tests/Aiakos.Hosting.Wsl.Tests/Aiakos.Hosting.Wsl.Tests.csproj" />
+    <Project Path="tests/Aiakos.Node.Tests/Aiakos.Node.Tests.csproj" />
+    <Project Path="tests/Aiakos.Orchestrator.Tests/Aiakos.Orchestrator.Tests.csproj" />
+  </Folder>
+</Solution>
