@@ -383,6 +383,7 @@ AppHost configuration (`src/Aiakos.AppHost/appsettings.json`), with the dev defa
   "Aiakos": {
     "Instance": "dev",
     "PortBase": 5180,
+    "WindowsHome": ".aiakos-dev",
     "Wsl": {
       "Distro": "Ubuntu",
       "Home": ".aiakos-dev",
@@ -396,6 +397,7 @@ AppHost configuration (`src/Aiakos.AppHost/appsettings.json`), with the dev defa
 |---|---|---|
 | `Aiakos:Instance` | `dev` | telemetry attribute `aiakos.instance`, Postgres volume name |
 | `Aiakos:PortBase` | `5180` | port allocation (below) |
+| `Aiakos:WindowsHome` | `.aiakos-dev` | dev `connection.json` and API token file, relative to `%USERPROFILE%` (R14) |
 | `Aiakos:Wsl:Distro` | `Ubuntu` | `wsl.exe -d` |
 | `Aiakos:Wsl:Home` | `.aiakos-dev` | `AIAKOS_HOME`, relative to the WSL user's home |
 | `Aiakos:Wsl:NodeId` | `wsl-local` | `AIAKOS_NODE_ID` (matches plan §5's `rig.env.yaml` example) |
@@ -978,9 +980,18 @@ recommendation in the review of PR #26; they are folded into the requirements an
   - *Orchestrator:* a failed migration ends the process through the unhandled startup exception
     (non-zero, as R28 requires) rather than a clean exit code 1, so `WebApplicationFactory` sees the
     failure.
+  - *R14 (wave 3):* both orchestrator endpoints are unproxied, so Kestrel binds `127.0.0.1:5181`
+    itself. The `api-token` parameter is generated and persisted like `node-token`; the AppHost
+    writes `secretsapi-token` and `connection.json` (`api_url`, `pid` of the AppHost, `version`,
+    `started_at`, `otlp_endpoint` = the dashboard's OTLP URL) when the orchestrator becomes
+    healthy, and deletes `connection.json` on a graceful stop (only if it names its own pid). The
+    Windows home is the new key `Aiakos:WindowsHome`; the guard refuses `.aiakos`, an absolute or
+    escaping path, and port bases whose +0/+1/+2/+10 ports hit the released ones. The orchestrator
+    does not read the token yet: `/v1` and its authentication arrive with #15. `InstanceDefaults`
+    gains the final released values of D9 and the `ApiPortOffset`/`PostgresPortOffset` constants.
   - *AppHost:* the orchestrator is added without a launch profile and its `http` and `grpc`
     endpoints are declared in the AppHost. The instance guard also refuses port bases whose +0/+10
-    ports hit the released ones (7170, 7190), an absolute or empty home, and invalid instance names.
+    ports hit the released ones, an absolute or empty home, and invalid instance names.
     Only a passing preflight is cached, so a fixed WSL setup is picked up on a resource restart.
     `WSLENV` is a value resolved after all environment callbacks rather than a final callback.
   - *Node:* `InvariantGlobalization` is on, because a stock Ubuntu distro may have no libicu and a

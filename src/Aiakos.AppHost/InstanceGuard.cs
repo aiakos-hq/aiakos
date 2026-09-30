@@ -35,10 +35,12 @@ public static partial class InstanceGuard
             throw Refuse("Aiakos:PortBase", $"is {options.PortBase}; it must be between 1024 and {65535 - InstanceDefaults.HookIngestPortOffset}.");
         }
 
-        int[] ours = [options.GrpcPort, options.HookIngestPort];
+        int[] ours = [options.GrpcPort, options.ApiPort, options.HookIngestPort];
         int[] released =
         [
             InstanceDefaults.ReleasedPortBase + InstanceDefaults.GrpcPortOffset,
+            InstanceDefaults.ReleasedPortBase + InstanceDefaults.ApiPortOffset,
+            InstanceDefaults.ReleasedPortBase + InstanceDefaults.PostgresPortOffset,
             InstanceDefaults.ReleasedPortBase + InstanceDefaults.HookIngestPortOffset,
         ];
         if (ours.Intersect(released).Any())
@@ -60,6 +62,22 @@ public static partial class InstanceGuard
         if (NormalizeHome(home) == NormalizeHome(InstanceDefaults.ReleasedWslHome))
         {
             throw Refuse("Aiakos:Wsl:Home", $"is '{home}', which is the released tool's WSL home. Use another directory (default '{InstanceDefaults.DevWslHome}').");
+        }
+
+        var windowsHome = options.WindowsHome?.Trim() ?? string.Empty;
+        if (windowsHome.Length == 0)
+        {
+            throw Refuse("Aiakos:WindowsHome", "is not set.");
+        }
+
+        if (Path.IsPathRooted(windowsHome) || windowsHome.Split('/', '\\').Contains(".."))
+        {
+            throw Refuse("Aiakos:WindowsHome", $"is '{windowsHome}'; it must be a directory under %USERPROFILE%.");
+        }
+
+        if (string.Equals(windowsHome.Replace('\\', '/').TrimEnd('/'), InstanceDefaults.ReleasedWindowsHome, StringComparison.OrdinalIgnoreCase))
+        {
+            throw Refuse("Aiakos:WindowsHome", $"is '{windowsHome}', which is the released tool's Windows home. Use another directory (default '{InstanceDefaults.DevWindowsHome}').");
         }
 
         if (string.IsNullOrWhiteSpace(options.Wsl.Distro))

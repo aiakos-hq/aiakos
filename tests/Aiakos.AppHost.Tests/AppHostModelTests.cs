@@ -109,18 +109,22 @@ public sealed class AppHostModelTests
     [Theory]
     [InlineData("postgres-password")]
     [InlineData("node-token")]
+    [InlineData("api-token")]
     public async Task GeneratedSecretsArePersistedInUserSecrets(string name)
     {
         var first = GetSecret(await CreateAsync(), name);
-        var second = GetSecret(await CreateAsync(), name);
 
         Assert.True(first.Secret);
         // UserSecretsParameterDefault is internal in Aspire 13.5: it wraps the generated default,
         // reads Parameters:<name> from the AppHost's user secrets and writes it there on first use.
         Assert.Equal("UserSecretsParameterDefault", first.Default?.GetType().Name);
-        // A second AppHost start sees the same value, so the Postgres volume keeps matching.
+        // Resolving the value writes it on a machine that has none yet (a fresh CI runner), so the
+        // second AppHost is created only afterwards, as a real restart would be.
         var value = await first.GetValueAsync(Ct);
         Assert.False(string.IsNullOrEmpty(value));
+
+        // A second AppHost start sees the same value, so the Postgres volume keeps matching.
+        var second = GetSecret(await CreateAsync(), name);
         Assert.Equal(value, await second.GetValueAsync(Ct));
     }
 
@@ -130,7 +134,7 @@ public sealed class AppHostModelTests
             : Assert.IsType<ParameterResource>(Get(builder, name));
 
     [Fact]
-    public async Task TheOrchestratorHasAnUnproxiedGrpcEndpointOnThePortBaseAndAnHttpHealthEndpoint()
+    public async Task TheOrchestratorHasUnproxiedGrpcAndHttpEndpointsOnFixedPorts()
     {
         var builder = await CreateAsync();
         var orchestrator = Get(builder, "orchestrator");
@@ -140,8 +144,8 @@ public sealed class AppHostModelTests
         Assert.Equal(5180, endpoints["grpc"].Port);
         Assert.False(endpoints["grpc"].IsProxied);
         Assert.Equal("http", endpoints["grpc"].UriScheme);
-        Assert.True(endpoints["http"].IsProxied);
-        Assert.Null(endpoints["http"].Port);
+        Assert.Equal(5181, endpoints["http"].Port);
+        Assert.False(endpoints["http"].IsProxied);
         Assert.Single(orchestrator.Annotations.OfType<HealthCheckAnnotation>());
 
         var env = await RawEnvironmentAsync(builder, orchestrator);
@@ -232,6 +236,7 @@ public sealed class AppHostModelTests
     [InlineData("--Aiakos:Instance=release", "Aiakos:Instance")]
     [InlineData("--Aiakos:Wsl:Home=.aiakos", "Aiakos:Wsl:Home")]
     [InlineData("--Aiakos:PortBase=7180", "Aiakos:PortBase")]
+    [InlineData("--Aiakos:WindowsHome=.aiakos", "Aiakos:WindowsHome")]
     public async Task TheAppHostRefusesTheReleasedInstanceValues(string arg, string key)
     {
         var ex = await Record.ExceptionAsync(() => CreateAsync(arg));

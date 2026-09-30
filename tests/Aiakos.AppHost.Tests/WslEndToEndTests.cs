@@ -34,6 +34,8 @@ public sealed class WslEndToEndTests
         var distro = appHost.Configuration["Aiakos:Wsl:Distro"]!;
         var home = appHost.Configuration["Aiakos:Wsl:Home"]!;
         var nodePattern = NodeDeployment.InstalledNodePath(home);
+        var connectionFiles = new DevConnectionFiles(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), appHost.Configuration["Aiakos:WindowsHome"]!));
 
         await using (var app = await appHost.BuildAsync(timeout.Token))
         {
@@ -54,6 +56,17 @@ public sealed class WslEndToEndTests
                 Assert.True(health.IsSuccessStatusCode, $"/health returned {(int)health.StatusCode}");
             }
 
+            // connection.json names the fixed API port and the token file exists (R14, spec 0007 R29).
+            var connection = await WaitForConnectionAsync(connectionFiles, timeout.Token);
+            Assert.Equal(new Uri("http://127.0.0.1:5181"), connection.ApiUrl);
+            Assert.Equal(Environment.ProcessId, connection.Pid);
+            Assert.True(File.Exists(connectionFiles.ApiTokenPath), $"missing {connectionFiles.ApiTokenPath}");
+            using (var direct = new HttpClient { BaseAddress = connection.ApiUrl })
+            {
+                using var health = await direct.GetAsync(new Uri("/health", UriKind.Relative), timeout.Token);
+                Assert.True(health.IsSuccessStatusCode, $"/health on {connection.ApiUrl} returned {(int)health.StatusCode}");
+            }
+
             // Process output is logged under the resource instance (e.g. node-wsl-abcd), not its
             // name; the logger service replays earlier lines to a new watcher.
             var line = await WaitForLogAsync(logs, nodeWsl.ResourceId, IsConnectedLine, timeout.Token);
@@ -63,6 +76,8 @@ public sealed class WslEndToEndTests
             stop.CancelAfter(StopTimeout);
             await app.StopAsync(stop.Token);
         }
+
+        Assert.False(File.Exists(connectionFiles.ConnectionPath), "connection.json was not deleted on stop");
 
         // Every stop path must take the node down (spike 0003 §4, AC11). Match the dev instance's
         // path only, so a released node running on the same machine does not count.
@@ -84,6 +99,20 @@ public sealed class WslEndToEndTests
         Assert.True(
             string.IsNullOrWhiteSpace(pgrep.StandardOutput),
             $"aiakos-node still running in WSL after stop: pids {pgrep.StandardOutput.Trim()}");
+    }
+
+    private static async Task<DevConnection> WaitForConnectionAsync(DevConnectionFiles files, CancellationToken cancellationToken)
+    {
+        // Written when the orchestrator becomes ready, which may trail the health wait slightly.
+        while (true)
+        {
+            if (files.ReadConnection() is { } connection)
+            {
+                return connection;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(200), cancellationToken);
+        }
     }
 
     private static bool IsConnectedLine(string content) =>

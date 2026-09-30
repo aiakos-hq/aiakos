@@ -6,6 +6,7 @@ public sealed class InstanceGuardTests
     {
         Instance = "dev",
         PortBase = 5180,
+        WindowsHome = ".aiakos-dev",
         Wsl = new AiakosDevOptions.WslOptions { Distro = "Ubuntu", Home = ".aiakos-dev", NodeId = "wsl-local" },
     };
 
@@ -50,6 +51,9 @@ public sealed class InstanceGuardTests
     [InlineData(7180)]
     [InlineData(7170)]
     [InlineData(7190)]
+    [InlineData(7179)]
+    [InlineData(7181)]
+    [InlineData(7172)]
     public void APortBaseCollidingWithTheReleasedPortsIsRefused(int portBase)
     {
         var options = Dev();
@@ -109,5 +113,29 @@ public sealed class InstanceGuardTests
         options.Wsl.NodeId = string.Empty;
 
         AssertRefused(options, "Aiakos:Wsl:NodeId");
+    }
+
+    [Theory]
+    [InlineData(".aiakos")]
+    [InlineData(".aiakos/")]
+    [InlineData(".AIAKOS")]
+    public void TheReleasedWindowsHomeIsRefused(string home)
+    {
+        var options = Dev();
+        options.WindowsHome = home;
+
+        AssertRefused(options, "Aiakos:WindowsHome");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("/abs/.aiakos-dev")]
+    [InlineData("../.aiakos-dev")]
+    public void AMissingOrEscapingWindowsHomeIsRefused(string home)
+    {
+        var options = Dev();
+        options.WindowsHome = home;
+
+        AssertRefused(options, "Aiakos:WindowsHome");
     }
 }
