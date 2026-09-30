@@ -7,11 +7,12 @@ do not reopen them without writing a new ADR that supersedes the old one.
 
 ## Current stage
 
-**Stage A (manual).** Work is done by a human with a single agent session. The only code so far
-is a placeholder `aiakos` .NET tool in [`src/Aiakos.Cli`](src/Aiakos.Cli/). It is published on
-nuget.org as `Aiakos` 0.0.1-preview.1 to reserve the ID (#6). Milestone **M1** is the
-self-hosting threshold; after it, this repository is developed by an Aiakos-managed rig defined
-in [`rigs/aiakos-dev/`](rigs/aiakos-dev/).
+**Stage A (manual).** Work is done by a human with a single agent session. The solution skeleton
+(#9, spec 0001) exists: `Aiakos.slnx` with the Aspire AppHost, the orchestrator, the node agent
+in WSL, Postgres with DbUp migrations, OpenTelemetry and CI. The CLI in
+[`src/Aiakos.Cli`](src/Aiakos.Cli/) is still the placeholder published on nuget.org as `Aiakos`
+0.0.1-preview.1 to reserve the ID (#6). Milestone **M1** is the self-hosting threshold; after it,
+this repository is developed by an Aiakos-managed rig defined in [`rigs/aiakos-dev/`](rigs/aiakos-dev/).
 
 **M0 (spikes) is done.** All five spikes are in [`docs/spikes/`](docs/spikes/): Claude Code in
 WSL tmux, session resume, Aspire launching a WSL node, the OpenCode API, and a Docker seat.
@@ -20,11 +21,10 @@ WSL tmux, session resume, Aspire launching a WSL node, the OpenCode API, and a D
 for #9, #10, #14, #11, #12 and #13. The decisions are in ADRs 0012–0033 in
 [`docs/adr/`](docs/adr/).
 
-**Next up, in parallel:**
-- **Wave 3 specs:** #15 (CLI) and #16 (the `aiakos-dev` rig, which is M1's acceptance test).
-- **Implementation of #9 (solution skeleton, spec 0001).** It adds CI and the commands below.
+**Next up:** the wave 3 specs, #15 (CLI) and #16 (the `aiakos-dev` rig, which is M1's
+acceptance test), and implementation of #10 (gRPC contract, spec 0002).
 
-Then implement #10, then #11/#12/#13, then #15, then #16. Implementation of an issue starts once
+After #10, implement #11/#12/#13, then #15, then #16. Implementation of an issue starts once
 its spec is merged. Before implementing an issue, check its rows in [`docs/risks.md`](docs/risks.md).
 Specs go to `docs/specs/NNNN-*.md` from [`docs/specs/TEMPLATE.md`](docs/specs/TEMPLATE.md).
 
@@ -83,12 +83,21 @@ Milestones `M0`–`M8` follow the roadmap in `docs/plan.md` §10.
 
 ## Commands
 
-The solution skeleton (#9) brings the build/test/run commands (see spec 0001). Until then, the
-only project is the placeholder tool:
+Prerequisites: .NET SDK 10.0.1xx+ (see `global.json`); Docker Desktop running; WSL2 distro
+`Ubuntu` with mirrored networking (see above). WSL needs no .NET.
 
-```bash
-dotnet pack src/Aiakos.Cli -c Release -o ./nupkg
-```
+- Build (warnings are errors): `dotnet build`
+- Test (Docker required for the database tests): `dotnet test`
+- Run the dev stack (Postgres, orchestrator, node in WSL): `dotnet run --project src/Aiakos.AppHost`
+  — dashboard at http://localhost:15180
+- WSL end-to-end test (Windows only, stack not running): `$env:AIAKOS_E2E_WSL=1; dotnet test --project tests/Aiakos.AppHost.Tests`
+- Pack the placeholder tool: `dotnet pack src/Aiakos.Cli -c Release -o artifacts/packages`
+- Add a migration: `src/Aiakos.Data/Migrations/NNNN_description.sql` (next number; never edit a
+  merged one; every table in schema `aiakos` gets `tenant_id`).
+- Reset the dev database (stack stopped): `docker rm -f <postgres container>` then
+  `docker volume rm aiakos-dev-pgdata`.
+- The dev stack uses instance `dev` (`~/.aiakos-dev`, ports 5180+). It never touches the released
+  tool's instance (`~/.aiakos`, ports 7180+).
 
 ## Commits and PRs
 
