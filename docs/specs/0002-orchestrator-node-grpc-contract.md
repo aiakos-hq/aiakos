@@ -107,7 +107,8 @@ Related specs, written in parallel or later:
   different major version with `FAILED_PRECONDITION`. The negotiated minor is the lower of the
   two; neither side uses a feature above it.
 - **R5** Optional features are gated by **capability strings** that the node advertises in
-  `Hello` (e.g. `harness.claude-code`, `command.send-keys`, `launch.fork`). The orchestrator sends
+  `Hello` (e.g. `harness.claude-code`, `command.send-keys`, `launch.fork`, `session-host.tmux`
+  (the node has a usable tmux session host, spec 0004)). The orchestrator sends
   only commands and options the node advertised. A node that receives something it did not
   advertise answers with a `REJECTED` result, reason `UNSUPPORTED`.
 
@@ -162,7 +163,8 @@ Related specs, written in parallel or later:
   orchestrator-owned native session ID, workspace, argv, non-secret env, projected files and
   secrets. The node expands only the placeholders `${AIAKOS_SEAT_HOME}` and `${AIAKOS_WORKSPACE}`
   in argv, env values and file contents marked `expand`; it does not interpret anything else.
-  When `Workspace.worktree` is set, the node ensures the worktree exists (idempotent) before it
+  `argv[0]` is the harness's logical name (e.g. `claude`), which the node replaces with the
+  executable path configured for that harness on the node (spec 0005). When `Workspace.worktree` is set, the node ensures the worktree exists (idempotent) before it
   launches (D6). Resume and fork are launch modes of `StartSeat`, not separate commands (D4).
 - **R20** A `StartSeat` for a seat that already has a live harness under a different `launch_id`
   is rejected with `SEAT_ALREADY_RUNNING`. The node never kills a running seat to satisfy a
@@ -276,9 +278,11 @@ Related specs, written in parallel or later:
   by the AppHost through `WSLENV`). The orchestrator stores only a hash; the token binds a node ID
   and a tenant.
 - **R45** The orchestrator mints a per-seat token for every launch and sends it in
-  `StartSeat.secrets`. The node places it in the seat's environment (M1), uses it to attribute
-  hook posts to the seat, and never logs it. Secret values never appear in logs, traces, errors or
-  `argv`.
+  `StartSeat.secrets`. The node writes it to a file with mode 0600 under the seat home and gives
+  the seat only the file's path, in `AIAKOS_SEAT_TOKEN_FILE`; the value never passes through tmux
+  argv or environment ([ADR 0025](../adr/0025-secrets-never-through-tmux.md)). The node uses the
+  token to attribute hook posts to the seat and never logs it. Secret values never appear in
+  logs, traces, errors or `argv`.
 - **R46** The node rejects projected file paths that are absolute or contain `..`
   (`PATH_NOT_ALLOWED`); files are written only below the seat home or the workspace.
 
@@ -524,8 +528,8 @@ message SeatSecret {
   string name = 1;                 // e.g. "seat_token"
   bytes value = 2;
   oneof target {
-    string env_var = 3;            // M1: e.g. "AIAKOS_SEAT_TOKEN"
-    string file_path = 4;          // relative to seat home; M6 sandboxes use files
+    string env_var = 3;            // not used for the seat token (R45)
+    string file_path = 4;          // relative to seat home; M1 seat token (R45) and M6 sandboxes
   }
 }
 
@@ -830,6 +834,9 @@ Command level (`CommandResult.error.reason`, initial catalogue; additions are ad
 | `PATH_NOT_ALLOWED` | `INVALID_ARGUMENT` | no | R46 |
 | `PAYLOAD_TOO_LARGE` | `RESOURCE_EXHAUSTED` | no | R38 |
 | `SESSION_HOST_ERROR` | `INTERNAL` | yes | tmux (or later sandbox) call failed |
+| `INPUT_NOT_ALLOWED` | `INVALID_ARGUMENT` | no | lead or body contains a forbidden character (spec 0004 R16) |
+| `INVALID_LAUNCH` | `INVALID_ARGUMENT` | no | launch argv, working directory, environment or size invalid (spec 0004 R11) |
+| `SESSION_HOST_UNAVAILABLE` | `FAILED_PRECONDITION` | no | no usable session host, e.g. tmux missing or too old (spec 0004 R5) |
 
 Launch outcome reasons (`LaunchResult.reason`): `READY_TIMEOUT`, `RESUME_SESSION_NOT_FOUND`,
 `HARNESS_EXITED`, `SESSION_ID_MISMATCH`, `STOPPED`.
@@ -840,8 +847,8 @@ Launch outcome reasons (`LaunchResult.reason`): `READY_TIMEOUT`, `RESUME_SESSION
 unproxied port (spike 0003). The node token comes from `AIAKOS_NODE_TOKEN` (through `WSLENV`);
 the orchestrator stores its hash with the node ID and tenant it binds. Per-seat tokens are minted
 per launch by the orchestrator, travel only inside `StartSeat.secrets` over loopback, reach the
-harness through the pane environment (spike 0001: `new-session -e`), and let the node attribute
-hook posts to seats. Everything in messages that names a seat is a *claim scoped by the node's
+seat as a 0600 file named by `AIAKOS_SEAT_TOKEN_FILE` (never through tmux argv or environment,
+R45), and let the node attribute hook posts to seats. Everything in messages that names a seat is a *claim scoped by the node's
 identity* (R12).
 
 **What changes for remote and sandboxed nodes (M6).** These are additive or configuration
@@ -849,7 +856,7 @@ changes, not a v2:
 
 - TLS is mandatory for any non-loopback endpoint (Tailscale or a real certificate); h2c stays
   loopback-only (R43). mTLS or token rotation are candidates for an ADR then.
-- Secrets move from environment variables to files (`SeatSecret.file_path`) in a per-container
+- Secret files (`SeatSecret.file_path`, already used in M1, R45) move to a per-container
   tmpfs, written without appearing in argv or `docker events` (spike 0005 F3).
 - Hook posts from containers arrive from a proxy address (`host.docker.internal`), so the per-seat
   token in a header is the only identity (spike 0005 F5); it lives in a secrets file, not in
@@ -934,7 +941,7 @@ sequenceDiagram
     O->>N: Command{command_id C1, seat A, StartSeat}
     N-->>O: CommandAck{C1}
     N->>N: ensure workspace or worktree, write files, check no orphan harness
-    N->>H: create pane with env AIAKOS_SEAT and AIAKOS_SEAT_TOKEN, run argv
+    N->>H: write seat token file, create pane with env AIAKOS_SEAT and AIAKOS_SEAT_TOKEN_FILE, run argv
     H->>R: SessionStart hook (session_id U, source startup)
     R->>N: POST with seat token and source_seq
     N->>O: SeatEvent{HarnessEvent SESSION_STARTED, source startup}
@@ -1155,10 +1162,23 @@ recorded in [ADR 0019](../adr/0019-node-link-delivery-model.md) and
 
 ### Risks
 
-- **statusLine volume.** statusLine fires often; R39 rate-limits and coalesces it. If it still
+- **RK1 — statusLine volume.** statusLine fires often; R39 rate-limits and coalesces it. If it still
   dominates, move usage samples to a separate unsequenced message in a minor revision.
-- **Secrets over h2c.** Acceptable only on loopback (R43). Any remote node needs TLS first (M6).
+- **RK2 — Secrets over h2c.** Acceptable only on loopback (R43). Any remote node needs TLS first (M6).
 
 ## Changes after acceptance
 
-*(none yet)*
+- **2026-09-30 — wave 2 amendments** (specs 0004 and 0005, accepted in review):
+  - **R45, seat token as a file.** The token still arrives in `StartSeat.secrets`, but the node
+    writes it to a 0600 file under the seat home and gives the seat only
+    `AIAKOS_SEAT_TOKEN_FILE`; the value never passes through tmux argv or environment. The
+    `SeatSecret` comments, [Security](#security) and the start sequence diagram follow. Source:
+    spec 0004 Q1 and spec 0005's decisions;
+    [ADR 0025](../adr/0025-secrets-never-through-tmux.md).
+  - **Reason catalogue and capabilities.** Added the command reasons `INPUT_NOT_ALLOWED`,
+    `INVALID_LAUNCH` and `SESSION_HOST_UNAVAILABLE` to the [Error model](#error-model) table,
+    and the capability string `session-host.tmux` to R5. Reasons are strings in
+    `Error.reason`, so the proto is unchanged; the additions are additive (no renumbering).
+    Source: spec 0004 (Mapping to spec 0002).
+  - **R19, `argv[0]`.** Clarified that `argv[0]` is the harness's logical name (e.g. `claude`),
+    resolved by the node to its configured executable path. Source: spec 0005 Q6.

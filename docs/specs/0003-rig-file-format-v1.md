@@ -213,20 +213,23 @@ Owned elsewhere:
   outside every repository checkout: `<projection root>/CLAUDE.md` and
   `<projection root>/.claude/skills/<name>/…`. Projection never writes, modifies or deletes
   files inside a repository checkout, so the repo's own `CLAUDE.md` and `.claude/` stay intact
-  and the worktree stays clean ([ADR 0015](../adr/0015-projection-outside-checkouts.md)). #12
-  verifies the loading mechanism (`--add-dir` + `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`)
-  before relying on it. If it fails, `seat-worktree` seats use the seat directory as the
-  projection root (an ancestor of the worktree), and launching a `shared` seat fails with a clear
-  error (D3).
+  and the worktree stays clean ([ADR 0015](../adr/0015-projection-outside-checkouts.md)). The
+  adapter loads it with `--add-dir <projection root>` plus
+  `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` for `CLAUDE.md`; skills need only `--add-dir`.
+  A `.claude/settings.json` inside the projection root is not read, so settings go only in the
+  per-seat `--settings` file (verified by spec 0005;
+  [ADR 0027](../adr/0027-claude-projection-and-settings.md), D3).
 - **R29** The projected `CLAUDE.md` is generated deterministically: a generated header (seat
   address, rig, `spec_hash`, "do not edit"), the rig roster, the culture file, then the agent's
   guidance files in listed order, each preceded by a source comment. Same inputs give
   byte-identical output.
 - **R30** Paths derived on the node are fixed by this spec: seat directory
   `<seat_root>/<rig>/<seat>`, projection root `<seat dir>/projection`, worktrees
-  `<seat dir>/repos/<repo>`, seat branch `aiakos/<rig>/<seat>`. The seat root must be trusted
-  by Claude Code on that node (spike 0002 F8); the adapter (#12) checks and reports an untrusted
-  root before launch instead of letting the trust dialog block.
+  `<seat dir>/repos/<repo>`, seat branch `aiakos/<rig>/<seat>`. Claude Code inherits trust from
+  a trusted ancestor only up to a git repository root, so a trusted `seat_root` does not cover
+  the worktrees beneath it (spec 0005's experiment). The node sets trust for each seat's exact
+  workdir before launch ([ADR 0029](../adr/0029-minimal-harness-user-config.md)) and reports a
+  failure to do so instead of letting the trust dialog block.
 
 ### Compatibility and bootstrap
 
@@ -360,7 +363,7 @@ Guidance and culture files: Markdown, at most 256 KiB each.
 |---|---|---|---|---|
 | `apiVersion` / `kind` | | yes | — | `aiakos.dev/v1` / `RigEnv` |
 | `rig` | id | yes | — | Must equal `rig.yaml` `name` |
-| `seat_root` | node path | no | `~/aiakos/seats` | Trusted root for seat directories (spike 0002 F8) |
+| `seat_root` | node path | no | `~/aiakos/seats` | Root for seat directories; the node trusts each seat workdir (R30) |
 | `placement.default_node` | node name | no | none | Node for seats without an override |
 | `placement.seats.<seat id>.node` | node name | no | `default_node` | Per-seat node |
 | `repos.<repo name>.path` | node path | yes for every used repo | — | Existing clone on the node(s) running seats that use it |
@@ -475,8 +478,9 @@ Loading: the adapter adds the projection root with `--add-dir <projection root>`
 `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` in the pane environment, so Claude Code loads
 `CLAUDE.md` and `.claude/skills/` from it while the working directory stays the repo checkout
 (whose own `CLAUDE.md` and `.claude/` still apply). This works identically for `shared` and
-`seat-worktree`. **The spikes did not cover this mechanism**; #12 must verify it first (see
-[D3](#decisions-resolved-in-review) for the fallback).
+`seat-worktree`. Spec 0005's experiment verified it: `CLAUDE.md` needs `--add-dir` plus the
+variable, skills need only `--add-dir`, and a `.claude/settings.json` in the projection root is
+not read ([D3](#decisions-resolved-in-review)).
 
 The permission fragment goes into the per-seat settings file that the adapter already passes with
 `--settings` (spike 0002): `permissions.allow/ask/deny` and `permissions.defaultMode`
@@ -748,7 +752,7 @@ harnesses:
 apiVersion: aiakos.dev/v1
 kind: RigEnv
 rig: aiakos-dev
-seat_root: ~/aiakos/seats           # trusted once in Claude Code (spike 0002 F8)
+seat_root: ~/aiakos/seats           # the node trusts each seat's workdir (R30)
 placement:
   default_node: wsl-local
 repos:
@@ -857,13 +861,12 @@ No questions remain open. The maintainer accepted every recommendation in review
   without disturbing anyone. Reflected in R11 and the worked example. #16 updates
   `rigs/aiakos-dev/README.md`.
 - **D3 — Projection loading mechanism.** *Decision:* the mechanism is `--add-dir <projection root>`
-  with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`, and #12 verifies it before building on it.
-  If it fails, `seat-worktree` falls back to putting the projection at the seat directory. That
-  directory is an ancestor of the worktree, so `CLAUDE.md` loads as a parent memory file, and
-  skills come in via `--add-dir`. A `shared` seat's launch then fails with a clear error until a
-  mechanism exists. In no case is anything written into the checkout. *Rationale:* the mechanism
-  is documented but no spike exercised it, and the fallback keeps the no-write rule. Recorded in
-  [ADR 0015](../adr/0015-projection-outside-checkouts.md); reflected in R28 and
+  with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` for `CLAUDE.md`, and `--add-dir` alone
+  for skills. Spec 0005's experiment confirmed it (a `.claude/settings.json` inside the projection
+  is not read), so no fallback is needed. In no case is anything written into the checkout.
+  *Rationale:* the mechanism keeps the no-write rule and works for `shared` and `seat-worktree`
+  alike. Recorded in [ADR 0015](../adr/0015-projection-outside-checkouts.md) and
+  [ADR 0027](../adr/0027-claude-projection-and-settings.md); reflected in R28 and
   [Projection for Claude Code](#projection-for-claude-code).
 - **D4 — Culture in v1?** *Decision:* yes. `culture_file` is plain Markdown projected into every
   agent seat. *Rationale:* #16 needs `CULTURE.md`, and M2 can add options without changing the
@@ -913,15 +916,26 @@ ADRs recording the cross-cutting decisions of this spec:
 
 ### Risks
 
-- **Seat root collisions between two Aiakos instances** (the released team vs a development
+- **RK1 — Seat root collisions between two Aiakos instances** (the released team vs a development
   build under test) on the same node. Seat directories include the rig name, and development
   tests should use their own rig names and `seat_root`. The node should keep an ownership marker
   in each seat directory (#11/#12).
-- **The projected header and roster mention identity in text.** That text informs the model and
+- **RK2 — The projected header and roster mention identity in text.** That text informs the model and
   carries no authority; authority comes from the environment token (rule 2). The header says so.
-- **The projection mechanism is unverified until #12** (D3). The fallback covers
-  `seat-worktree`, which is all `aiakos-dev` needs.
+- **RK3 — The projection mechanism is unverified until #12** (D3). *Resolved 2026-09-30:* spec 0005's
+  experiment verified it (see "Changes after acceptance").
 
 ## Changes after acceptance
 
-*(none yet)*
+- **2026-09-30 — wave 2 amendments** (spec 0005, accepted in review):
+  - **R30, trust.** Claude Code inherits trust from a trusted ancestor only up to a git
+    repository root, so a trusted `seat_root` does not cover the worktrees beneath it. The node
+    now sets trust for each seat's exact workdir; the `seat_root` descriptions in the
+    `rig.env.yaml` table and the worked example follow. Source: spec 0005's verification experiment (T1–T7);
+    [ADR 0029](../adr/0029-minimal-harness-user-config.md).
+  - **R28 and D3, projection mechanism confirmed.** `--add-dir` +
+    `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` loads the projected `CLAUDE.md`, `--add-dir`
+    alone loads skills, and a `settings.json` inside the projection is not read. The fallback
+    (projection at the seat directory, `shared` seats failing) is removed, and the related risk
+    is resolved. Source: spec 0005's verification experiment (E1–E8);
+    [ADR 0027](../adr/0027-claude-projection-and-settings.md).

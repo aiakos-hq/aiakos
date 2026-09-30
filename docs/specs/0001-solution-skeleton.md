@@ -251,14 +251,17 @@ Specs written in parallel own neighbouring parts. This spec only reserves their 
   There is no default orchestrator URL (rule 3: no silent fallbacks). `AIAKOS_HOME` may be
   absolute or relative to `$HOME`; a leading `~/` is expanded by the node.
 - **R40** The node is marked `IsAotCompatible` and must not reference `Aiakos.Orchestrator`,
-  `Aiakos.Data`, Akka or Npgsql (ADR 0004: no business logic on the node).
+  `Aiakos.Data`, Akka or Npgsql (ADR 0004: no business logic on the node). It may reference
+  ASP.NET Core, for the hook ingest only: Kestrel through `WebApplication.CreateSlimBuilder`
+  (AOT-supported), bound to `127.0.0.1` at port base + 10 (spec 0005).
 
 ### Telemetry
 
 - **R41** `Aiakos.ServiceDefaults` provides `AddAiakosServiceDefaults()` for
   `IHostApplicationBuilder`, used by the orchestrator and the node. It registers OpenTelemetry
   logs, traces and metrics, and it exports through OTLP only when `OTEL_EXPORTER_OTLP_ENDPOINT` is
-  set. It has no ASP.NET Core dependency so that the node does not carry one.
+  set. It has no ASP.NET Core dependency; hosts that serve HTTP add ASP.NET Core instrumentation
+  themselves.
 - **R42** Every component emits telemetry under its own `ActivitySource` and `Meter`
   (`Aiakos.Orchestrator`, `Aiakos.Node`), and the resource carries `service.name` (from
   `OTEL_SERVICE_NAME`), `aiakos.instance` and, on the node, `aiakos.node.id`.
@@ -314,7 +317,8 @@ Specs written in parallel own neighbouring parts. This spec only reserves their 
 │  ├─ Aiakos.Contracts/         gRPC/protobuf; content owned by spec 0002 (R44)
 │  ├─ Aiakos.Data/              DbUp migrator, embedded migrations, Dapper conventions (R30–R33)
 │  ├─ Aiakos.Orchestrator/      ASP.NET Core + Akka.Hosting + gRPC server (R27–R29)
-│  ├─ Aiakos.Node/              node agent "Ergates"; executable aiakos-node (R34–R40)
+│  ├─ Aiakos.Node/              node agent "Ergates"; executable aiakos-node; Kestrel hook
+│  │                            ingest from spec 0005 (R34–R40)
 │  └─ Aiakos.Cli/               EXISTING placeholder `dotnet tool` (PackageId Aiakos, command
 │                               aiakos); adopted as is (R48), replaced by #15
 └─ tests/
@@ -351,7 +355,7 @@ starting point: Aspire 13.5.4, Grpc.* 2.84.0, Google.Protobuf 3.36.2, OpenTeleme
 | Orchestrator | `Akka.Hosting`, `Grpc.AspNetCore`, `Grpc.AspNetCore.HealthChecks`, `Aspire.Npgsql` |
 | Data | `dbup-postgresql`, `Dapper`, `Npgsql` |
 | Contracts | `Google.Protobuf`, `Grpc.Core.Api`, `Grpc.Tools` (private assets) |
-| Node | `Grpc.Net.Client`, `Grpc.HealthCheck` (client types) |
+| Node | `Grpc.Net.Client`, `Grpc.HealthCheck` (client types); framework reference `Microsoft.AspNetCore.App` for the hook ingest (R40) |
 | ServiceDefaults | `OpenTelemetry.Extensions.Hosting`, `OpenTelemetry.Exporter.OpenTelemetryProtocol`, instrumentation for HTTP client, runtime, ASP.NET Core (orchestrator only), gRPC client |
 | Tests | `xunit.v3`, `Microsoft.Testing.Platform` (via xUnit v3), `Testcontainers.PostgreSql`, `Aspire.Hosting.Testing`, `Microsoft.AspNetCore.Mvc.Testing` |
 
@@ -363,8 +367,8 @@ starting point: Aspire 13.5.4, Grpc.* 2.84.0, Google.Protobuf 3.36.2, OpenTeleme
 </ItemGroup>
 ```
 
-Server stubs only need `Grpc.Core.Api`, so the node carries no ASP.NET Core dependency by
-referencing the same project. File names, packages and `csharp_namespace` are spec 0002's.
+Server stubs only need `Grpc.Core.Api`, so referencing the same project adds no ASP.NET Core
+dependency to the node (its only ASP.NET Core use is the hook ingest, R40). File names, packages and `csharp_namespace` are spec 0002's.
 
 ### Configuration
 
@@ -397,7 +401,7 @@ Ports, from the port base (dev values):
 | Offset | Dev port | Listener | Side |
 |---|---|---|---|
 | +0 | 5180 | orchestrator `grpc` (h2c, localhost, unproxied) | Windows |
-| +10 | 5190 | *reserved*: node hook ingest (#11/#12) | WSL |
+| +10 | 5190 | node hook ingest (Kestrel, `127.0.0.1`; spec 0005, #12) | WSL |
 | — | 15180 | dashboard UI (launch profile) | Windows |
 | — | 19180 | dashboard OTLP gRPC (launch profile) | Windows |
 | — | 20180 | dashboard resource service (launch profile) | Windows |
@@ -594,8 +598,8 @@ Program
   stream is spec 0002's, following spike 0003 §1.)
 - Shutdown: `HostOptions.ShutdownTimeout` 5 s; the telemetry providers are flushed with a 2 s
   bound (R37), and the OTLP exporter timeout for the node defaults to 2 s (loopback).
-- The node never binds a port in the skeleton. The hook-ingest listener (port base + 10) arrives
-  with #11/#12.
+- The node never binds a port in the skeleton. The hook-ingest listener (Kestrel slim builder on
+  `127.0.0.1`, port base + 10) arrives with #12 (spec 0005).
 
 ### Database
 
@@ -782,7 +786,7 @@ Prerequisites: .NET SDK 10.0.1xx+ (see `global.json`); Docker Desktop running; W
   `aiakos` that has no `tenant_id` (its own negative test shows this) and passes on the real
   migrations.
 - [ ] **AC16** The architecture test shows `Aiakos.Node` references none of `Aiakos.Orchestrator`,
-  `Aiakos.Data`, `Akka*`, `Npgsql*`.
+  `Aiakos.Data`, `Akka*`, `Npgsql*` (ASP.NET Core is allowed, R40).
 - [ ] **AC17** `CLAUDE.md` "Commands" matches [Design → Commands](#commands-for-claudemd), and the
   spec table in `docs/specs/README.md` shows 0001 as `implemented` when the PR merges.
 - [ ] **AC18** `Aiakos.Cli` is in `Aiakos.slnx`, its project file no longer sets the properties
@@ -900,19 +904,24 @@ recommendation in the review of PR #26; they are folded into the requirements an
 
 ## Risks
 
-- **`wslinfo --networking-mode`** was not exercised in spike 0003. If it is unavailable in the
+- **RK1 — `wslinfo --networking-mode`** was not exercised in spike 0003. If it is unavailable in the
   installed WSL version, the preflight falls back to reading `networkingMode` from
   `%USERPROFILE%\.wslconfig` and reports `unknown` (and refuses) when neither works.
-- **Per-endpoint Kestrel protocols with Aspire-managed endpoints** (R14) were not tried in the
+- **RK2 — Per-endpoint Kestrel protocols with Aspire-managed endpoints** (R14) were not tried in the
   spike, which used the global `EndpointDefaults`. If Aspire's injected configuration fights the
   per-endpoint setting, fall back to configuring both endpoints explicitly in Kestrel from the
   ports Aspire passes, and record it under "Changes after acceptance".
-- **Aspire version churn.** `EndpointReference` handling and event names changed across Aspire
+- **RK3 — Aspire version churn.** `EndpointReference` handling and event names changed across Aspire
   releases (spike 0003 pitfall 2). The AppHost tests pin the behaviour; upgrade Aspire only in a
   dedicated PR.
-- **Akka.TestKit and xUnit v3** (D5): check compatibility before #13 starts.
-- **Publish time on each AppHost start** (D2) could annoy; measure it in the implementation PR.
+- **RK4 — Akka.TestKit and xUnit v3** (D5): check compatibility before #13 starts.
+- **RK5 — Publish time on each AppHost start** (D2) could annoy; measure it in the implementation PR.
 
 ## Changes after acceptance
 
-*(none yet)*
+- **2026-09-30 — the node carries ASP.NET Core for the hook ingest** (spec 0005 Q10, accepted in
+  review). The node hosts the hook ingest on Kestrel (`WebApplication.CreateSlimBuilder`, which
+  supports native AOT, so `IsAotCompatible` and D10 stand), bound to `127.0.0.1` at the port
+  base plus 10. R40 now allows ASP.NET Core in the node while still forbidding `Aiakos.Orchestrator`,
+  `Aiakos.Data`, Akka and Npgsql (AC16 unchanged apart from that note); R41's rationale, the
+  layout, the package table, the port table and [Design → Node](#node) follow. No ADR.

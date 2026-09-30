@@ -44,6 +44,8 @@ edit docs there) and `aiakos-hq/.github` (org profile, CONTRIBUTING, SECURITY, C
 - **Decisions**: `docs/adr/NNNN-short-title.md` from [`docs/adr/TEMPLATE.md`](docs/adr/TEMPLATE.md).
 - **Spikes**: throwaway experiments; findings go to `docs/spikes/NNNN-short-title.md`. Spike code
   is not merged into `src/`.
+- **Risks** are indexed in [`docs/risks.md`](docs/risks.md); check the relevant ones before
+  implementing an issue and at milestone boundaries.
 
 Labels: `type/*` (feature, bug, spike, chore, docs), `area/*`, and status labels
 `spec-needed`, `ready`, `in-progress`, `needs-review`, `blocked`.
