@@ -114,7 +114,7 @@ Ideas worth keeping:
 - **Rigs defined in shareable files**: rig spec → reusable agent specs → shared libraries →
   culture file → portable bundles; resolved at launch and *projected* into each harness's
   native files (CLAUDE.md / AGENTS.md / skills / settings).
-- **Seat identity from the environment** (`member@rig`), never from request bodies.
+- **Seat identity from the environment** (`seat@rig`), never from request bodies.
 - **tmux as transport, not truth**: messages are pasted into panes (bracketed paste + separate
   Enter); the durable record lives in the database.
 - **Queue with a closure contract ("hot potato")**: an item cannot be closed without a reason
@@ -238,8 +238,10 @@ A seat = **harness × session host × sandbox** (× node).
 ## 5. Rig definition files (shareable, OpenRig-style)
 
 Layers:
-1. **Rig spec** (`rig.yaml`): pods, members (`agent_ref`, `harness`, `model`, `profile`,
-   `checkout`, `requires`), edges, `culture_file`, `workspace` (repos), channels.
+1. **Rig spec** (`rig.yaml`): seats (`agent_ref`, `harness`, `model`, `profile`, `checkout`,
+   `requires`), edges, `culture_file`, `workspace` (repos), channels. Seat IDs are flat and
+   unique within the rig; a seat's address is `seat@rig`. Pods (M2) are an optional grouping
+   attribute, not part of the address ([ADR 0014](adr/0014-flat-seat-addresses.md)).
 2. **Agent spec** (`agent.yaml` + folder): `imports` (`local:` / `path:`, later `git:…@ref`),
    `resources` (skills, guidance, subagents, hooks, harness-tagged runtime fragments),
    `profiles` (`uses:` selections, `namespace:id` refs), `startup` (files + delivery hints:
@@ -271,29 +273,29 @@ workspace:
   repos:
     - { name: api, url: git@github.com:acme/api.git }
     - { name: web, url: git@github.com:acme/web.git }
-pods:
-  - id: dev
-    members:
-      - id: lead
-        agent_ref: local:agents/lead
-        harness: opencode
-        checkout: shared
-      - id: impl
-        agent_ref: local:agents/implementer
-        harness: claude-code
-        checkout: seat-worktree
-        requires: { sandbox: required, auth: api-key, secrets: [anthropic_api_key] }
-    edges:
-      - { kind: delegates_to, from: lead, to: impl }
+seats:                           # flat, rig-unique IDs: lead@product-team, impl@product-team
+  - id: lead
+    pod: dev                     # optional grouping (M2), not part of the address
+    agent_ref: local:agents/lead
+    harness: opencode
+    checkout: shared
+  - id: impl
+    pod: dev
+    agent_ref: local:agents/implementer
+    harness: claude-code
+    checkout: seat-worktree
+    requires: { sandbox: required, auth: api-key, secrets: [anthropic_api_key] }
+edges:
+  - { kind: delegates_to, from: lead, to: impl }
 channels:
-  inbound: dev.lead
+  inbound: lead
 ```
 
 ```yaml
 # rig.env.yaml (local, never shared)
 nodes:
-  dev.lead: wsl-local
-  dev.impl: linux-box
+  lead: wsl-local
+  impl: linux-box
 repos:
   api: { path: ~/src/api }
 secrets:
