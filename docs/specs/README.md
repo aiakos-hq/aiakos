@@ -16,3 +16,4 @@ and test plan. The *what/why* and status live in the linked GitHub issue.
 | [0005](0005-claude-code-adapter.md) | Claude Code adapter | accepted | M1 |
 | [0006](0006-seat-actor.md) | SeatActor: lifecycle and three-axis state | accepted | M1 |
 | [0007](0007-cli-and-released-instance.md) | CLI and the released instance | accepted | M1 |
+| [0008](0008-aiakos-dev-rig.md) | The aiakos-dev rig and the M1 acceptance | accepted | M1 |
