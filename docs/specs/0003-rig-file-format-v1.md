@@ -916,13 +916,13 @@ ADRs recording the cross-cutting decisions of this spec:
 
 ### Risks
 
-- **Seat root collisions between two Aiakos instances** (the released team vs a development
+- **RK1 — Seat root collisions between two Aiakos instances** (the released team vs a development
   build under test) on the same node. Seat directories include the rig name, and development
   tests should use their own rig names and `seat_root`. The node should keep an ownership marker
   in each seat directory (#11/#12).
-- **The projected header and roster mention identity in text.** That text informs the model and
+- **RK2 — The projected header and roster mention identity in text.** That text informs the model and
   carries no authority; authority comes from the environment token (rule 2). The header says so.
-- **The projection mechanism is unverified until #12** (D3). *Resolved 2026-09-30:* spec 0005's
+- **RK3 — The projection mechanism is unverified until #12** (D3). *Resolved 2026-09-30:* spec 0005's
   experiment verified it (see "Changes after acceptance").
 
 ## Changes after acceptance

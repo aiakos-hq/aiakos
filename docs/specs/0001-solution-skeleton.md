@@ -904,18 +904,18 @@ recommendation in the review of PR #26; they are folded into the requirements an
 
 ## Risks
 
-- **`wslinfo --networking-mode`** was not exercised in spike 0003. If it is unavailable in the
+- **RK1 — `wslinfo --networking-mode`** was not exercised in spike 0003. If it is unavailable in the
   installed WSL version, the preflight falls back to reading `networkingMode` from
   `%USERPROFILE%\.wslconfig` and reports `unknown` (and refuses) when neither works.
-- **Per-endpoint Kestrel protocols with Aspire-managed endpoints** (R14) were not tried in the
+- **RK2 — Per-endpoint Kestrel protocols with Aspire-managed endpoints** (R14) were not tried in the
   spike, which used the global `EndpointDefaults`. If Aspire's injected configuration fights the
   per-endpoint setting, fall back to configuring both endpoints explicitly in Kestrel from the
   ports Aspire passes, and record it under "Changes after acceptance".
-- **Aspire version churn.** `EndpointReference` handling and event names changed across Aspire
+- **RK3 — Aspire version churn.** `EndpointReference` handling and event names changed across Aspire
   releases (spike 0003 pitfall 2). The AppHost tests pin the behaviour; upgrade Aspire only in a
   dedicated PR.
-- **Akka.TestKit and xUnit v3** (D5): check compatibility before #13 starts.
-- **Publish time on each AppHost start** (D2) could annoy; measure it in the implementation PR.
+- **RK4 — Akka.TestKit and xUnit v3** (D5): check compatibility before #13 starts.
+- **RK5 — Publish time on each AppHost start** (D2) could annoy; measure it in the implementation PR.
 
 ## Changes after acceptance
 

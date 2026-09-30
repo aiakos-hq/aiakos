@@ -1162,9 +1162,9 @@ recorded in [ADR 0019](../adr/0019-node-link-delivery-model.md) and
 
 ### Risks
 
-- **statusLine volume.** statusLine fires often; R39 rate-limits and coalesces it. If it still
+- **RK1 — statusLine volume.** statusLine fires often; R39 rate-limits and coalesces it. If it still
   dominates, move usage samples to a separate unsequenced message in a minor revision.
-- **Secrets over h2c.** Acceptable only on loopback (R43). Any remote node needs TLS first (M6).
+- **RK2 — Secrets over h2c.** Acceptable only on loopback (R43). Any remote node needs TLS first (M6).
 
 ## Changes after acceptance
 
