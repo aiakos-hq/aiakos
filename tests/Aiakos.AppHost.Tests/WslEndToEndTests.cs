@@ -28,7 +28,9 @@ public sealed class WslEndToEndTests
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(StartTimeout);
 
-        var appHost = await DistributedApplicationTestingBuilder.CreateAsync<Projects.Aiakos_AppHost>(timeout.Token);
+        // Keep the configured ports: the node is told the orchestrator's fixed gRPC port up front.
+        var appHost = await DistributedApplicationTestingBuilder.CreateAsync<Projects.Aiakos_AppHost>(
+            ["--DcpPublisher:RandomizePorts=false"], timeout.Token);
         var distro = appHost.Configuration["Aiakos:Wsl:Distro"]!;
         var home = appHost.Configuration["Aiakos:Wsl:Home"]!;
         var nodePattern = NodeDeployment.InstalledNodePath(home);
