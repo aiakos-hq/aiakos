@@ -1,7 +1,7 @@
 ---
 id: 0001
 title: Solution skeleton
-status: draft            # draft | accepted | implemented | superseded
+status: accepted         # draft | accepted | implemented | superseded
 issue: https://github.com/aiakos-hq/aiakos/issues/9
 milestone: M1
 owner: "@bsakel"
@@ -65,8 +65,9 @@ Specs written in parallel own neighbouring parts. This spec only reserves their 
 - A GitHub Actions workflow builds and tests every pull request.
 - The dev stack can run next to the released tool without sharing a home directory, port or
   database (bootstrap rule).
-- Empty, named seams exist for the gRPC contract, the rule-5 interfaces and the CLI, so the next
-  specs add code without moving projects.
+- Empty, named seams exist for the gRPC contract and the rule-5 interfaces, and the existing
+  `Aiakos.Cli` placeholder tool joins the shared build, so the next specs add code without moving
+  projects.
 
 ## Non-goals / out of scope
 
@@ -75,17 +76,18 @@ Specs written in parallel own neighbouring parts. This spec only reserves their 
 - Any `ISessionHost`, `ISandbox`, `IHarnessAdapter`, `ISeatChannel` or `IChatConnector` behaviour.
   They exist only as empty placeholder interfaces (R43).
 - Actors other than the empty `ActorSystem`; tables other than `tenant`.
-- The CLI, NuGet packaging, the released instance's process model, release pipeline (#15, #6).
+- The real CLI, publishing to NuGet, the released instance's process model, release pipeline (#15).
+  The skeleton only adopts the existing `Aiakos.Cli` placeholder into the shared build (R48).
 - Native-AOT publishing. The node is marked AOT-compatible but published self-contained, non-AOT
-  (Q10).
+  (D10).
 - NAT networking. It is not supported (CLAUDE.md); the AppHost detects it and refuses (R25).
 - TLS, Tailscale, remote or sandboxed nodes (M6), `aspire publish` / Docker Compose (M6).
 - Row-level security and multitenancy activation (M8).
 - Blazor UI, REST API, MCP server, chat connectors.
-- Several dev stacks at once on one machine (Q11). M1 assumes one dev AppHost per machine and
+- Several dev stacks at once on one machine (D11). M1 assumes one dev AppHost per machine and
   makes a second one fail loudly.
-- A Windows CI runner and automated WSL end-to-end tests in CI (Q7).
-- Serilog (Q8).
+- A Windows CI runner and automated WSL end-to-end tests in CI (D7).
+- Serilog (D8).
 
 ## Requirements
 
@@ -103,7 +105,7 @@ Specs written in parallel own neighbouring parts. This spec only reserves their 
   `latest-recommended`, `EnforceCodeStyleInBuild` `true`, `GenerateDocumentationFile` `true` with
   `CS1591` in `NoWarn` (needed for IDE0005 in builds), `Deterministic` `true`,
   `ContinuousIntegrationBuild` `true` when `GITHUB_ACTIONS` is `true`, `IsPackable` `false`
-  (the CLI opts in later), `NuGetAudit` with `NuGetAuditMode` `all`, and the Apache-2.0 license
+  (`Aiakos.Cli` opts in, R48), `NuGetAudit` with `NuGetAuditMode` `all`, and the Apache-2.0 license
   and repository metadata.
 - **R5** Central package management: `Directory.Packages.props` with
   `ManagePackageVersionsCentrally` and `CentralPackageTransitivePinningEnabled` set to `true`.
@@ -115,6 +117,14 @@ Specs written in parallel own neighbouring parts. This spec only reserves their 
   says why (for example ASPIRE010 in the AppHost, R9).
 - **R8** All new text files are LF, as `.gitattributes` already enforces. `*.ps1` keeps CRLF.
   `.gitignore` gains `artifacts/`.
+- **R48** The existing placeholder tool `src/Aiakos.Cli` (merged in #31 to claim the NuGet ID, #6)
+  is adopted, not recreated: it joins `Aiakos.slnx`; the settings that `Directory.Build.props`
+  now provides (`TargetFramework`, `Nullable`, `ImplicitUsings`, `TreatWarningsAsErrors`,
+  `Authors`, license and repository metadata) are removed from its project file; any package it
+  gains later is versioned centrally. It keeps its tool identity unchanged: `PackageId` `Aiakos`,
+  `ToolCommandName` `aiakos`, `AssemblyName` `aiakos`, `Version` `0.0.1-preview.1`,
+  `RollForward` `Major`, `IsPackable` `true`, `PackAsTool` `true` and its packed `README.md`. Its
+  behaviour does not change; #15 replaces the code under the same ID.
 
 ### AppHost and configuration
 
@@ -122,7 +132,7 @@ Specs written in parallel own neighbouring parts. This spec only reserves their 
   and defines these resources: `postgres` (container) with database `aiakos`, `orchestrator`
   (project), `node-publish` and `node-install` (one-shot executables, R19–R21) and `node-wsl`
   (the node in WSL). The build warning ASPIRE010 is suppressed only in `Aiakos.AppHost.csproj`,
-  with a comment pointing to spike 0003 pitfall 11 (Q1).
+  with a comment pointing to spike 0003 pitfall 11 (D1).
 - **R10** The AppHost uses a single `http` launch profile with fixed dashboard ports (R15) and
   `ASPIRE_ALLOW_UNSECURED_TRANSPORT=true`. All local traffic is plain HTTP on loopback; the
   "No trusted development certificate" banner is expected (spike 0003 §1, §3 "HTTPS / dev cert").
@@ -209,7 +219,7 @@ Specs written in parallel own neighbouring parts. This spec only reserves their 
   (four digits, ordered by name) and a migrator built on DbUp for PostgreSQL that runs each script
   in its own transaction and holds a Postgres advisory lock for the whole upgrade.
 - **R31** Application tables live in schema `aiakos`. The DbUp journal lives in
-  `aiakos_meta.schema_versions` and is the only table exempt from rule 6 (Q4).
+  `aiakos_meta.schema_versions` and is the only table exempt from rule 6 (D4).
 - **R32** Migration `0001_tenant.sql` creates `aiakos.tenant` and inserts the default tenant
   ([Design → Database](#database)).
 - **R33** A test fails if any table in schema `aiakos` lacks a `tenant_id uuid NOT NULL` column
@@ -266,7 +276,7 @@ Specs written in parallel own neighbouring parts. This spec only reserves their 
 - **R45** `.github/workflows/ci.yml` runs on pull requests to `main`, pushes to `main` and manual
   dispatch, on `ubuntu-latest`, with `permissions: contents: read`. It restores, builds in
   Release (warnings are errors), runs all tests (Postgres through Docker on the runner), publishes
-  the node for `linux-x64` self-contained, and uploads test results. Runs on the same PR cancel
+  the node for `linux-x64` self-contained, packs `Aiakos.Cli` (R48), and uploads test results. Runs on the same PR cancel
   each other.
 
 ### Bootstrap rule
@@ -304,7 +314,9 @@ Specs written in parallel own neighbouring parts. This spec only reserves their 
 │  ├─ Aiakos.Contracts/         gRPC/protobuf; content owned by spec 0002 (R44)
 │  ├─ Aiakos.Data/              DbUp migrator, embedded migrations, Dapper conventions (R30–R33)
 │  ├─ Aiakos.Orchestrator/      ASP.NET Core + Akka.Hosting + gRPC server (R27–R29)
-│  └─ Aiakos.Node/              node agent "Ergates"; executable aiakos-node (R34–R40)
+│  ├─ Aiakos.Node/              node agent "Ergates"; executable aiakos-node (R34–R40)
+│  └─ Aiakos.Cli/               EXISTING placeholder `dotnet tool` (PackageId Aiakos, command
+│                               aiakos); adopted as is (R48), replaced by #15
 └─ tests/
    ├─ Directory.Build.props     imports the root file; test defaults (xUnit v3, MTP)
    ├─ Aiakos.Hosting.Wsl.Tests/
@@ -323,9 +335,10 @@ Aiakos.AppHost ──► Aiakos.Hosting.Wsl, Aiakos.Core
 Aiakos.Orchestrator ──► Aiakos.ServiceDefaults, Aiakos.Contracts, Aiakos.Data, Aiakos.Core
 Aiakos.Node ──► Aiakos.ServiceDefaults, Aiakos.Contracts, Aiakos.Core
 Aiakos.Data ──► Aiakos.Core
+Aiakos.Cli  ──► (none in the skeleton; #15 adds its references)
 ```
 
-Reserved names, not created by this spec: `src/Aiakos.Cli` (#15), `src/Aiakos.HookRelay` (only
+Reserved names, not created by this spec: `src/Aiakos.HookRelay` (only
 if a native relay binary is needed; spikes 0001 and 0005 used a script), `images/` (M6 seat
 images).
 
@@ -602,7 +615,8 @@ INSERT INTO aiakos.tenant (tenant_id, slug, name)
 VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'Default tenant');
 ```
 
-- `Aiakos.Core.TenantIds.Default` is that UUID. Until multitenancy is activated (M8), every write
+- Tenant keys follow [ADR 0012](../adr/0012-tenant-keys.md) (D3): `uuid` keys, a unique slug for
+  addresses. `Aiakos.Core.TenantIds.Default` is the default tenant's UUID. Until multitenancy is activated (M8), every write
   uses it, taken from a `CallerContext` (plan §9) rather than hard-coded in repositories.
 - Conventions for every later migration (checked in review; the rule-6 part is checked by a test):
   - `tenant_id uuid NOT NULL REFERENCES aiakos.tenant (tenant_id)` on every table.
@@ -680,6 +694,7 @@ jobs:
       - run: dotnet build -c Release --no-restore
       - run: dotnet test -c Release --no-build --results-directory artifacts/test-results -- --report-xunit-trx   # exact TRX switch per the xUnit v3/MTP version in use
       - run: dotnet publish src/Aiakos.Node -c Release -r linux-x64 --self-contained -o artifacts/node/linux-x64
+      - run: dotnet pack src/Aiakos.Cli -c Release --no-build -o artifacts/packages
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: test-results, path: artifacts/test-results }
@@ -720,8 +735,9 @@ Prerequisites: .NET SDK 10.0.1xx+ (see `global.json`); Docker Desktop running; W
 - Run the dev stack (Postgres, orchestrator, node in WSL): `dotnet run --project src/Aiakos.AppHost`
   — dashboard at http://localhost:15180
 - WSL end-to-end test (Windows only, stack not running): `$env:AIAKOS_E2E_WSL=1; dotnet test tests/Aiakos.AppHost.Tests`
+- Pack the placeholder tool: `dotnet pack src/Aiakos.Cli -c Release -o artifacts/packages`
 - Add a migration: `src/Aiakos.Data/Migrations/NNNN_description.sql` (next number; never edit a
-  merged one; every table gets `tenant_id`).
+  merged one; every table in schema `aiakos` gets `tenant_id`).
 - Reset the dev database (stack stopped): `docker rm -f <postgres container>` then
   `docker volume rm aiakos-dev-pgdata`.
 - The dev stack uses instance `dev` (`~/.aiakos-dev`, ports 5180+). It never touches the released
@@ -769,6 +785,10 @@ Prerequisites: .NET SDK 10.0.1xx+ (see `global.json`); Docker Desktop running; W
   `Aiakos.Data`, `Akka*`, `Npgsql*`.
 - [ ] **AC17** `CLAUDE.md` "Commands" matches [Design → Commands](#commands-for-claudemd), and the
   spec table in `docs/specs/README.md` shows 0001 as `implemented` when the PR merges.
+- [ ] **AC18** `Aiakos.Cli` is in `Aiakos.slnx`, its project file no longer sets the properties
+  that `Directory.Build.props` provides, and `dotnet pack src/Aiakos.Cli -c Release` produces
+  `Aiakos.0.0.1-preview.1.nupkg` containing `README.md` and the `aiakos` tool command; running the
+  tool prints the same greeting and version as before.
 
 ## Test plan
 
@@ -825,60 +845,60 @@ Prerequisites: .NET SDK 10.0.1xx+ (see `global.json`); Docker Desktop running; W
 Walk AC6 to AC14 in order: start the AppHost, look at the dashboard, look in WSL, stop and start
 the orchestrator, start a second node, Ctrl+C, then try the released-instance values.
 
-## Risks and open questions
+## Decisions (resolved in review)
 
-Open questions carry a recommendation; the reviewer confirms or changes them before `accepted`.
+The draft carried these as open questions with recommendations. The maintainer accepted every
+recommendation in the review of PR #26; they are folded into the requirements and design above.
 
-- **Q1 — `dotnet run` or `aspire run`?** Spike 0003 pitfall 11: without the `aspire` CLI,
-  `Aspire.AppHost.Sdk` 13.5.4 warns ASPIRE010, which breaks a warnings-as-errors build.
-  *Recommendation:* standardize on `dotnet run --project src/Aiakos.AppHost` (no extra tool for
-  CI or agent worktrees) and suppress ASPIRE010 in `Aiakos.AppHost.csproj` only, with a comment.
-  `aspire run` may still be used by humans. Revisit when the CLI bundle becomes the only
-  supported path.
-- **Q2 — How is the node deployed into WSL?** Options: (a) one-shot Aspire resources
-  `node-publish` → `node-install` → `node-wsl` (this spec); (b) an MSBuild target on the AppHost
-  build; (c) a manual script. *Recommendation:* (a). It is visible in the dashboard, fails
-  honestly, reruns on each AppHost start and needs no MSBuild customization. The cost is about
-  10–20 s of incremental publish on each start; accept it for M1.
-- **Q3 — `tenant_id` type: `uuid` or text slug?** *Recommendation:* `uuid` keys plus a unique
-  `slug` for addresses (`tenant/rig/seat` in plan §9), with the default tenant at the fixed UUID
-  `00000000-0000-0000-0000-000000000001`. This shapes every future table, so it is **significant
-  enough for a short ADR** (proposed ADR 0012 "Tenant keys") when this spec is accepted.
-- **Q4 — Is the DbUp journal exempt from rule 6?** It is infrastructure, not tenant data.
-  *Recommendation:* yes: journal in its own schema `aiakos_meta`, the guard test scoped to schema
-  `aiakos`, and one sentence added to rule 6 in `CLAUDE.md` ("migration bookkeeping in
-  `aiakos_meta` is exempt"). No ADR needed; ADR 0003's intent is tenant data.
-- **Q5 — xUnit v3 on Microsoft.Testing.Platform, or xUnit v2 on VSTest?** Plan §4 says xUnit and
-  Akka.TestKit, without a version. *Recommendation:* xUnit v3 + MTP (the .NET 10 direction; dynamic
-  skip for the opt-in E2E test). Risk: Akka.TestKit's xUnit integration must support v3 when #13
-  needs it; if it does not, that one test project uses xUnit v2. Check before #13 starts.
-- **Q6 — Warnings as errors locally too, or only in CI?** *Recommendation:* everywhere, so an
-  agent's local build fails exactly like CI. Use `-p:TreatWarningsAsErrors=false` ad hoc while
-  iterating; never commit it.
-- **Q7 — Add a Windows CI job?** It would catch Windows-only build breaks, but it cannot run
-  Linux containers or WSL. *Recommendation:* not in M1; the analyzers' platform checks (CA1416)
-  cover most risks. Add it together with an automated WSL end-to-end run when a self-hosted
-  Windows runner exists.
-- **Q8 — Serilog?** Plan §4 lists "OpenTelemetry + Serilog". *Recommendation:* not in the
-  skeleton; `ILogger` + OpenTelemetry covers the dashboard. Decide file logging for the released
-  tool in #15.
-- **Q9 — Released-tool defaults (`~/.aiakos`, port base 7180, instance `release`).**
-  *Recommendation:* adopt them as the constants in `InstanceDefaults` now; #15 owns the final
-  values and changes them in one place if needed.
-- **Q10 — Native AOT for the node.** Native AOT cannot cross-compile from Windows to linux-x64,
-  and WSL has no .NET. *Recommendation:* mark the node and its libraries `IsAotCompatible` now
-  (analyzers catch problems early) and publish self-contained non-AOT in dev and CI. Native-AOT
-  release binaries (plan §0.5) are built on a Linux runner by the release pipeline (#15 or later).
-- **Q11 — Several dev stacks on one machine (e.g. two seats testing in two worktrees).** Fixed
-  ports and a shared WSL home collide. *Recommendation:* M1 supports one dev stack per machine;
-  the overrides (`Aiakos:Instance`, `Aiakos:PortBase`, `Aiakos:Wsl:Home`, dashboard ports in the
-  launch profile) make a second one possible by hand, and the lock and port binding fail loudly
-  otherwise. Automatic allocation is a later issue if stage B needs it.
-- **Q12 — Persistent Postgres container.** *Recommendation:* persistent with a named volume per
-  instance (faster restarts, no leak on a hard kill, data kept across `down`/`up` tests). Reset is
-  `docker rm -f` plus `docker volume rm aiakos-dev-pgdata`, documented in CLAUDE.md.
+- **D1 — `dotnet run` or `aspire run`?** Decision: standardize on
+  `dotnet run --project src/Aiakos.AppHost` and suppress ASPIRE010 in `Aiakos.AppHost.csproj`
+  only, with a comment (R7, R9). Rationale: no extra tool for CI or agent worktrees; spike 0003
+  pitfall 11 showed ASPIRE010 is the only cost. Humans may still use `aspire run`.
+- **D2 — How is the node deployed into WSL?** Decision: one-shot Aspire resources
+  `node-publish` → `node-install` → `node-wsl` (R19–R21), not an MSBuild target or a script.
+  Rationale: visible in the dashboard, fails honestly, reruns on every start, no MSBuild
+  customization; about 10–20 s of incremental publish per start is acceptable for M1.
+- **D3 — `tenant_id` type.** Decision: `uuid` keys plus a unique `slug` for addresses, default
+  tenant at the fixed UUID `00000000-0000-0000-0000-000000000001` (R32,
+  [Design → Database](#database)). Rationale: stable opaque keys for every table, readable
+  `tenant/rig/seat` addresses (plan §9). Recorded in
+  [ADR 0012](../adr/0012-tenant-keys.md) because it shapes every future table.
+- **D4 — Is the DbUp journal exempt from rule 6?** Decision: yes. The journal lives in schema
+  `aiakos_meta`, the guard test is scoped to schema `aiakos` (R31, R33), and rule 6 in
+  `CLAUDE.md` says so. Rationale: migration bookkeeping is infrastructure, not tenant data; ADR
+  0003's intent is tenant data, so no ADR is needed.
+- **D5 — Test framework.** Decision: xUnit v3 on Microsoft.Testing.Platform
+  ([Design → Tests](#tests), R3). Rationale: the .NET 10 direction, and dynamic skip for the opt-in
+  end-to-end test. If Akka.TestKit does not support xUnit v3 when #13 needs it, that one test
+  project uses xUnit v2 (see Risks).
+- **D6 — Warnings as errors locally or only in CI?** Decision: everywhere (R4). Rationale: an
+  agent's local build fails exactly like CI. `-p:TreatWarningsAsErrors=false` may be used ad hoc
+  while iterating and is never committed.
+- **D7 — Windows CI job?** Decision: not in M1 (R45). Rationale: a hosted Windows runner cannot run
+  Linux containers or WSL, and CA1416 covers most platform risks. Add it with an automated WSL
+  end-to-end run once a self-hosted Windows runner exists.
+- **D8 — Serilog?** Decision: not in the skeleton (R41). Rationale: `ILogger` + OpenTelemetry covers
+  the dashboard; file logging for the released tool is decided in #15.
+- **D9 — Released-tool defaults.** Decision: `~/.aiakos`, port base 7180, instance `release`,
+  as constants in `Aiakos.Core.InstanceDefaults` (R18, R46). Rationale: the guard needs concrete
+  values now; #15 owns the final values and changes them in one place.
+- **D10 — Native AOT for the node.** Decision: `IsAotCompatible` on the node and its libraries now;
+  self-contained, non-AOT publish in dev and CI (R19, R40). Rationale: Native AOT cannot
+  cross-compile from Windows to linux-x64 and WSL has no .NET; native-AOT release binaries
+  (plan §0.5) come from a Linux runner in the release pipeline.
+- **D11 — Several dev stacks on one machine.** Decision: M1 supports one dev stack per machine;
+  the overrides (`Aiakos:Instance`, `Aiakos:PortBase`, `Aiakos:Wsl:Home`, launch-profile ports)
+  allow a second one by hand, and the lock and port binding fail loudly otherwise. Rationale:
+  keeps M1 small; automatic allocation becomes an issue only if stage B needs it.
+- **D12 — Postgres container lifetime.** Decision: persistent, with a named volume per instance
+  (R12); the reset command is in [Design → Commands](#commands-for-claudemd). Rationale: faster
+  restarts, no leak on a hard kill of DCP, data kept across `down`/`up` tests.
+- **D13 — The existing `Aiakos.Cli` placeholder.** Decision: the skeleton adopts it (R48) rather
+  than treating it as a reserved name. Rationale: it already owns the NuGet ID and `aiakos`
+  command (#6); moving its shared settings into `Directory.Build.props` and central package
+  management now means #15 replaces only its code.
 
-Risks:
+## Risks
 
 - **`wslinfo --networking-mode`** was not exercised in spike 0003. If it is unavailable in the
   installed WSL version, the preflight falls back to reading `networkingMode` from
@@ -890,7 +910,8 @@ Risks:
 - **Aspire version churn.** `EndpointReference` handling and event names changed across Aspire
   releases (spike 0003 pitfall 2). The AppHost tests pin the behaviour; upgrade Aspire only in a
   dedicated PR.
-- **Publish time on each AppHost start** (Q2) could annoy; measure it in the implementation PR.
+- **Akka.TestKit and xUnit v3** (D5): check compatibility before #13 starts.
+- **Publish time on each AppHost start** (D2) could annoy; measure it in the implementation PR.
 
 ## Changes after acceptance
 

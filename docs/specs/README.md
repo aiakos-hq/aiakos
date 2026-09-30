@@ -9,4 +9,4 @@ and test plan. The *what/why* and status live in the linked GitHub issue.
 
 | # | Title | Status | Milestone |
 |---|---|---|---|
-| [0001](0001-solution-skeleton.md) | Solution skeleton | draft | M1 |
+| [0001](0001-solution-skeleton.md) | Solution skeleton | accepted | M1 |
