@@ -1,7 +1,7 @@
 ---
 id: 0005
 title: Claude Code adapter
-status: draft            # draft | accepted | implemented | superseded
+status: accepted         # draft | accepted | implemented | superseded
 issue: https://github.com/aiakos-hq/aiakos/issues/12
 milestone: M1
 owner: "@bsakel"
@@ -33,7 +33,7 @@ Evidence from the M0 spikes:
 | [0004](../spikes/0004-opencode-api.md) | The second harness is API-driven. The node-side driver interface must fit an HTTP/SSE harness as well as a terminal one, so nothing Claude-specific may leak into it. |
 | [0005](../spikes/0005-docker-seat.md) | `StopFailure` is the only signal for auth and API errors, after about 3 minutes of silence. Seed `~/.claude.json` (`hasCompletedOnboarding`, `theme`, trust) for a fresh home. Use `apiKeyHelper` with a key file, never `ANTHROPIC_API_KEY` (it opens a blocking dialog whose default is "No"). SIGTERM gives `SessionEnd reason=other`. The hook source address cannot identify a seat; the per-seat token does. |
 
-### Verification experiment (spec 0003 open question 3)
+### Verification experiment (spec 0003 D3)
 
 Spec 0003 projects guidance and skills into a per-seat projection root outside the checkout and
 proposes loading it with `--add-dir <projection root>` plus
@@ -144,25 +144,26 @@ Other findings from the same runs:
 
 ### Depends on wave 1 decisions
 
-These come from draft specs that are still in review. If one changes, the parts listed here change
-with it.
+Specs 0001–0003 are accepted on `main`, and the decision IDs cited below (D…) are theirs.
+Specs 0004 and 0006 were written in parallel with this one. If one of them changes, the parts
+listed here change with it.
 
 - **Spec 0001 (solution skeleton, #9)**
   - The reserved project name `src/Aiakos.HookRelay` ("only if a native relay binary is needed").
   - The hook ingest port is the instance port base + 10 (dev 5190, released 7190).
   - `AIAKOS_HOME` is per instance.
-  - The node is AOT-compatible, and the opt-in end-to-end pattern is `AIAKOS_E2E_*` with xUnit v3
+  - The node is AOT-compatible, published non-AOT in dev (D10), and the opt-in end-to-end pattern is `AIAKOS_E2E_*` with xUnit v3
     dynamic skip.
 - **Spec 0002 (gRPC contract, #10)**
-  - The adapter split of Q1: the orchestrator builds launches and interprets state; the node driver
+  - The adapter split of D1 (ADR 0018): the orchestrator builds launches and interprets state; the node driver
     does the mechanics and normalization.
   - The `HarnessEventKind` names and the Claude column of its mapping table (corrected in
     [Event mapping](#event-mapping)).
-  - `source_seq`, stamped by the hook relay (R28, Q3). Its mechanism is defined here.
+  - `source_seq`, stamped by the hook relay (R28, D3). Its mechanism is defined here.
   - `LaunchResult` READY / FAILED / UNKNOWN with reasons (R21), and `DeliverInput`
     `lead` / `body` / `expect_confirmation` / `confirm_timeout` with `DeliveryResult` (R22).
   - `StartSeat` `argv` / `env` / `files` / `secrets` with the placeholders `${AIAKOS_SEAT_HOME}` and
-    `${AIAKOS_WORKSPACE}` (R19). See Q6 for `argv[0]`.
+    `${AIAKOS_WORKSPACE}` (R19). See D6 for `argv[0]`.
   - Orphan `SessionEnd` is forwarded (R35), and `SessionObserved` reports mismatches (R36).
   - Raw payload limits (R38) and `TELEMETRY` coalescing (R39).
   - The "#12 must" list in its Assumptions for dependent specs.
@@ -174,8 +175,8 @@ with it.
     rejected.
   - Aiakos-owned settings (R17).
   - `seat_root` in `rig.env.yaml`, secrets as node-local file references (R21), `auth` (R13), and
-    the model as a verbatim string or `null`.
-  - Its Q3 is answered by E1–E6, and its trust assumption is corrected by T1–T7.
+    the model as a verbatim string or `null` (D7); `auth: api-key` is outside M1 acceptance (D6).
+  - Its D3 (ADR 0015) is verified by E1–E6, and its trust assumption is corrected by T1–T7.
 - **Proposals from spec 0004 (tmux session host, #11, in parallel)**
   - The per-seat token is a 0600 file, and the relay reads its path from `AIAKOS_SEAT_TOKEN_FILE`
     (its Q1, which amends 0002 R45).
@@ -201,7 +202,7 @@ with it.
 
 ## Goals
 
-- One Claude Code adapter in two halves (spec 0002 Q1):
+- One Claude Code adapter in two halves (spec 0002 D1, ADR 0018):
   - an orchestrator half that turns a resolved seat into a `StartSeat` and provides the state
     profile;
   - a node half that prepares the seat, waits for readiness, verifies resumes, delivers and confirms
@@ -243,7 +244,7 @@ with it.
 
 ### Adapter shape
 
-- **R1** The adapter has two halves, one per process (spec 0002 Q1):
+- **R1** The adapter has two halves, one per process (spec 0002 D1, ADR 0018):
   - the **orchestrator half** implements `IHarnessAdapter` and `IHarnessStateProfile` in
     `Aiakos.Orchestrator` (namespace `Aiakos.Orchestrator.Harnesses.ClaudeCode`);
   - the **node half** implements `IHarnessDriver` in `Aiakos.Node` (namespace
@@ -273,11 +274,11 @@ with it.
     with **no** `--session-id`
   - `FORK` (not in M1): `claude --resume <from> --fork-session --session-id <new> -n …`
   `--model` is present only when the resolved model is not `null`. It is passed verbatim (spec 0003
-  Q7) on every launch, resumes included, so the rig spec stays authoritative. `--continue`,
+  D7) on every launch, resumes included, so the rig spec stays authoritative. `--continue`,
   `--permission-mode`, `--dangerously-skip-permissions`, `--bare`, `--safe-mode` and
   `--setting-sources` are never used.
 - **R6** `argv[0]` is the logical name `claude`. The node driver replaces it with its configured
-  absolute executable (Q6). No other element is rewritten except the spec 0002 R19 placeholders.
+  absolute executable (D6). No other element is rewritten except the spec 0002 R19 placeholders.
 - **R7** `BuildLaunch` sets these non-secret environment variables:
   - `AIAKOS_SEAT=<seat>@<rig>` (informational; it appears in the statusLine);
   - `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` (E1, E2);
@@ -306,7 +307,7 @@ with it.
   first 8 hex characters of the delivery's `command_id`. It sets `expect_confirmation = true`. A body
   that is a single slash command gets an **empty** lead and `expect_confirmation = false`, and in M1
   it must be on the allowlist `{/compact}`; anything else is rejected with
-  `SLASH_COMMAND_NOT_ALLOWED` (Q13).
+  `SLASH_COMMAND_NOT_ALLOWED` (D13).
 
 ### Seat preparation (node half)
 
@@ -530,7 +531,7 @@ Aiakos.Node/Hooks/
 ```
 
 `src/Aiakos.HookRelay` (reserved by spec 0001) is **not** created in M1. The relay is a POSIX shell
-script (Q1).
+script (D1).
 
 ### Interfaces
 
@@ -701,7 +702,7 @@ feeds.
 | Claude source | Condition | `kind` | `native_session_id` | Attributes, usage | Spec 0006 rows |
 |---|---|---|---|---|---|
 | `SessionStart` | `source` ∈ `startup`, `resume`, `fork` | `SESSION_STARTED` | payload | `source`, `model`, `session_title`; resume: `context_tokens`, `seconds_since_last_response` | S11, A1; readiness per R25 |
-| `SessionStart` | `source = clear` | `SESSION_STARTED` | **new** ID | `source=clear`, `previous_session_id` | A1; rotation (Q5) |
+| `SessionStart` | `source = clear` | `SESSION_STARTED` | **new** ID | `source=clear`, `previous_session_id` | A1; rotation (D5) |
 | `SessionStart` | `source = compact` | `COMPACTED` | payload | `source=compact` | A9 |
 | `UserPromptSubmit` | — | `PROMPT_SUBMITTED` | payload | `turn_id`=`prompt_id`, `permission_mode`, `delivery_id` if the lead marker matched (R30) | A2; U2 evidence |
 | `PreToolUse` | — | `TOOL_STARTED` | payload | `tool_name`, `tool_use_id`, `turn_id` | A4 |
@@ -709,7 +710,7 @@ feeds.
 | `PostToolUse` | — | `TOOL_FINISHED` | payload | `tool_name`, `tool_use_id`, `duration_ms` | A5 (resolves a matching `request_id` or `*`) |
 | `PostToolUseFailure` | — (documented, not yet observed) | `TOOL_FINISHED` | payload | as above + `failed=true` | A5 |
 | `Notification` | `permission_prompt`, first since the last prompt/tool start (R23) | `INPUT_REQUESTED` | payload | `notification_type`, `request_id=*` | A6 |
-| `Notification` | `permission_prompt` echo, `idle_prompt`, others | `OTHER` | payload | `notification_type` | A14 (quiet timer only); see Q4 |
+| `Notification` | `permission_prompt` echo, `idle_prompt`, others | `OTHER` | payload | `notification_type` | A14 (quiet timer only); see D4, RK2 |
 | `Stop` | — | `TURN_ENDED` | payload | `turn_id`, `stop_hook_active` | A10; U2 evidence |
 | `StopFailure` | — | `TURN_FAILED` | payload | `turn_id`, `error` (= `last_assistant_message`, ≤ 1 KiB) | A11 (+`turn-failed`); U2 evidence |
 | `PreCompact` | — | `COMPACTION_STARTED` | payload | `trigger` (`manual`/`auto`) | A8 |
@@ -721,7 +722,7 @@ feeds.
 `INPUT_RESOLVED` is never emitted for Claude. Resolution is inferred by spec 0006 A5 from
 `TOOL_FINISHED`, the next `PROMPT_SUBMITTED` (A2) or `TURN_ENDED` (A10).
 
-Known gap (Q4): a human who **denies with Escape** gets no hook at all, so the seat stays
+Known gap (D4, RK3): a human who **denies with Escape** gets no hook at all, so the seat stays
 `needs-input` until the human's next prompt in the pane (A2). This is honest, because nothing
 contradicts it, and the human is at the pane when it happens.
 
@@ -782,7 +783,7 @@ Activity rules that this mapping feeds:
 | Adopted live seats reported `UNKNOWN` after a node restart. The driver cannot re-establish readiness; the next hook re-establishes activity | R33 |
 
 Two points to settle with spec 0004. First, its R11 rejects environment names that contain
-`TOKEN`, which would also reject `AIAKOS_SEAT_TOKEN_FILE` (Q7). Second, it lists this spec's
+`TOKEN`, which would also reject `AIAKOS_SEAT_TOKEN_FILE` (D7). Second, it lists this spec's
 `PATH` handling as a risk, and R15 addresses it.
 
 ### Trust seeding
@@ -801,7 +802,7 @@ often. A lost update is caught in two ways:
 - failing that, `READY_TIMEOUT` with `metadata.screen = trust-dialog` (R26). That outcome is
   `UNKNOWN`, never a key press.
 
-Spec 0003 R30's "check the seat root" becomes "ensure the workdir". Its Q3 fallback (projection at
+Spec 0003 R30's "check the seat root" becomes "ensure the workdir". Its D3 fallback (projection at
 the seat directory) is not needed.
 
 ## Acceptance criteria
@@ -871,7 +872,21 @@ the seat directory) is not needed.
   9. `RESUME` with a fresh random UUID → `FAILED RESUME_SESSION_NOT_FOUND`, and no new transcript
      file exists for any new ID;
   10. with `"disableAllHooks": true` in the worktree's `.claude/settings.local.json`, steps 1 and 4
-      still pass.
+      still pass;
+  11. (RK1) with `Bash(sleep:*)` allowed, a prompt to run `sleep 20`, then Escape 3 s after
+      `TOOL_STARTED` from the test (acting as the human): record which events arrive within 15 s,
+      and assert only that the next delivered prompt is `CONFIRMED`. The observed sequence is
+      written to the test output and copied into this spec under "Changes after acceptance";
+  12. (RK2) a permission dialog left open for 70 s: record whether `Notification idle_prompt`
+      arrives while `needs-input` holds. The test fails if it does, because D4 then needs revisiting;
+  13. (RK4) 10 deliveries, each sent as soon as a relaunch reports `READY`, are all `CONFIRMED`
+      without a resubmit;
+  14. (RK5) stop the seat, change the code word in the projected `CLAUDE.md` source, `RESUME`, and
+      ask for it. Record whether the new or the old word is returned; if it is the old one, #15
+      shows the D11 note;
+  15. (RK10) a prompt that runs a failing tool (for example reading a missing file) gives
+      `TOOL_FINISHED`, from either `PostToolUse` or `PostToolUseFailure`, with the tool's
+      `tool_use_id`.
 - [ ] **AC10** End to end, `/clear` (same switch): a delivered `/compact` is accepted, and `/clear`
   is rejected by the orchestrator with `SLASH_COMMAND_NOT_ALLOWED`. `/clear` typed by a human in the
   pane produces `OTHER{reason=clear}` for the old ID and `SESSION_STARTED{source=clear}` with a new
@@ -911,7 +926,7 @@ and echoes pasted input to a file. This exercises prepare → tmux → relay →
 `LaunchResult` and `DeliveryResult` without a login.
 
 **End to end** (opt-in, AC9–AC11): real Claude Code in WSL, as listed. It also measures the
-`ready_settle` question (Q8): 10 deliveries sent right after `READY` must all confirm without a
+`ready_settle` question (D8, RK4): 10 deliveries sent right after `READY` must all confirm without a
 resubmit.
 
 **Manual demo** (with specs 0004 and 0006 and the CLI, #15): `aiakos up` the `aiakos-dev` rig. Then:
@@ -921,97 +936,118 @@ resubmit.
 - `aiakos down`, then `aiakos up` resumes (decision `resume`, outcome `ready`);
 - attaching read-only shows the footer `aiakos impl@aiakos-dev`.
 
-## Risks and open questions
+## Decisions and risks
 
-Each question has a recommendation; the reviewer can accept it by merging.
+### Decisions (resolved in review)
 
-- **Q1 — Relay as a script or as `Aiakos.HookRelay`?** A native binary needs no `curl` or `flock`,
-  but native AOT cannot be cross-compiled from Windows (spec 0001 Q10), and a non-AOT .NET start per
-  hook costs about 50–100 ms. *Recommendation:* the POSIX `sh` relay above in M1, shipped as an
-  embedded resource and projected as a seat file. `Aiakos.HookRelay` stays reserved for M6 seat
-  images, implementing the same R16/R17 contract (built on a Linux runner).
-- **Q2 — May the node write the user's `~/.claude.json`?** It is the user's global Claude config,
-  and Claude rewrites it itself. The alternative is a manual "trust this path" step before every new
-  worktree, which fails the first `up` of each seat. *Recommendation:* yes, narrowly as in R13 (exact
-  workdir, one field, atomic, verified, logged), with `TRUST_NOT_ESTABLISHED` and `READY_TIMEOUT` /
-  `trust-dialog` as the honest failures. **ADR-worthy** ("Aiakos may write minimal harness user
-  config on the node").
-- **Q3 — Adopt `PermissionRequest` in M1?** It is verified, arrives ~6 s before the `Notification`,
-  and lets `request_id` pair with a `tool_use_id`. Its payload has no `tool_use_id`, so the pairing
-  is by tool name and input (R23). *Recommendation:* adopt it, and keep the `Notification` as a
-  deduplicated fallback. That closes most of spec 0006's "send into a dialog" window, and its
-  parallel-tools risk shrinks to identical parallel calls.
-- **Q4 — `idle_prompt`, and denial by Escape.** An Escape denial emits nothing (verified), so the
-  seat stays `needs-input` until the next prompt. `Notification idle_prompt` fired 60 s after a
-  `Stop`, but it is **not verified** whether it also fires while a permission dialog is open. If it
-  did and we mapped it to idle, `send` could paste into a dialog. *Recommendation:* map it to
-  `OTHER` in M1 and document the gap. A follow-up experiment keeps a dialog open for more than 60 s.
-  If `idle_prompt` never fires then, propose an additive `IDLE` level kind in spec 0002 and map
-  `idle_prompt` to it.
-- **Q5 — `/clear` rotates the session ID.** *Recommendation:* R27's mapping plus the new profile
-  member `IsSessionRotation`. The SeatActor records a new `seat_session` (decision
-  `harness-cleared`) that starts `fresh-only`. This adds to spec 0006, which proposed exactly this in
-  its Q14. Aiakos itself never sends `/clear` in M1 (Q13).
-- **Q6 — Who resolves `argv[0]`?** Spec 0002 R19 expands only two placeholders, but the harness
-  binary path is node configuration (spec 0003). *Recommendation:* `argv[0]` is a logical harness
-  name that the node driver replaces with its configured absolute executable (R6), as a one-line
-  clarification to 0002 R19. Recording the version in `Hello` (for example
-  `harness.claude-code@2.1.284`) is a later minor addition.
-- **Q7 — `AIAKOS_SEAT_TOKEN_FILE` vs spec 0004's environment name guard.** 0004 R11 rejects names
-  that contain `TOKEN`, and its own Q1 introduces this variable. *Recommendation:* 0004 exempts names
-  ending in `_FILE` whose value is an absolute path under the seat home. The guard exists to keep
-  values out of tmux, and a path is not a secret.
-- **Q8 — Is 1 s of `ready_settle` enough, or too much?** Spike 0001 lost the submit key when input
-  arrived before the TUI was ready. In this experiment, input sent 2–3 s after `SessionStart` always
-  worked, but a shorter delay was not measured. *Recommendation:* 1 s. AC9's 10 immediate deliveries
-  measure it, and the confirmer's single resubmit is the safety net.
-- **Q9 — How is a delivery confirmed?** Comparing the prompt text with the body is fragile: the
-  `<pasted_content>` wrapper, TAB → spaces, CRLF. *Recommendation:* the 8-hex marker in the lead
-  (R11, R30). It is unambiguous, survives the wrapper (the lead is typed, not pasted), and costs the
-  model 10 characters of noise.
-- **Q10 — The ingest's HTTP stack.** *Recommendation:* Kestrel through
-  `WebApplication.CreateSlimBuilder` (AOT-supported) with one route, bound to `127.0.0.1` only. The
-  alternative, `HttpListener`, is legacy. Spec 0001 intended the node to carry no ASP.NET Core
-  dependency through the contracts project. This adds one on purpose, only in the node, and spec
-  0001 should record that.
-- **Q11 — Does updated guidance reach a resumed conversation?** Claude may keep context from the
-  first launch; `--system-prompt-snapshot` suggests the system prompt is recorded once per
-  conversation. *Recommendation:* the E2E run checks whether a changed projected `CLAUDE.md` is
-  visible after `RESUME`. If it is not, document "guidance changes apply to fresh sessions or after
-  `/compact`" in the CLI's `up` output (#15), and do not work around it in M1.
-- **Q12 — Version pinning.** Seats share the user's Claude binary. *Recommendation:* no pinning in
-  M1. `DISABLE_AUTOUPDATER=1` in the seat environment (R7), the version recorded from the statusLine
-  and at node start, and a warning for versions newer than the tested one (R3). The E2E test is the
-  gate before the team upgrades Claude (bootstrap rule spirit, ADR 0008).
-- **Q13 — Slash commands through `send`.** `/clear` rotates the ID, `/exit` ends the seat outside
-  `down`, `/resume` switches conversations, and `/login` opens dialogs. *Recommendation:* M1 allows
-  only `/compact`. Humans can type anything in the attached pane, and the mapping reports what
-  happens.
-- **Q14 — Auto memory.** Claude keeps an auto-memory directory per working directory
-  (`~/.claude/projects/<slug>/memory/`). With `seat-worktree` each seat has its own. *Recommendation:*
-  leave it at Claude's default in M1, and revisit when the M7 handover design decides what a seat
-  should remember.
-- **Risk — Claude Code changes hook payloads, trust rules or flags.** They changed between spikes
-  (for example `idle_prompt` now fires). The fixtures are versioned by directory (`2.1.284/`), and
-  the E2E test is the upgrade gate (Q12).
-- **Risk — repository hooks run in seats.** A checked-out repo's `.claude/settings.json` hooks run
-  alongside ours (E7). That is Claude's normal behaviour for a trusted project, and binding a repo
-  implies trusting it (R13). The seat's own deny rules still apply.
-- **Risk — shared `~/.claude.json` writes** (Q2) may lose an update to Claude's own writer. It is
-  detected, not silent (R13, R26).
+The draft carried these as open questions with recommendations. In the review of PR #30 the
+maintainer accepted every recommendation. Each outcome is folded into the requirements and design
+above.
 
-**Decisions that deserve an ADR** (not written here):
+- **D1 — Relay as a script or as `Aiakos.HookRelay`?** *Decision:* in M1 the relay is the POSIX
+  `sh` script from [Hook relay](#hook-relay). It is shipped as an embedded resource and projected as
+  a seat file (R8, R16, R17). `Aiakos.HookRelay` stays reserved for M6 seat images and will
+  implement the same R16/R17 contract, built on a Linux runner. *Rationale:* native AOT cannot be
+  cross-compiled from Windows (spec 0001 D10), and a non-AOT .NET start costs about 50–100 ms per
+  hook. Recorded in [ADR 0028](../adr/0028-hook-transport.md).
+- **D2 — May the node write the user's `~/.claude.json`?** *Decision:* yes, narrowly as in R13:
+  - only the exact workdir, and only that one field;
+  - an atomic write, verified by a re-read, and logged;
+  - `TRUST_NOT_ESTABLISHED` and `READY_TIMEOUT`/`trust-dialog` are the honest failures.
+  *Rationale:* the alternative is a manual trust step for every new worktree, and the first `up` of
+  each seat would fail. Recorded in
+  [ADR 0029](../adr/0029-minimal-harness-user-config.md).
+- **D3 — Adopt `PermissionRequest` in M1?** *Decision:* yes. The `Notification permission_prompt`
+  stays as a deduplicated fallback (R20, R23). *Rationale:* `PermissionRequest` arrives about 6 s
+  earlier, which closes most of the "send into a dialog" window, and it lets `request_id` pair with
+  a `tool_use_id`.
+- **D4 — `idle_prompt`, and denial by Escape.** *Decision:* `Notification idle_prompt` maps to
+  `OTHER` in M1 ([Event mapping](#event-mapping)), and the Escape-denial gap is documented. The
+  follow-up experiment (does `idle_prompt` fire while a permission dialog is open?) is accepted but
+  **has not been run**; it is tracked as RK2 with a concrete E2E check. If `idle_prompt` never fires
+  while a dialog is open, a later revision proposes an additive `IDLE` level kind in spec 0002 and
+  maps `idle_prompt` to it. *Rationale:* mapping an unverified signal to idle could let `send` paste
+  into an open dialog.
+- **D5 — `/clear` rotates the session ID.** *Decision:* the R27 mapping, plus the profile member
+  `IsSessionRotation`. The SeatActor records a new `seat_session` with decision `harness-cleared`
+  that starts `fresh-only` (spec 0006 Q14). Aiakos itself never sends `/clear` (D13). *Rationale:*
+  this was verified in the experiment. Treating the rotation as a session-ID mismatch would push a
+  seat that the user cleared on purpose into `unknown`.
+- **D6 — Who resolves `argv[0]`?** *Decision:* `argv[0]` is the logical harness name `claude`, and
+  the node driver replaces it with its configured absolute executable (R6). This is a clarification
+  of spec 0002 R19. The Claude version may later be added to `Hello` in a minor revision.
+  *Rationale:* the harness binary path is node configuration (spec 0003), and the orchestrator
+  cannot know it.
+- **D7 — `AIAKOS_SEAT_TOKEN_FILE` vs spec 0004's environment name guard.** *Decision:* spec 0004
+  exempts names that end in `_FILE` and whose value is an absolute path under the seat home. The
+  amendment is applied to spec 0004 separately. *Rationale:* the guard keeps secret values out of
+  tmux, and a path is not a secret.
+- **D8 — `ready_settle`.** *Decision:* 1 s (R25). The confirmer's single resubmit is the safety net,
+  and RK4 measures whether 1 s is right. *Rationale:* spike 0001 lost the submit key when input
+  arrived too early, and 2–3 s always worked in the experiment. A shorter delay was not measured.
+- **D9 — How is a delivery confirmed?** *Decision:* by the 8-hex marker in the typed lead (R11,
+  R30), not by comparing the body. *Rationale:* a body comparison is fragile: the `<pasted_content>`
+  wrapper, TAB → spaces, CRLF. The marker is typed, not pasted, so it survives the wrapper, and it
+  costs the model about 10 characters.
+- **D10 — The ingest's HTTP stack.** *Decision:* Kestrel through `WebApplication.CreateSlimBuilder`
+  (AOT-supported), with one route, bound to `127.0.0.1` only (R18). This deliberately adds ASP.NET
+  Core to the node, and the amendment recording it is applied to spec 0001 separately.
+  *Rationale:* `HttpListener` is legacy, and a hand-written HTTP parser is not worth it.
+- **D11 — Does updated guidance reach a resumed conversation?** *Decision:* do not work around it
+  in M1. The E2E run checks it (RK5). If a changed `CLAUDE.md` is not visible after `RESUME`, the
+  CLI's `up` output (#15) says "guidance changes apply to fresh sessions or after `/compact`".
+  *Rationale:* `--system-prompt-snapshot` suggests the context is recorded once per conversation,
+  but this is unverified.
+- **D12 — Version pinning.** *Decision:* no pinning in M1. The seat environment gets
+  `DISABLE_AUTOUPDATER=1` (R7). The version is recorded at node start and from the statusLine, and
+  versions newer than the tested one get a warning (R3). The E2E test is the gate before the team
+  upgrades Claude. *Rationale:* seats share the user's binary. The E2E gate keeps upgrades
+  deliberate, in the spirit of ADR 0008.
+- **D13 — Slash commands through `send`.** *Decision:* only `/compact` (R11). Humans can type
+  anything in the attached pane, and the mapping reports what happens. *Rationale:* `/clear` rotates
+  the ID, `/exit` ends the seat outside `down`, `/resume` switches conversations, and `/login` opens
+  dialogs.
+- **D14 — Auto memory.** *Decision:* leave Claude's per-workdir auto memory
+  (`~/.claude/projects/<slug>/memory/`) at its default in M1. *Rationale:* with `seat-worktree`, each
+  seat already has its own. What a seat should remember is decided with the M7 handover design.
 
-1. Guidance and skills are loaded from an Aiakos-owned projection root via `--add-dir` +
-   `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`, and every Aiakos setting (hooks, statusLine,
-   permissions, `disableAllHooks: false`) comes from one per-seat `--settings` file. This makes spec
-   0003's ADR candidate 3 concrete, now verified.
-2. Hook transport: a relay per hook invocation, a per-launch token read from a file (never argv or
-   the tmux environment), and a per-seat `source_seq` counter that is monotonic across launches
-   and doubles as loss detection.
-3. Aiakos writes minimal harness user configuration (trust for the exact workdir) on the node (Q2).
-4. The screen of a blocked launch is classified for the *reason* only. It never changes an outcome
-   and never triggers input.
+ADRs recording the cross-cutting decisions of this spec:
+
+1. [ADR 0027](../adr/0027-claude-projection-and-settings.md): guidance and skills load from an
+   Aiakos-owned projection root via `--add-dir` + `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`.
+   Every Aiakos setting (hooks, statusLine, permissions, `disableAllHooks: false`) comes from one
+   per-seat `--settings` file (R5, R8, R9; E1–E13). This makes spec 0003 D3 /
+   [ADR 0015](../adr/0015-projection-outside-checkouts.md) concrete, and the mechanism is verified.
+2. [ADR 0028](../adr/0028-hook-transport.md): a shell relay per hook invocation, a per-launch token
+   read from a 0600 file (never argv or the tmux environment), and a per-seat `source_seq` counter
+   that is monotonic across launches and also detects losses (R15–R19, D1).
+3. [ADR 0029](../adr/0029-minimal-harness-user-config.md): the node writes minimal harness user
+   configuration, meaning trust for the exact workdir (R13, D2).
+4. [ADR 0030](../adr/0030-screen-classification-never-acts.md): the screen of a blocked launch is
+   classified only to explain the *reason*. It never changes an outcome and never triggers input
+   (R26).
+
+### Risks
+
+Stable IDs; the central risk register links to them. Each risk says how and when it is checked,
+and which issue owns it.
+
+| ID | Risk | Check | Owner |
+|---|---|---|---|
+| RK1 | **Escape during a running tool** (the human interrupts a tool call that needed no permission). It is unverified which hooks fire, if any. If none fire, the seat stays `working` until spec 0006's quiet timeout. | AC9 step 11 | #12 |
+| RK2 | **`idle_prompt` while a permission dialog is open** is unverified. If it fires and is ever mapped to idle, `send` could paste into the dialog. M1 maps it to `OTHER` (D4). | AC9 step 12 (dialog open for 70 s) | #12 |
+| RK3 | **Denial by Escape emits no hook** (verified). The seat stays `needs-input` until the human's next prompt in the pane, so `send` is refused until then. | AC7 sequence test (no event → still `needs-input`); documented in the CLI's `send` rejection message | #12, #13, #15 |
+| RK4 | **The 1 s `ready_settle`** (D8) may be too short, which loses the submit key, or longer than needed. | AC9 step 13 (10 deliveries right after `READY`, all confirmed without a resubmit) | #12 |
+| RK5 | **Updated guidance may not reach a resumed conversation** (D11). | AC9 step 14 (change the projected `CLAUDE.md` between stop and `RESUME`, then ask for the new code word) | #12, #15 |
+| RK6 | **A write to `~/.claude.json` can be lost** when a running Claude rewrites the file at the same time (D2). | AC6 (atomic write, verify); AC7 (`trust-dialog` → `UNKNOWN`, zero keys); implementation logs every write | #12 |
+| RK7 | **Claude Code upgrades can change** hook payloads, trust rules or flags. They already changed between spikes (for example, `idle_prompt` now fires). | Fixtures versioned by directory (`2.1.284/`); AC9 is the upgrade gate (D12); R3 warns on untested versions | #12 |
+| RK8 | **Repository settings act in seats.** A repo's hooks run next to ours (E7), and `disableAllHooks: true` in a repo would blind Aiakos without R9. | AC3 (`disableAllHooks: false` present); AC9 step 10 | #12 |
+| RK9 | **`PermissionRequest` pairing** by tool name and input (R23) can match the wrong one of two identical parallel tool calls, so `needs-input` could clear early. | Normalizer sequence tests in AC1; accepted for M1 (spec 0006 risk) | #12, #13 |
+| RK10 | **`PostToolUseFailure`** is registered and mapped but has never been observed. | AC9 step 15 (a tool call that fails) | #12 |
+| RK11 | **Relay dependencies** (`curl`, `flock`) could be missing on a node. | R3 capability check at node start; AC4 runs on Linux CI | #12 |
+| RK12 | **The `/clear` rotation** depends on spec 0006 adopting `IsSessionRotation` (D5). | AC10 | #12, #13 |
+| RK13 | **`auth: api-key`** is not verified with a real key (the spike 0005 nonce recall is pending). It is outside M1 acceptance. | Spike 0005's pending verifier, then an E2E variant in M6 | #12 (M6 follow-up) |
+| RK14 | **The deny rule `Bash(tmux:*)` is only a speed bump.** A seat can still reach the tmux socket some other way (spec 0004 security notes). | Removed by sandboxing in M6; no M1 check beyond AC3 | #11 |
 
 ## Changes after acceptance
 
