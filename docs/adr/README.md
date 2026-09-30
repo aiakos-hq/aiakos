@@ -26,3 +26,15 @@ ADR that supersedes the old one instead. Template: [`TEMPLATE.md`](TEMPLATE.md).
 | [0019](0019-node-link-delivery-model.md) | Node link delivery model | accepted |
 | [0020](0020-node-contract-versioning.md) | Node contract versioning: package major, negotiated minor, capabilities | accepted |
 | [0021](0021-buf-for-proto-tooling.md) | buf for proto lint and breaking checks; Grpc.Tools for C# codegen | accepted |
+| [0022](0022-private-tmux-server-per-instance.md) | A private tmux server per instance; sessions are adopted after a node restart | accepted |
+| [0023](0023-no-self-initiated-input.md) | The session host never sends input on its own; delivery is one composite operation | accepted |
+| [0024](0024-process-tree-stop.md) | Stop terminates the harness process tree by signals and verifies it | accepted |
+| [0025](0025-secrets-never-through-tmux.md) | Secrets never pass through tmux; the seat token is a file | accepted |
+| [0026](0026-minimum-tmux-version.md) | Minimum tmux version 3.4; below it the session host is unavailable | accepted |
+| [0027](0027-claude-projection-and-settings.md) | Claude Code loads the projection via `--add-dir` and all Aiakos settings via `--settings` | accepted |
+| [0028](0028-hook-transport.md) | Hooks reach the node through a POSIX sh relay with a per-seat sequence counter | accepted |
+| [0029](0029-minimal-harness-user-config.md) | The node may write minimal harness user configuration (exact-workdir trust) | accepted |
+| [0030](0030-screen-classification-never-acts.md) | Screen classification explains outcomes but never triggers input | accepted |
+| [0031](0031-three-axis-seat-state.md) | Three-axis seat state with fixed values, reasoned unknowns and a reporting overlay | accepted |
+| [0032](0032-seat-actor-sole-writer.md) | The SeatActor is the sole writer of seat state; one transaction per input | accepted |
+| [0033](0033-no-unrecorded-relaunch.md) | No relaunch or fresh start without a recorded decision | accepted |
