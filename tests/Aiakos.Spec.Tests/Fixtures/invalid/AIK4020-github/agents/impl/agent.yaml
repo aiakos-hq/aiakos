@@ -1,0 +1,6 @@
+apiVersion: aiakos.dev/v1
+kind: Agent
+name: impl
+description: uses ghp_example
+defaults:
+  harness: claude-code

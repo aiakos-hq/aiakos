@@ -1,0 +1,2 @@
+rig.yaml:7:12: error AIK4011: repo url in workspace.repos[0] has an unsupported form
+  hint: use https://host/path or git@host:org/repo.git

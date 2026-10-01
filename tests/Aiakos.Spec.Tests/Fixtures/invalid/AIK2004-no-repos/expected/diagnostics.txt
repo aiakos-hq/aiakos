@@ -1,0 +1,1 @@
+rig.yaml:12:12: error AIK2004: field 'repos' in seat 'impl' must have at least one item

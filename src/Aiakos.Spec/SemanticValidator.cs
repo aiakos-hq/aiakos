@@ -53,6 +53,9 @@ internal sealed class SemanticValidator
         ValidateCrossFile();
     }
 
+    internal static bool ContainsCredentialLikeText(string? text) =>
+        text is not null && Credentials.Any(credential => credential.Pattern.IsMatch(text));
+
     private void ValidateRig()
     {
         var root = rig.Root!;
@@ -364,8 +367,7 @@ internal sealed class SemanticValidator
         if (!Usable(document) || document.Root is null) return;
         VisitValues(document.Root, node =>
         {
-            if (node.Kind != YamlNodeKind.Scalar || node.Value is null || node.IsNull || node.IsTaggedOrAlias || repoUrls.Contains(node)) return;
-            if (HasDiagnosticAt(document.File, node.Mark, "AIK2004")) return;
+            if (node.Kind != YamlNodeKind.Scalar || node.Value is null || node.IsNull || repoUrls.Contains(node)) return;
             foreach (var (kind, pattern) in Credentials)
             {
                 if (pattern.IsMatch(node.Value))
@@ -441,6 +443,8 @@ internal sealed class SemanticValidator
     {
         var definedRepoList = Get(Get(rig.Root!, "workspace"), "repos");
         if (definedRepoList is not { Kind: YamlNodeKind.Sequence }) return;
+        if (seats.Any(seat => (seat.Kind == "agent" || seat.Kind is null) && !seat.KindInvalid &&
+                              Get(seat.Node, "repos") is { } list && Damaged(rig, list))) return;
         var repoMap = Get(env.Root!, "repos");
         var reposKey = FindKey(env.Root!, "repos");
         var damaged = repoMap is not null && Damaged(env, repoMap);

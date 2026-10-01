@@ -84,6 +84,8 @@ public static class RigLoader
             .Distinct(StringComparer.Ordinal).Select((file, index) => (file, index)).ToDictionary(item => item.file, item => item.index, StringComparer.Ordinal);
         var safeDiagnostics = diagnostics
             .Where(diagnostic => diagnostic.Code == "AIK4020" || !diagnostics.Any(secret => secret.Code == "AIK4020" && secret.File == diagnostic.File && secret.Line == diagnostic.Line && secret.Column == diagnostic.Column))
+            .Where(diagnostic => diagnostic.Code == "AIK4020" ||
+                                 (!SemanticValidator.ContainsCredentialLikeText(diagnostic.Message) && !SemanticValidator.ContainsCredentialLikeText(diagnostic.Hint)))
             .OrderBy(diagnostic => fileOrder.GetValueOrDefault(diagnostic.File, int.MaxValue))
             .ThenBy(diagnostic => diagnostic.Line)
             .ThenBy(diagnostic => diagnostic.Column)

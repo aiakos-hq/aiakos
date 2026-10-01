@@ -1,0 +1,1 @@
+agents/impl/agent.yaml:6:12: error AIK4002: harness 'codex' in defaults is not supported in this version (planned for M2)

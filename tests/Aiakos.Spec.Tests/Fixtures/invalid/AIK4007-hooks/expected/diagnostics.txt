@@ -1,0 +1,1 @@
+agents/impl/agent.yaml:9:5: error AIK4007: setting 'hooks' in harnesses.claude-code is owned by Aiakos

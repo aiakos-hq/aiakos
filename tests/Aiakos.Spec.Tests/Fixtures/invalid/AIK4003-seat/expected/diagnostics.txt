@@ -1,0 +1,2 @@
+rig.yaml:12:9: error AIK4003: duplicate seat id 'impl'
+  hint: first defined at line 9

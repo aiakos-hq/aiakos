@@ -1,0 +1,2 @@
+rig.yaml:9:9: error AIK4010: seat id 'node' is reserved
+  hint: reserved ids: all, aiakos, system, orchestrator, node, human

@@ -1,0 +1,2 @@
+rig.yaml:15:19: error AIK4004: workdir_repo 'lib' is not in the repos of seat 'impl'
+  hint: repos of the seat: app

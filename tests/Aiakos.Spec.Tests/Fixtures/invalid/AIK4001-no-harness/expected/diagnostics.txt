@@ -1,0 +1,2 @@
+rig.yaml:9:5: error AIK4001: seat 'impl' has no harness
+  hint: set harness on the seat or defaults.harness in agents/impl/agent.yaml

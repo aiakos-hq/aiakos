@@ -1,0 +1,2 @@
+rig.env.yaml:8:11: error AIK5002: invalid node path 'C:\src\app' for field 'path' in repos.app
+  hint: Windows paths are not valid; node paths are POSIX paths on the node

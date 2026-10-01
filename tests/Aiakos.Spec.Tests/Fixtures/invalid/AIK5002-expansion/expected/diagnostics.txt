@@ -1,0 +1,2 @@
+rig.env.yaml:9:12: error AIK5002: invalid node path '$HOME/seats' for field 'seat_root'
+  hint: '$' expansion is not supported

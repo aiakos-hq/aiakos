@@ -1,0 +1,2 @@
+rig.yaml:10:16: error AIK2004: invalid value 'agents/impl' for field 'agent_ref' in seat 'impl'
+  hint: must be local:<path>

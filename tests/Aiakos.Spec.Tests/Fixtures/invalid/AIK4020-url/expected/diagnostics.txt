@@ -1,0 +1,2 @@
+rig.env.yaml:8:11: error AIK4020: credential-like value (URL with user info)
+  hint: never put secrets in rig files; name the secret and bind it in rig.env.yaml

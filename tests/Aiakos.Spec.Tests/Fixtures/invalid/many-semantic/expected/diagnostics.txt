@@ -1,0 +1,8 @@
+rig.yaml:9:9: error AIK4010: seat id 'node' is reserved
+  hint: reserved ids: all, aiakos, system, orchestrator, node, human
+rig.yaml:12:13: error AIK4004: unknown repo 'lib' in seat 'node'
+  hint: defined repos: app
+agents/impl/agent.yaml:9:5: error AIK4007: setting 'hooks' in harnesses.claude-code is owned by Aiakos
+rig.env.yaml:3:6: error AIK5001: rig 'other' does not match rig name 'demo'
+rig.env.yaml:8:11: error AIK5002: invalid node path 'src/app' for field 'path' in repos.app
+  hint: must be absolute or start with ~/

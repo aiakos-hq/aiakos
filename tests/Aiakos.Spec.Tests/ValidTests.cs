@@ -16,6 +16,17 @@ public sealed class ValidTests
     }
 
     [Fact]
+    public void LoadsFullRigWithoutDiagnostics()
+    {
+        var fullRoot = Path.Combine(AppContext.BaseDirectory, "Fixtures", "valid", "full");
+
+        var result = RigLoader.Load(fullRoot, null);
+
+        Assert.Null(result.Rig);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
     public void AcceptsUtf8Bom()
     {
         var root = CopyMinimalRig();

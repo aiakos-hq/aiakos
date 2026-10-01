@@ -1,0 +1,2 @@
+rig.yaml:6:13: error AIK4020: credential-like value (Anthropic API key)
+  hint: never put secrets in rig files; name the secret and bind it in rig.env.yaml

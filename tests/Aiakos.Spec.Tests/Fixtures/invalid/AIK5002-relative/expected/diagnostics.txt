@@ -1,0 +1,2 @@
+rig.env.yaml:8:11: error AIK5002: invalid node path 'src/app' for field 'path' in repos.app
+  hint: must be absolute or start with ~/
