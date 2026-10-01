@@ -13,18 +13,23 @@ its own git worktree. You decide whether it can go to a pull request. You do not
 - `slice`: the slice id, for example `14-2`.
 - `worktree`: the worktree that holds the implementation.
 - `brief`: the brief the implementer was given (inside the worktree, git-ignored).
-- `trial`: `artifacts/trials/<slice>/` in the main checkout. It holds `review.md` (written by the
-  brief's author: which test project the scoring files go into, how to run them, what else to
-  check), the scoring test, the probes, and usually a probe baseline taken on `main`.
+- `trial`: `artifacts/trials/<slice>/` inside the worktree (git-ignored). It holds `review.md`
+  (written by the brief's author: which test project the scoring files go into, how to run them,
+  what else to check), the scoring test, the probes, and usually a probe baseline taken on
+  `main`. Earlier runs' `findings.md` and probe outputs may be there too.
+
+Everything you read and write is inside the worktree. `artifacts/` is git-ignored there, so your
+files do not show up in `git status`; the tooling copies them to the main checkout afterwards.
 
 If an input is missing or a path does not exist, stop and say which one. Do not guess.
 
 ## Hard rules
 
-- Never edit, commit, stash, reset or clean anything in the worktree, except the temporary copies
-  in step 4, which you remove again. Never push. Never call `gh` to create, edit or comment.
+- Never edit, commit, stash, reset or clean tracked files in the worktree, except the temporary
+  copies in step 4, which you remove again. Never push. Never call `gh` to create, edit or comment.
 - Never repair the implementation, not even a typo. A problem is a finding.
-- Write only inside the trial directory and `artifacts/briefs/` of the main checkout.
+- Write only inside the worktree's `artifacts/trials/<slice>/` and `artifacts/briefs/`. Never
+  write outside the worktree.
 - Do not read whole specs. Read a spec section only when the brief cites it and a finding depends
   on it. Read the diff, not whole source files, unless a finding needs the surrounding code.
 - Say what you did not verify. "Not checked" is a valid result; a guess is not.

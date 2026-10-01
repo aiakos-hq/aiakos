@@ -63,5 +63,10 @@ did not commit), pass that sentence to the reviewer as a last line `run note: <s
   means the slice waits for a dependency.
 - The brief: the body of the slice issue. `start` copies it to
   `<worktree>/artifacts/briefs/<slice>.md`.
-- Review inputs and outputs: `artifacts/trials/<slice>/` in the main checkout (git-ignored).
+- Review inputs: written beforehand in `artifacts/trials/<slice>/` of the main checkout
+  (git-ignored). `done` copies them into `<worktree>/artifacts/trials/<slice>/`; the reviewer
+  reads and writes only there and in `<worktree>/artifacts/briefs/`. `rework`, `pr` and `cleanup`
+  copy its results back to the main checkout, and `rework` removes the scoring files from the
+  worktree again so the implementer never sees them (`findings.md` stays).
+- Start the reviewer with the paths `done` prints. Never give it a path outside the worktree.
 - Briefs and scoring tests are written in a separate chat with a stronger model, before `ready`.
