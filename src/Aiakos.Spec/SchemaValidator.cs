@@ -65,7 +65,7 @@ internal sealed class SchemaValidator
                 Fields = [
                     new("id", true) { Pattern = SeatId.ToString(), PatternFieldName = "id" },
                     new("kind") { Values = ["agent", "human"] }, new("description"),
-                    new("agent_ref"), new("harness") { Values = ["claude-code"] }, new("model"),
+                    new("agent_ref"), new("harness"), new("model"),
                     new("checkout") { Values = ["shared", "seat-worktree"] },
                     new("repos", type: SchemaType.List) { Items = new("repo", type: SchemaType.String) { Pattern = RepoId.ToString(), PatternFieldName = "repo id" } },
                     new("workdir_repo") { Pattern = RepoId.ToString(), PatternFieldName = "repo id" },
@@ -89,7 +89,7 @@ internal sealed class SchemaValidator
         new("description", true),
         new("defaults", type: SchemaType.Mapping)
         {
-            Fields = [new("harness") { Values = ["claude-code"] }, new("model")]
+            Fields = [new("harness"), new("model")]
         },
         new("guidance", type: SchemaType.List) { Items = new("guidance", type: SchemaType.String) },
         new("skills", type: SchemaType.List) { Items = new("skill", type: SchemaType.String) },
@@ -340,6 +340,12 @@ internal sealed class SchemaValidator
             return;
         }
 
+        if (fieldName == "repos" && parentPath.StartsWith("seats[", StringComparison.Ordinal) && value.Items.Count == 0)
+        {
+            Add("AIK2004", value.Mark, $"field 'repos'{Context(parentPath, containingMapping, isSeat: true)} must have at least one item");
+            return;
+        }
+
         for (var index = 0; index < value.Items.Count; index++)
         {
             var item = value.Items[index];
@@ -529,7 +535,6 @@ internal sealed class SchemaValidator
     private static bool TryGetReservedScalar(string field, string path, string value, out string milestone)
     {
         milestone = "M2";
-        if (field == "harness" && value is "opencode" or "codex" && (path.StartsWith("seats[", StringComparison.Ordinal) || path == "defaults")) return true;
         if (field == "checkout" && value == "shared-readonly") { milestone = "M6"; return true; }
         if (field == "checkout" && value == "task-worktree") { milestone = "M8"; return true; }
         if (field == "harnesses" && value is "opencode" or "codex") return true;

@@ -72,25 +72,6 @@ public sealed class ValidTests
     }
 
     [Fact]
-    public void AcceptsDeferredHarnessAndSecretFields()
-    {
-        var root = CopyMinimalRig();
-        try
-        {
-            var agentPath = Path.Combine(root, "agents", "impl", "agent.yaml");
-            File.AppendAllText(agentPath, "harnesses: {claude-code: {permission_mode: bypassPermissions, hooks: {}, statusLine: x, apiKeyHelper: x, env: {A: b}}}\n");
-            var envPath = Path.Combine(root, "rig.env.yaml");
-            File.AppendAllText(envPath, "secrets: {api_key: {value: abc}}\n");
-
-            Assert.Empty(RigLoader.Load(root, null).Diagnostics);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    [Fact]
     public void DoesNotExposeExceptionTextInYamlSyntaxDiagnostic()
     {
         var root = CopyMinimalRig();

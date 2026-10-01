@@ -13,9 +13,11 @@ public static class RigLoader
         var diagnostics = new List<Diagnostic>();
         var root = rigRoot ?? "";
         var rigPath = Path.Combine(root, "rig.yaml");
-        var rigNode = LoadFile(rigPath, GetDisplayPath(root, rigPath), RigFileKind.Rig, diagnostics);
+        var rigNode = LoadFile(rigPath, GetDisplayPath(root, rigPath), RigFileKind.Rig, diagnostics, out var rigParsed);
+        var rigDocument = new SemanticDocument(rigNode, GetDisplayPath(root, rigPath), RigFileKind.Rig, rigParsed);
 
         var agentPaths = new HashSet<string>(PathComparer());
+        var agentDocuments = new List<SemanticDocument>();
         if (rigNode is { Kind: YamlNodeKind.Mapping })
         {
             foreach (var seats in Values(rigNode, "seats"))
@@ -63,19 +65,36 @@ public static class RigLoader
                     }
 
                     var agentFile = Path.Combine(directoryPath, "agent.yaml");
-                    LoadFile(agentFile, GetDisplayPath(root, agentFile), RigFileKind.Agent, diagnostics);
+                    var agentDisplayPath = GetDisplayPath(root, agentFile);
+                    var agentNode = LoadFile(agentFile, agentDisplayPath, RigFileKind.Agent, diagnostics, out var agentParsed);
+                    agentDocuments.Add(new SemanticDocument(agentNode, agentDisplayPath, RigFileKind.Agent, agentParsed, text));
                 }
             }
         }
 
         var actualEnvPath = envPath is null ? Path.Combine(root, "rig.env.yaml") : envPath;
         var envDisplayPath = envPath is null ? GetDisplayPath(root, actualEnvPath) : GetEnvDisplayPath(root, envPath);
-        LoadFile(actualEnvPath, envDisplayPath, RigFileKind.RigEnv, diagnostics);
-        return new LoadResult(null, diagnostics);
+        var envNode = LoadFile(actualEnvPath, envDisplayPath, RigFileKind.RigEnv, diagnostics, out var envParsed);
+        var envDocument = new SemanticDocument(envNode, envDisplayPath, RigFileKind.RigEnv, envParsed);
+        var semanticDiagnostics = new List<Diagnostic>();
+        new SemanticValidator(rigDocument, agentDocuments, envDocument, diagnostics, semanticDiagnostics.Add).Validate();
+
+        diagnostics.AddRange(semanticDiagnostics);
+        var fileOrder = new[] { rigDocument.File }.Concat(agentDocuments.Select(document => document.File)).Append(envDocument.File)
+            .Distinct(StringComparer.Ordinal).Select((file, index) => (file, index)).ToDictionary(item => item.file, item => item.index, StringComparer.Ordinal);
+        var safeDiagnostics = diagnostics
+            .Where(diagnostic => diagnostic.Code == "AIK4020" || !diagnostics.Any(secret => secret.Code == "AIK4020" && secret.File == diagnostic.File && secret.Line == diagnostic.Line && secret.Column == diagnostic.Column))
+            .OrderBy(diagnostic => fileOrder.GetValueOrDefault(diagnostic.File, int.MaxValue))
+            .ThenBy(diagnostic => diagnostic.Line)
+            .ThenBy(diagnostic => diagnostic.Column)
+            .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
+            .ToArray();
+        return new LoadResult(null, safeDiagnostics);
     }
 
-    private static YamlNode? LoadFile(string path, string displayPath, RigFileKind kind, List<Diagnostic> allDiagnostics)
+    private static YamlNode? LoadFile(string path, string displayPath, RigFileKind kind, List<Diagnostic> allDiagnostics, out bool parsed)
     {
+        parsed = false;
         byte[] bytes;
         try
         {
@@ -156,6 +175,8 @@ public static class RigLoader
             allDiagnostics.Add(new Diagnostic(Severity.Error, "AIK1002", displayPath, Math.Max(1, (int)mark.Line), Math.Max(1, (int)mark.Column), "YAML syntax error: malformed YAML", null));
             return null;
         }
+
+        parsed = true;
 
         var validationDiagnostics = new List<Diagnostic>();
         new SchemaValidator(displayPath, kind, validationDiagnostics.Add).Validate(document);
