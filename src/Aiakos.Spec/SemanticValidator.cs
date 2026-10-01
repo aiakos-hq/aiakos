@@ -3,7 +3,7 @@ using YamlDotNet.Core;
 
 namespace Aiakos.Spec;
 
-internal sealed record SemanticDocument(YamlNode? Root, string File, RigFileKind Kind, bool Parsed, string? AgentReference = null);
+internal sealed record SemanticDocument(YamlNode? Root, string File, bool Parsed);
 
 internal sealed class SemanticValidator
 {
@@ -23,24 +23,28 @@ internal sealed class SemanticValidator
 
     private readonly SemanticDocument rig;
     private readonly IReadOnlyList<SemanticDocument> agents;
+    private readonly IReadOnlyDictionary<YamlNode, SemanticDocument> seatAgents;
     private readonly SemanticDocument env;
     private readonly IReadOnlyList<Diagnostic> schemaDiagnostics;
-    private readonly Action<Diagnostic> add;
+    private readonly List<Diagnostic> found = [];
     private readonly List<SeatInfo> seats = [];
     private readonly List<RepoInfo> repos = [];
     private readonly HashSet<YamlNode> repoUrls = [];
+    private readonly List<string> reportedCredentials = [];
 
-    public SemanticValidator(SemanticDocument rig, IReadOnlyList<SemanticDocument> agents, SemanticDocument env,
-        IReadOnlyList<Diagnostic> schemaDiagnostics, Action<Diagnostic> add)
+    // seatAgents maps a seat mapping of rig.yaml to the agent file its agent_ref resolved to.
+    public SemanticValidator(SemanticDocument rig, IReadOnlyList<SemanticDocument> agents, IReadOnlyDictionary<YamlNode, SemanticDocument> seatAgents,
+        SemanticDocument env, IReadOnlyList<Diagnostic> schemaDiagnostics)
     {
         this.rig = rig;
         this.agents = agents;
+        this.seatAgents = seatAgents;
         this.env = env;
         this.schemaDiagnostics = schemaDiagnostics;
-        this.add = add;
     }
 
-    public void Validate()
+    // Returns the slice 1 diagnostics together with the semantic ones, in no particular order.
+    public IReadOnlyList<Diagnostic> Validate()
     {
         if (Usable(rig)) ValidateRig();
         foreach (var agent in agents)
@@ -50,11 +54,9 @@ internal sealed class SemanticValidator
 
         if (Usable(env)) ValidateEnvironmentPaths();
         ValidateCredentials();
-        ValidateCrossFile();
+        if (Usable(rig) && Usable(env)) ValidateCrossFile();
+        return WithoutCredentialEchoes([.. schemaDiagnostics, .. found]);
     }
-
-    internal static bool ContainsCredentialLikeText(string? text) =>
-        text is not null && Credentials.Any(credential => credential.Pattern.IsMatch(text));
 
     private void ValidateRig()
     {
@@ -73,41 +75,44 @@ internal sealed class SemanticValidator
                 if (url is not null) repoUrls.Add(url);
             }
 
-            ValidateDuplicateNames(repos.Select(repo => (repo.Name, repo.Node)), "repo", "repo name");
+            ValidateDuplicateNames(repos.Select(repo => (repo.Name, repo.Node)), "repo name");
             foreach (var repo in repos) ValidateRepoUrl(repo);
         }
 
         var seatList = Get(root, "seats");
         if (seatList is not { Kind: YamlNodeKind.Sequence }) return;
-        foreach (var seatNode in seatList.Items)
+        for (var index = 0; index < seatList.Items.Count; index++)
         {
+            var seatNode = seatList.Items[index];
             if (seatNode.Kind != YamlNodeKind.Mapping) continue;
             var idNode = Get(seatNode, "id");
-            var id = ReadScalar(rig, idNode);
             var kindNode = Get(seatNode, "kind");
             var kind = ReadScalar(rig, kindNode);
-            var kindInvalid = kindNode is not null && kind is null;
-            var agentSeat = kind is null || kind == "agent" || kindInvalid;
-            var info = new SeatInfo(seatNode, idNode, id, kind, agentSeat, kindInvalid);
-            seats.Add(info);
+            var seat = new SeatInfo(seatNode, index, idNode, ReadScalar(rig, idNode), kind, kindNode is not null && kind is null);
+            seats.Add(seat);
 
-            if (!kindInvalid && id is not null && ReservedSeats.Contains(id))
+            // A seat whose kind failed slice 1 only counts for AIK4006 (general rule 3).
+            if (seat.KindInvalid) continue;
+            if (seat.Id is not null && ReservedSeats.Contains(seat.Id))
             {
-                Report(rig, idNode!, "AIK4010", $"seat id '{id}' is reserved", ReservedSeatIds);
+                Report(rig, idNode!, "AIK4010", $"seat id '{seat.Id}' is reserved", ReservedSeatIds);
             }
 
-            if (!kindInvalid)
+            ValidateAgentReference(seat);
+            ValidateSeatRepos(seat);
+            if (seat.IsAgent)
             {
-                ValidateAgentReference(info);
-                ValidateHarness(info);
-                ValidateSeatRepos(info);
-                ValidateHumanSeat(info);
-                ValidateAuthSecret(info);
+                ValidateSeatHarness(seat);
+                ValidateAuthSecret(seat);
+            }
+            else
+            {
+                ValidateHumanSeat(seat);
             }
         }
 
-        ValidateDuplicateNames(seats.Where(seat => !seat.KindInvalid && seat.Id is not null).Select(seat => (seat.Id!, seat.IdNode!)), "seat", "seat id");
-        if (!seats.Any(seat => seat.IsAgentSeat))
+        ValidateDuplicateNames(seats.Where(seat => !seat.KindInvalid && seat.Id is not null).Select(seat => (seat.Id!, seat.IdNode!)), "seat id");
+        if (!seats.Any(seat => seat.IsAgent || seat.KindInvalid))
         {
             var key = FindKey(root, "seats");
             if (key is not null) Report(rig, key, "AIK4006", "rig has no agent seat");
@@ -131,36 +136,23 @@ internal sealed class SemanticValidator
         }
     }
 
-    private void ValidateHarness(SeatInfo seat)
+    // The harness values themselves are checked by slice 1 (AIK2004, AIK4002); a harness that failed there counts as present.
+    private void ValidateSeatHarness(SeatInfo seat)
     {
-        var harnessNode = Get(seat.Node, "harness");
-        var harness = harnessNode is { Kind: YamlNodeKind.Scalar, IsNull: false, IsTaggedOrAlias: false, Value: { } value } ? value : null;
-        if (harnessNode is not null && harness is not null)
-        {
-            if (harness is "opencode" or "codex")
-            {
-                Report(rig, harnessNode, "AIK4002", $"harness '{harness}'{SeatWhere(seat)} is not supported in this version (planned for M2)");
-            }
-            else if (harness != "claude-code")
-            {
-                Report(rig, harnessNode, "AIK2004", $"invalid value '{harness}' for field 'harness'{SeatWhere(seat)}", "allowed values: claude-code");
-            }
-        }
-
+        if (seat.Id is null || Get(seat.Node, "harness") is not null) return;
         var agent = FindAgent(seat);
-        if (agent is null || !Usable(agent)) return;
-        var defaults = Get(agent.Root!, "defaults");
+        if (agent is null) return;
+        var defaults = Get(agent.Root, "defaults");
         if (defaults is not null && defaults.Kind != YamlNodeKind.Mapping) return;
-        var defaultsHarnessNode = Get(defaults, "harness");
-        if (harnessNode is null && defaultsHarnessNode is null)
+        if (Get(defaults, "harness") is null)
         {
-            Report(rig, seat.Node, "AIK4001", $"seat '{seat.Id ?? ""}' has no harness", $"set harness on the seat or defaults.harness in {agent.File}");
+            Report(rig, seat.Node, "AIK4001", $"seat '{seat.Id}' has no harness", $"set harness on the seat or defaults.harness in {agent.File}");
         }
     }
 
     private void ValidateSeatRepos(SeatInfo seat)
     {
-        var known = repos.Select(repo => repo.Name).ToHashSet(StringComparer.Ordinal);
+        var known = repos.Select(repo => repo.Name).Distinct(StringComparer.Ordinal).ToList();
         var listNode = Get(seat.Node, "repos");
         var selected = new List<string>();
         if (listNode is { Kind: YamlNodeKind.Sequence })
@@ -169,79 +161,52 @@ internal sealed class SemanticValidator
             {
                 var name = ReadScalar(rig, item);
                 if (name is null) continue;
-                if (!known.Contains(name))
+                if (!known.Contains(name, StringComparer.Ordinal))
                 {
-                    Report(rig, item, "AIK4004", $"unknown repo '{name}'{SeatWhere(seat)}", $"defined repos: {string.Join(", ", repos.Select(repo => repo.Name))}");
+                    Report(rig, item, "AIK4004", $"unknown repo '{name}'{SeatWhere(seat)}", $"defined repos: {string.Join(", ", known)}");
                 }
-                else selected.Add(name);
+                else if (!selected.Contains(name, StringComparer.Ordinal)) selected.Add(name);
             }
         }
         else if (listNode is null)
         {
-            selected.AddRange(repos.Select(repo => repo.Name));
+            selected.AddRange(known);
         }
 
         var workdirNode = Get(seat.Node, "workdir_repo");
         var workdir = ReadScalar(rig, workdirNode);
-        if (workdir is not null && !selected.Contains(workdir, StringComparer.Ordinal))
+        if (seat.Id is null || workdir is null || selected.Count == 0) return;
+        if (!selected.Contains(workdir, StringComparer.Ordinal))
         {
-            Report(rig, workdirNode!, "AIK4004", $"workdir_repo '{workdir}' is not in the repos of seat '{seat.Id ?? ""}'", $"repos of the seat: {string.Join(", ", selected)}");
+            Report(rig, workdirNode!, "AIK4004", $"workdir_repo '{workdir}' is not in the repos of seat '{seat.Id}'", $"repos of the seat: {string.Join(", ", selected)}");
         }
     }
 
     private void ValidateHumanSeat(SeatInfo seat)
     {
-        if (seat.Kind != "human") return;
+        if (seat.Id is null) return;
         var allowed = new HashSet<string>(["id", "kind", "description"], StringComparer.Ordinal);
         var reported = new HashSet<string>(StringComparer.Ordinal);
         foreach (var entry in seat.Node.Entries)
         {
             if (entry.Key.Kind == YamlNodeKind.Scalar && entry.Key.Value is { } field && reported.Add(field) && !allowed.Contains(field) && IsSchemaField(field))
             {
-                Report(rig, entry.Key, "AIK4005", $"field '{field}' is not allowed on human seat '{seat.Id ?? ""}'");
+                Report(rig, entry.Key, "AIK4005", $"field '{field}' is not allowed on human seat '{seat.Id}'");
             }
         }
     }
 
     private void ValidateAuthSecret(SeatInfo seat)
     {
-        if (!seat.IsAgentSeat) return;
-        var agent = FindAgent(seat);
-        if (agent is null || !Usable(agent)) return;
-        var seatHarness = Get(seat.Node, "harness");
-        if (seatHarness is not null && ReadScalar(rig, seatHarness) is null) return;
-        var defaultHarness = Get(Get(agent.Root!, "defaults"), "harness");
-        if (seatHarness is null && defaultHarness is not null && ReadScalar(agent, defaultHarness) is null) return;
-        var harness = ReadScalar(rig, seatHarness) ?? ReadScalar(agent, defaultHarness);
-        if (harness != "claude-code") return;
+        if (seat.Id is null || !UsesAnthropicApiKey(seat)) return;
         var requires = Get(seat.Node, "requires");
-        var auth = Get(requires, "auth");
-        if (ReadScalar(rig, auth) != "api-key") return;
         var secrets = Get(requires, "secrets");
-        var hasAnthropic = secrets is { Kind: YamlNodeKind.Sequence } && secrets.Items.Any(item => ReadScalar(rig, item) == "anthropic_api_key");
-        if (!hasAnthropic && auth is not null)
-        {
-            Report(rig, auth, "AIK4012", $"seat '{seat.Id ?? ""}' uses auth: api-key but does not list secret 'anthropic_api_key'", "add anthropic_api_key to requires.secrets", Severity.Warning);
-        }
+        if (secrets is { Kind: YamlNodeKind.Sequence } && secrets.Items.Any(item => ReadScalar(rig, item) == "anthropic_api_key")) return;
+        Report(rig, Get(requires, "auth")!, "AIK4012", $"seat '{seat.Id}' uses auth: api-key but does not list secret 'anthropic_api_key'", "add anthropic_api_key to requires.secrets", Severity.Warning);
     }
 
     private void ValidateAgent(SemanticDocument agent)
     {
-        var defaults = Get(agent.Root!, "defaults");
-        var harness = Get(defaults, "harness");
-        var harnessValue = harness is { Kind: YamlNodeKind.Scalar, IsNull: false, IsTaggedOrAlias: false, Value: { } value } ? value : null;
-        if (harness is not null && harnessValue is not null)
-        {
-            if (harnessValue is "opencode" or "codex")
-            {
-                Report(agent, harness, "AIK4002", $"harness '{harnessValue}' in defaults is not supported in this version (planned for M2)");
-            }
-            else if (harnessValue != "claude-code")
-            {
-                Report(agent, harness, "AIK2004", $"invalid value '{harnessValue}' for field 'harness' in defaults", "allowed values: claude-code");
-            }
-        }
-
         var claude = Get(Get(agent.Root!, "harnesses"), "claude-code");
         if (claude is not { Kind: YamlNodeKind.Mapping }) return;
         foreach (var entry in claude.Entries)
@@ -387,24 +352,64 @@ internal sealed class SemanticValidator
                 if (pattern.IsMatch(node.Value))
                 {
                     Report(document, node, "AIK4020", $"credential-like value ({kind})", CredentialHint);
+                    reportedCredentials.Add(node.Value);
                     break;
                 }
             }
         });
     }
 
-    private void ValidateCrossFile()
+    // General rule 6: only AIK4020 may stand where a credential-like value is, and no other diagnostic may print one.
+    private List<Diagnostic> WithoutCredentialEchoes(IReadOnlyList<Diagnostic> diagnostics)
     {
-        if (Usable(rig) && Usable(env))
+        var credentialPositions = diagnostics.Where(diagnostic => diagnostic.Code == "AIK4020")
+            .Select(diagnostic => (diagnostic.File, diagnostic.Line, diagnostic.Column)).ToHashSet();
+        var result = new List<Diagnostic>();
+        foreach (var diagnostic in diagnostics)
         {
-            ValidateRigNameBinding();
-            ValidatePlacement();
-            ValidateRepoBindings();
-            ValidateSecretBindings();
-            ValidateSecretExtras();
+            var position = (diagnostic.File, diagnostic.Line, diagnostic.Column);
+            if (diagnostic.Code == "AIK4020")
+            {
+                result.Add(diagnostic);
+                continue;
+            }
+
+            if (credentialPositions.Contains(position)) continue;
+            var echo = FindCredential(diagnostic.Message) ?? FindCredential(diagnostic.Hint);
+            if (echo is null)
+            {
+                result.Add(diagnostic);
+            }
+            else if (!reportedCredentials.Any(value => value.Contains(echo.Value.Text, StringComparison.Ordinal)) && credentialPositions.Add(position))
+            {
+                // The scan did not see this text (a mapping key, or a file whose fields are not checked).
+                // Report it here, so that removing the echo never leaves the file without a diagnostic.
+                result.Add(new Diagnostic(Severity.Error, "AIK4020", diagnostic.File, diagnostic.Line, diagnostic.Column, $"credential-like value ({echo.Value.Kind})", CredentialHint));
+            }
         }
 
-        if (Usable(rig) && Usable(env)) ValidateUnknownRepoBindings();
+        return result;
+    }
+
+    private static (string Kind, string Text)? FindCredential(string? text)
+    {
+        if (text is null) return null;
+        foreach (var (kind, pattern) in Credentials)
+        {
+            if (pattern.Match(text) is { Success: true } match) return (kind, match.Value);
+        }
+
+        return null;
+    }
+
+    private void ValidateCrossFile()
+    {
+        ValidateRigNameBinding();
+        ValidatePlacement();
+        ValidateRepoBindings();
+        ValidateSecretBindings();
+        ValidateSecretExtras();
+        ValidateUnknownRepoBindings();
     }
 
     private void ValidateRigNameBinding()
@@ -421,22 +426,20 @@ internal sealed class SemanticValidator
     private void ValidatePlacement()
     {
         var placement = Get(env.Root!, "placement");
-        var placementDamaged = placement is not null && Damaged(env, placement);
-        if (placement is not null && placementDamaged) return;
+        if (placement is not null && Damaged(env, placement)) return;
         var defaultNode = ReadScalar(env, Get(placement, "default_node"));
         var placementSeats = Get(placement, "seats");
         var placementById = placementSeats is { Kind: YamlNodeKind.Mapping }
             ? placementSeats.Entries.Where(entry => entry.Key.Value is not null).ToDictionary(entry => entry.Key.Value!, entry => entry, StringComparer.Ordinal)
             : new Dictionary<string, YamlEntry>(StringComparer.Ordinal);
 
-        foreach (var seat in seats.Where(item => item.Kind == "agent" || item.Kind is null))
+        foreach (var seat in seats.Where(seat => seat.IsAgent && seat.Id is not null))
         {
-            if (seat.KindInvalid || seat.Id is null) continue;
-            var hasSeatNode = placementById.TryGetValue(seat.Id, out var seatPlacement) && ReadScalar(env, Get(seatPlacement.Value, "node")) is not null;
+            var hasSeatNode = placementById.TryGetValue(seat.Id!, out var seatPlacement) && ReadScalar(env, Get(seatPlacement.Value, "node")) is not null;
             if (defaultNode is null && !hasSeatNode)
             {
                 var node = FindKey(env.Root!, "placement");
-                Report(env, node?.Mark ?? Mark.Empty, node, "AIK5003", $"seat '{seat.Id}' has no node", $"set placement.default_node or placement.seats.{seat.Id}.node");
+                Report(env, node?.Mark ?? Mark.Empty, "AIK5003", $"seat '{seat.Id}' has no node", $"set placement.default_node or placement.seats.{seat.Id}.node");
             }
         }
 
@@ -448,7 +451,7 @@ internal sealed class SemanticValidator
             {
                 var human = matching?.Kind == "human";
                 Report(env, entry.Key, "AIK5005", human ? $"placement for human seat '{id}'" : $"placement for unknown seat '{id}'",
-                    human ? "human seats take no placement" : $"agent seats: {string.Join(", ", seats.Where(seat => (seat.Kind == "agent" || seat.Kind is null) && !seat.KindInvalid).Select(seat => seat.Id).Where(id => id is not null))}");
+                    human ? "human seats take no placement" : $"agent seats: {string.Join(", ", seats.Where(seat => seat.IsAgent && seat.Id is not null).Select(seat => seat.Id).Distinct(StringComparer.Ordinal))}");
             }
         }
     }
@@ -457,7 +460,7 @@ internal sealed class SemanticValidator
     {
         var definedRepoList = Get(Get(rig.Root!, "workspace"), "repos");
         if (definedRepoList is not { Kind: YamlNodeKind.Sequence }) return;
-        if (seats.Any(seat => (seat.Kind == "agent" || seat.Kind is null) && !seat.KindInvalid &&
+        if (seats.Any(seat => seat.IsAgent &&
                               Get(seat.Node, "repos") is { } list && Damaged(rig, list))) return;
         var repoMap = Get(env.Root!, "repos");
         var reposKey = FindKey(env.Root!, "repos");
@@ -466,18 +469,18 @@ internal sealed class SemanticValidator
         var bound = repoMap is { Kind: YamlNodeKind.Mapping }
             ? repoMap.Entries.Where(entry => entry.Key.Value is not null).ToDictionary(entry => entry.Key.Value!, entry => entry, StringComparer.Ordinal)
             : new Dictionary<string, YamlEntry>(StringComparer.Ordinal);
-        foreach (var name in seats.Where(seat => (seat.Kind == "agent" || seat.Kind is null) && !seat.KindInvalid)
+        foreach (var name in seats.Where(seat => seat.IsAgent)
                      .SelectMany(GetSelectedKnownRepos).Distinct(StringComparer.Ordinal))
         {
             if (bound.TryGetValue(name, out var entry) && Get(entry.Value, "path") is not null) continue;
             var position = bound.TryGetValue(name, out entry) ? entry.Key : reposKey;
-            Report(env, position?.Mark ?? Mark.Empty, position, "AIK5004", $"repo '{name}' has no path", $"set repos.{name}.path");
+            Report(env, position?.Mark ?? Mark.Empty, "AIK5004", $"repo '{name}' has no path", $"set repos.{name}.path");
         }
     }
 
     private void ValidateSecretBindings()
     {
-        if (seats.Any(seat => (seat.Kind == "agent" || seat.Kind is null) && !seat.KindInvalid &&
+        if (seats.Any(seat => seat.IsAgent &&
                               Get(seat.Node, "requires") is { } requires && Damaged(rig, requires))) return;
         var secretMap = Get(env.Root!, "secrets");
         var secretsKey = FindKey(env.Root!, "secrets");
@@ -495,7 +498,7 @@ internal sealed class SemanticValidator
             }
             else
             {
-                Report(env, secretsKey?.Mark ?? Mark.Empty, secretsKey, "AIK5004", $"secret '{name}' has no source", $"set secrets.{name}.file");
+                Report(env, secretsKey?.Mark ?? Mark.Empty, "AIK5004", $"secret '{name}' has no source", $"set secrets.{name}.file");
             }
         }
     }
@@ -505,13 +508,13 @@ internal sealed class SemanticValidator
         var definedRepoList = Get(Get(rig.Root!, "workspace"), "repos");
         if (definedRepoList is not { Kind: YamlNodeKind.Sequence }) return;
         var repoMap = Get(env.Root!, "repos");
-        if (repoMap is not { Kind: YamlNodeKind.Mapping } || Damaged(env, repoMap) || seats.Any(seat => (seat.Kind == "agent" || seat.Kind is null) && !seat.KindInvalid && Get(seat.Node, "repos") is { } list && Damaged(rig, list))) return;
-        var defined = repos.Select(repo => repo.Name).ToHashSet(StringComparer.Ordinal);
+        if (repoMap is not { Kind: YamlNodeKind.Mapping } || Damaged(env, repoMap) || seats.Any(seat => seat.IsAgent && Get(seat.Node, "repos") is { } list && Damaged(rig, list))) return;
+        var defined = repos.Select(repo => repo.Name).Distinct(StringComparer.Ordinal).ToList();
         foreach (var entry in repoMap.Entries)
         {
-            if (entry.Key.Value is { } name && !defined.Contains(name))
+            if (entry.Key.Value is { } name && !defined.Contains(name, StringComparer.Ordinal))
             {
-                Report(env, entry.Key, "AIK5006", $"binding for unknown repo '{name}'", $"defined repos: {string.Join(", ", repos.Select(repo => repo.Name))}");
+                Report(env, entry.Key, "AIK5006", $"binding for unknown repo '{name}'", $"defined repos: {string.Join(", ", defined)}");
             }
         }
     }
@@ -519,7 +522,7 @@ internal sealed class SemanticValidator
     private void ValidateSecretExtras()
     {
         var secretMap = Get(env.Root!, "secrets");
-        if (secretMap is not { Kind: YamlNodeKind.Mapping } || Damaged(env, secretMap) || seats.Any(seat => (seat.Kind == "agent" || seat.Kind is null) && !seat.KindInvalid && Get(seat.Node, "requires") is { } requires && Damaged(rig, requires))) return;
+        if (secretMap is not { Kind: YamlNodeKind.Mapping } || Damaged(env, secretMap) || seats.Any(seat => seat.IsAgent && Get(seat.Node, "requires") is { } requires && Damaged(rig, requires))) return;
         var required = RequiredSecrets().ToHashSet(StringComparer.Ordinal);
         foreach (var entry in secretMap.Entries)
         {
@@ -534,7 +537,7 @@ internal sealed class SemanticValidator
     {
         var required = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var seat in seats.Where(seat => (seat.Kind == "agent" || seat.Kind is null) && !seat.KindInvalid))
+        foreach (var seat in seats.Where(seat => seat.IsAgent))
         {
             var secretList = Get(Get(seat.Node, "requires"), "secrets");
             if (secretList is { Kind: YamlNodeKind.Sequence })
@@ -545,16 +548,20 @@ internal sealed class SemanticValidator
                 }
             }
 
-            var agent = FindAgent(seat);
-            if (agent is null || !Usable(agent)) continue;
-            var harness = ReadScalar(rig, Get(seat.Node, "harness")) ?? ReadScalar(agent, Get(Get(agent.Root!, "defaults"), "harness"));
-            if (harness == "claude-code" && ReadScalar(rig, Get(Get(seat.Node, "requires"), "auth")) == "api-key")
-            {
-                if (seen.Add("anthropic_api_key")) required.Add("anthropic_api_key");
-            }
+            if (UsesAnthropicApiKey(seat) && seen.Add("anthropic_api_key")) required.Add("anthropic_api_key");
         }
 
         return required;
+    }
+
+    // Rule 14: the seat harness is claude-code and the seat asks for auth: api-key.
+    private bool UsesAnthropicApiKey(SeatInfo seat)
+    {
+        var agent = FindAgent(seat);
+        if (agent is null) return false;
+        var seatHarness = Get(seat.Node, "harness");
+        var harness = seatHarness is null ? ReadScalar(agent, Get(Get(agent.Root, "defaults"), "harness")) : ReadScalar(rig, seatHarness);
+        return harness == "claude-code" && ReadScalar(rig, Get(Get(seat.Node, "requires"), "auth")) == "api-key";
     }
 
     private IEnumerable<string> GetSelectedKnownRepos(SeatInfo seat)
@@ -570,7 +577,7 @@ internal sealed class SemanticValidator
         return list.Items.Select(item => ReadScalar(rig, item)).Where(name => name is not null && known.Contains(name)).Select(name => name!);
     }
 
-    private void ValidateDuplicateNames(IEnumerable<(string Name, YamlNode Node)> values, string subject, string displayName)
+    private void ValidateDuplicateNames(IEnumerable<(string Name, YamlNode Node)> values, string displayName)
     {
         var first = new Dictionary<string, YamlNode>(StringComparer.Ordinal);
         foreach (var (name, node) in values)
@@ -583,11 +590,9 @@ internal sealed class SemanticValidator
         }
     }
 
-    private SemanticDocument? FindAgent(SeatInfo seat)
-    {
-        var reference = ReadScalar(rig, Get(seat.Node, "agent_ref"));
-        return reference is null ? null : agents.FirstOrDefault(agent => agent.AgentReference == reference);
-    }
+    // The seat's agent file, when it was loaded and its fields were checked (general rule 2).
+    private SemanticDocument? FindAgent(SeatInfo seat) =>
+        seatAgents.TryGetValue(seat.Node, out var agent) && Usable(agent) && agent.Root is { Kind: YamlNodeKind.Mapping } ? agent : null;
 
     private static bool IsSchemaField(string name) =>
         new[] { "id", "kind", "description", "agent_ref", "harness", "model", "checkout", "repos", "workdir_repo", "requires", "profile", "uses", "startup", "pod" }.Contains(name, StringComparer.Ordinal);
@@ -612,12 +617,12 @@ internal sealed class SemanticValidator
         schemaDiagnostics.Any(diagnostic => diagnostic.File == file && diagnostic.Code == code && (diagnostic.Line, diagnostic.Column) == Position(mark));
 
     private void Report(SemanticDocument document, YamlNode node, string code, string message, string? hint = null, Severity severity = Severity.Error) =>
-        add(new Diagnostic(severity, code, document.File, Math.Max(1, (int)node.Mark.Line), Math.Max(1, (int)node.Mark.Column), message, hint));
+        found.Add(new Diagnostic(severity, code, document.File, Math.Max(1, (int)node.Mark.Line), Math.Max(1, (int)node.Mark.Column), message, hint));
 
-    private void Report(SemanticDocument document, Mark mark, YamlNode? source, string code, string message, string? hint = null, Severity severity = Severity.Error) =>
-        add(new Diagnostic(severity, code, document.File, Math.Max(1, (int)mark.Line), Math.Max(1, (int)mark.Column), message, hint));
+    private void Report(SemanticDocument document, Mark mark, string code, string message, string? hint = null, Severity severity = Severity.Error) =>
+        found.Add(new Diagnostic(severity, code, document.File, Math.Max(1, (int)mark.Line), Math.Max(1, (int)mark.Column), message, hint));
 
-    private static string SeatWhere(SeatInfo seat) => seat.Id is null ? " in seats" : $" in seat '{seat.Id}'";
+    private static string SeatWhere(SeatInfo seat) => seat.Id is null ? $" in seats[{seat.Index}]" : $" in seat '{seat.Id}'";
     private static (int Line, int Column) Position(Mark mark) => (Math.Max(1, (int)mark.Line), Math.Max(1, (int)mark.Column));
     private static YamlNode? Get(YamlNode? mapping, string key) => mapping?.Kind == YamlNodeKind.Mapping ? mapping.Entries.FirstOrDefault(entry => entry.Key.Kind == YamlNodeKind.Scalar && entry.Key.Value == key)?.Value : null;
     private static YamlNode? FindKey(YamlNode? mapping, string key) => mapping?.Kind == YamlNodeKind.Mapping ? mapping.Entries.FirstOrDefault(entry => entry.Key.Kind == YamlNodeKind.Scalar && entry.Key.Value == key)?.Key : null;
@@ -664,6 +669,10 @@ internal sealed class SemanticValidator
         }
     }
 
-    private sealed record SeatInfo(YamlNode Node, YamlNode? IdNode, string? Id, string? Kind, bool IsAgentSeat, bool KindInvalid);
+    // Id and Kind are null when missing or when they failed slice 1; Index is the seat's position in seats.
+    private sealed record SeatInfo(YamlNode Node, int Index, YamlNode? IdNode, string? Id, string? Kind, bool KindInvalid)
+    {
+        public bool IsAgent => !KindInvalid && Kind is null or "agent";
+    }
     private sealed record RepoInfo(string Name, YamlNode Node, YamlNode Mapping, int Index);
 }

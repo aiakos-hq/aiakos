@@ -65,7 +65,7 @@ internal sealed class SchemaValidator
                 Fields = [
                     new("id", true) { Pattern = SeatId.ToString(), PatternFieldName = "id" },
                     new("kind") { Values = ["agent", "human"] }, new("description"),
-                    new("agent_ref"), new("harness"), new("model"),
+                    new("agent_ref"), new("harness") { Values = ["claude-code"] }, new("model"),
                     new("checkout") { Values = ["shared", "seat-worktree"] },
                     new("repos", type: SchemaType.List) { Items = new("repo", type: SchemaType.String) { Pattern = RepoId.ToString(), PatternFieldName = "repo id" } },
                     new("workdir_repo") { Pattern = RepoId.ToString(), PatternFieldName = "repo id" },
@@ -89,7 +89,7 @@ internal sealed class SchemaValidator
         new("description", true),
         new("defaults", type: SchemaType.Mapping)
         {
-            Fields = [new("harness"), new("model")]
+            Fields = [new("harness") { Values = ["claude-code"] }, new("model")]
         },
         new("guidance", type: SchemaType.List) { Items = new("guidance", type: SchemaType.String) },
         new("skills", type: SchemaType.List) { Items = new("skill", type: SchemaType.String) },
@@ -286,7 +286,11 @@ internal sealed class SchemaValidator
 
             if (field.Values is not null && !field.Values.Contains(value.Value, StringComparer.Ordinal))
             {
-                if (TryGetReservedScalar(fieldName, parentPath, value.Value!, out var milestone))
+                if (fieldName == "harness" && value.Value is "opencode" or "codex")
+                {
+                    Add("AIK4002", value.Mark, $"harness '{value.Value}'{context} is not supported in this version (planned for M2)");
+                }
+                else if (TryGetReservedScalar(fieldName, parentPath, value.Value!, out var milestone))
                 {
                     Add("AIK2005", value.Mark, $"reserved value '{value.Value}' for field '{fieldName}'{context} is not supported in this version (planned for {milestone})");
                 }

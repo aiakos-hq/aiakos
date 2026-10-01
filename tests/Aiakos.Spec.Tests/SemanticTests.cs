@@ -77,6 +77,77 @@ public sealed class SemanticTests
     }
 
     [Fact]
+    public void ReportsAnUnsupportedHarnessOnASeatWithAnInvalidKind()
+    {
+        var diagnostics = Load(MinimalRig + "    kind: robot\n    harness: opencode\n").Diagnostics;
+
+        Assert.Equal(["AIK2004", "AIK4002"], diagnostics.Select(item => item.Code));
+        Assert.Equal("harness 'opencode' in seat 'impl' is not supported in this version (planned for M2)", diagnostics[1].Message);
+    }
+
+    [Fact]
+    public void LoadsAnAgentDirectoryOnceForEverySpellingOfItsReference()
+    {
+        var rig = MinimalRig + "  - id: review\n    agent_ref: local:agents/impl/\n  - id: qa\n    agent_ref: local:./agents//impl\n";
+        var agent = MinimalAgent.Replace("defaults:\n  harness: claude-code\n", "", StringComparison.Ordinal);
+
+        var diagnostics = Load(rig, agent).Diagnostics;
+
+        Assert.Equal(["seat 'impl' has no harness", "seat 'review' has no harness", "seat 'qa' has no harness"], diagnostics.Select(item => item.Message));
+        Assert.All(diagnostics, item => Assert.Equal("set harness on the seat or defaults.harness in agents/impl/agent.yaml", item.Hint));
+    }
+
+    [Fact]
+    public void DoesNotReportAMissingHarnessForAnEmptyAgentFile()
+    {
+        var diagnostic = Assert.Single(Load(agent: "").Diagnostics);
+
+        Assert.Equal(("AIK2004", "agents/impl/agent.yaml", "file must contain a mapping"), (diagnostic.Code, diagnostic.File, diagnostic.Message));
+    }
+
+    [Fact]
+    public void DoesNotAskAHumanSeatForAHarness()
+    {
+        var rig = MinimalRig + "  - id: pm\n    kind: human\n    agent_ref: local:agents/impl\n";
+        var agent = MinimalAgent.Replace("defaults:\n  harness: claude-code\n", "", StringComparison.Ordinal);
+
+        var diagnostics = Load(rig, agent).Diagnostics;
+
+        Assert.Equal(["seat 'impl' has no harness", "field 'agent_ref' is not allowed on human seat 'pm'"], diagnostics.Select(item => item.Message));
+    }
+
+    [Fact]
+    public void NamesASeatWithoutAValidIdByItsIndex()
+    {
+        var rig = MinimalRig.Replace("  - id: impl\n", "  - id: Impl\n", StringComparison.Ordinal)
+            + "    repos: [nope]\n    workdir_repo: app\n    requires: {auth: api-key}\n  - agent_ref: git:https://example.com/agents.git\n";
+        var agent = MinimalAgent.Replace("defaults:\n  harness: claude-code\n", "", StringComparison.Ordinal);
+
+        var diagnostics = Load(rig, agent).Diagnostics;
+
+        Assert.Equal(
+            [
+                "invalid value 'Impl' for field 'id' in seats[0]",
+                "unknown repo 'nope' in seats[0]",
+                "missing required field 'id' in seats[1]",
+                "agent_ref scheme 'git:' in seats[1] is not supported in this version (planned for M2)"
+            ],
+            diagnostics.Select(item => item.Message));
+    }
+
+    [Fact]
+    public void ListsEachNameOnceInHints()
+    {
+        var rig = MinimalRig.Replace("seats:\n", "    - name: app\n      url: https://github.com/example/other.git\nseats:\n", StringComparison.Ordinal)
+            + "    repos: [app, app]\n    workdir_repo: lib\n  - id: review\n    agent_ref: local:agents/impl\n    repos: [nope]\n";
+
+        var diagnostics = Load(rig).Diagnostics;
+
+        Assert.Contains(diagnostics, item => item.Code == "AIK4004" && item.Hint == "repos of the seat: app");
+        Assert.Contains(diagnostics, item => item.Code == "AIK4004" && item.Hint == "defined repos: app");
+    }
+
+    [Fact]
     public void DetectsDuplicateSeatsAndReposAndReservedSeatIds()
     {
         var rig = MinimalRig.Replace("      url: https://github.com/example/app.git\n", "      url: https://github.com/example/app.git\n    - name: app\n      url: https://github.com/example/second.git\n", StringComparison.Ordinal)
@@ -277,6 +348,22 @@ public sealed class SemanticTests
         var result = Load(MinimalRig + "x-ghp_example: ordinary value\n");
 
         Assert.DoesNotContain(result.Diagnostics, item => item.Code == "AIK4020");
+    }
+
+    [Theory]
+    [InlineData("sk-ant-example: x\n", null, "rig.yaml", 12, 1)]
+    [InlineData(null, "kind: sk-ant-example\n", "agents/impl/agent.yaml", 2, 7)]
+    public void ReportsACredentialLikeTextTheScanDoesNotReachInsteadOfEchoingIt(string? rigLine, string? agentKind, string file, int line, int column)
+    {
+        var rig = MinimalRig + rigLine;
+        var agent = agentKind is null ? MinimalAgent : MinimalAgent.Replace("kind: Agent\n", agentKind, StringComparison.Ordinal);
+
+        var diagnostics = Load(rig, agent).Diagnostics;
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(("AIK4020", file, line, column), (diagnostic.Code, diagnostic.File, diagnostic.Line, diagnostic.Column));
+        Assert.Equal("credential-like value (Anthropic API key)", diagnostic.Message);
+        Assert.DoesNotContain("sk-ant-example", DiagnosticFormatter.Format(diagnostics), StringComparison.Ordinal);
     }
 
     [Fact]

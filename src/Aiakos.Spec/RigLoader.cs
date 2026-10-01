@@ -14,10 +14,11 @@ public static class RigLoader
         var root = rigRoot ?? "";
         var rigPath = Path.Combine(root, "rig.yaml");
         var rigNode = LoadFile(rigPath, GetDisplayPath(root, rigPath), RigFileKind.Rig, diagnostics, out var rigParsed);
-        var rigDocument = new SemanticDocument(rigNode, GetDisplayPath(root, rigPath), RigFileKind.Rig, rigParsed);
+        var rigDocument = new SemanticDocument(rigNode, GetDisplayPath(root, rigPath), rigParsed);
 
-        var agentPaths = new HashSet<string>(PathComparer());
+        var agentsByDirectory = new Dictionary<string, SemanticDocument>(PathComparer());
         var agentDocuments = new List<SemanticDocument>();
+        var seatAgents = new Dictionary<YamlNode, SemanticDocument>();
         if (rigNode is { Kind: YamlNodeKind.Mapping })
         {
             foreach (var seats in Values(rigNode, "seats"))
@@ -44,7 +45,7 @@ public static class RigLoader
                     string directoryPath;
                     try
                     {
-                        directoryPath = Path.GetFullPath(Path.Combine(root, agentDirectory));
+                        directoryPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(root, agentDirectory)));
                     }
                     catch (ArgumentException)
                     {
@@ -59,15 +60,18 @@ public static class RigLoader
                         continue;
                     }
 
-                    if (!agentPaths.Add(directoryPath))
+                    // One agent directory may back several seats, under different spellings; it is loaded once.
+                    if (!agentsByDirectory.TryGetValue(directoryPath, out var agentDocument))
                     {
-                        continue;
+                        var agentFile = Path.Combine(directoryPath, "agent.yaml");
+                        var agentDisplayPath = GetDisplayPath(root, agentFile);
+                        var agentNode = LoadFile(agentFile, agentDisplayPath, RigFileKind.Agent, diagnostics, out var agentParsed);
+                        agentDocument = new SemanticDocument(agentNode, agentDisplayPath, agentParsed);
+                        agentsByDirectory.Add(directoryPath, agentDocument);
+                        agentDocuments.Add(agentDocument);
                     }
 
-                    var agentFile = Path.Combine(directoryPath, "agent.yaml");
-                    var agentDisplayPath = GetDisplayPath(root, agentFile);
-                    var agentNode = LoadFile(agentFile, agentDisplayPath, RigFileKind.Agent, diagnostics, out var agentParsed);
-                    agentDocuments.Add(new SemanticDocument(agentNode, agentDisplayPath, RigFileKind.Agent, agentParsed, text));
+                    seatAgents[seat] = agentDocument;
                 }
             }
         }
@@ -75,23 +79,18 @@ public static class RigLoader
         var actualEnvPath = envPath is null ? Path.Combine(root, "rig.env.yaml") : envPath;
         var envDisplayPath = envPath is null ? GetDisplayPath(root, actualEnvPath) : GetEnvDisplayPath(root, envPath);
         var envNode = LoadFile(actualEnvPath, envDisplayPath, RigFileKind.RigEnv, diagnostics, out var envParsed);
-        var envDocument = new SemanticDocument(envNode, envDisplayPath, RigFileKind.RigEnv, envParsed);
-        var semanticDiagnostics = new List<Diagnostic>();
-        new SemanticValidator(rigDocument, agentDocuments, envDocument, diagnostics, semanticDiagnostics.Add).Validate();
+        var envDocument = new SemanticDocument(envNode, envDisplayPath, envParsed);
+        var allDiagnostics = new SemanticValidator(rigDocument, agentDocuments, seatAgents, envDocument, diagnostics).Validate();
 
-        diagnostics.AddRange(semanticDiagnostics);
         var fileOrder = new[] { rigDocument.File }.Concat(agentDocuments.Select(document => document.File)).Append(envDocument.File)
             .Distinct(StringComparer.Ordinal).Select((file, index) => (file, index)).ToDictionary(item => item.file, item => item.index, StringComparer.Ordinal);
-        var safeDiagnostics = diagnostics
-            .Where(diagnostic => diagnostic.Code == "AIK4020" || !diagnostics.Any(secret => secret.Code == "AIK4020" && secret.File == diagnostic.File && secret.Line == diagnostic.Line && secret.Column == diagnostic.Column))
-            .Where(diagnostic => diagnostic.Code == "AIK4020" ||
-                                 (!SemanticValidator.ContainsCredentialLikeText(diagnostic.Message) && !SemanticValidator.ContainsCredentialLikeText(diagnostic.Hint)))
+        var ordered = allDiagnostics
             .OrderBy(diagnostic => fileOrder.GetValueOrDefault(diagnostic.File, int.MaxValue))
             .ThenBy(diagnostic => diagnostic.Line)
             .ThenBy(diagnostic => diagnostic.Column)
             .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
             .ToArray();
-        return new LoadResult(null, safeDiagnostics);
+        return new LoadResult(null, ordered);
     }
 
     private static YamlNode? LoadFile(string path, string displayPath, RigFileKind kind, List<Diagnostic> allDiagnostics, out bool parsed)

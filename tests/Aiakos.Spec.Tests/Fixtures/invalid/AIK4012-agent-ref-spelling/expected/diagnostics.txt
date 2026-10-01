@@ -1,0 +1,4 @@
+rig.yaml:14:22: warning AIK4012: seat 'review' uses auth: api-key but does not list secret 'anthropic_api_key'
+  hint: add anthropic_api_key to requires.secrets
+rig.env.yaml:1:1: error AIK5004: secret 'anthropic_api_key' has no source
+  hint: set secrets.anthropic_api_key.file
