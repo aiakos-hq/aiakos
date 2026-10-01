@@ -1,0 +1,9 @@
+version: v2
+modules:
+  - path: src/Aiakos.Contracts/Protos
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

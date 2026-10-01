@@ -13,6 +13,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Aiakos.AppHost.Tests/Aiakos.AppHost.Tests.csproj" />
+    <Project Path="tests/Aiakos.Contracts.Tests/Aiakos.Contracts.Tests.csproj" />
     <Project Path="tests/Aiakos.Data.Tests/Aiakos.Data.Tests.csproj" />
     <Project Path="tests/Aiakos.Hosting.Wsl.Tests/Aiakos.Hosting.Wsl.Tests.csproj" />
     <Project Path="tests/Aiakos.Node.Tests/Aiakos.Node.Tests.csproj" />

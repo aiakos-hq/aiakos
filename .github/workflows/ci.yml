@@ -45,3 +45,28 @@ jobs:
         with:
           name: test-results
           path: artifacts/test-results
+
+  # Contract checks for the orchestrator <-> node proto (spec 0002 AC1/AC2, ADR 0021).
+  proto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: bufbuild/buf-action@v1
+        with:
+          version: 1.73.0
+          setup_only: true
+
+      - name: Lint
+        run: buf lint
+
+      # Skipped while main has no buf.yaml (the pull request that adds it).
+      - name: Breaking changes against main
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin +refs/heads/main:refs/heads/main
+          if git cat-file -e main:buf.yaml 2>/dev/null; then
+            buf breaking --against '.git#branch=main'
+          else
+            echo "::notice::main has no buf.yaml yet; buf breaking skipped"
+          fi
