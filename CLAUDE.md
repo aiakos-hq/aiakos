@@ -93,6 +93,7 @@ Prerequisites: .NET SDK 10.0.1xx+ (see `global.json`); Docker Desktop running; W
   — dashboard at http://localhost:15180
 - WSL end-to-end test (Windows only, stack not running): `$env:AIAKOS_E2E_WSL=1; dotnet test --project tests/Aiakos.AppHost.Tests`
 - Pack the placeholder tool: `dotnet pack src/Aiakos.Cli -c Release -o artifacts/packages`
+- Check the proto (needs buf 1.73.0): `buf lint` and `buf breaking --against '.git#branch=main'`
 - Add a migration: `src/Aiakos.Data/Migrations/NNNN_description.sql` (next number; never edit a
   merged one; every table in schema `aiakos` gets `tenant_id`).
 - Reset the dev database (stack stopped): `docker rm -f <postgres container>` then

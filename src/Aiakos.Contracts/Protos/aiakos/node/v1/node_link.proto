@@ -1,0 +1,436 @@
+// aiakos/node/v1/node_link.proto — location per spec 0001.
+syntax = "proto3";
+
+package aiakos.node.v1;
+
+option csharp_namespace = "Aiakos.Contracts.Node.V1";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// The node agent dials out and keeps one Connect stream open per node (ADR 0004).
+// Authentication: "authorization: Bearer <node token>" call metadata. Node ID and tenant
+// are derived from the token by the orchestrator, never from message fields (rule 2).
+service NodeLinkService {
+  rpc Connect(stream ConnectRequest) returns (stream ConnectResponse);
+}
+
+// ───────────────────────────── Envelopes ─────────────────────────────
+
+// Every message the node sends (buf naming: ConnectRequest).
+message ConnectRequest {
+  TraceContext trace = 1;
+  oneof body {
+    Hello hello = 10;              // first message, exactly once per stream
+    Heartbeat heartbeat = 11;
+    CommandAck command_ack = 12;
+    SeatEvent seat_event = 13;
+    Goodbye goodbye = 14;          // node shutting down gracefully (e.g. SIGHUP)
+  }
+}
+
+// Every message the orchestrator sends (buf naming: ConnectResponse).
+message ConnectResponse {
+  TraceContext trace = 1;
+  oneof body {
+    Welcome welcome = 10;          // first message, exactly once per stream
+    Command command = 11;
+    EventAck event_ack = 12;
+    Goodbye goodbye = 13;
+  }
+}
+
+// W3C Trace Context, per message: context on the Connect call is not enough (spike 0003).
+message TraceContext {
+  string traceparent = 1;
+  string tracestate = 2;
+}
+
+// ───────────────────────────── Handshake ─────────────────────────────
+
+message ProtocolVersion {
+  uint32 major = 1;                // 1 for this package
+  uint32 minor = 2;                // additive revisions; 0 for this spec
+}
+
+message Hello {
+  ProtocolVersion protocol = 1;
+  string node_name = 2;            // informational; must equal the name bound to the token
+  string node_instance_id = 3;     // UUID, new at every node process start; epoch of seq numbers
+  string agent_version = 4;        // node build version (SemVer)
+  NodePlatform platform = 5;
+  repeated string capabilities = 6;
+  repeated SeatInventory seats = 7;// every seat the node currently knows (live or buffered)
+  Limits limits = 8;
+}
+
+message NodePlatform {
+  string os = 1;                   // "linux"
+  string arch = 2;                 // "x64", "arm64"
+  string kernel = 3;               // e.g. "6.18.33.2-microsoft-standard-WSL2"
+  string hostname = 4;
+}
+
+message Limits {
+  uint32 max_message_bytes = 1;    // default 4 MiB
+  uint32 max_inflight_commands = 2;// per node; default 64
+  uint32 event_buffer_capacity = 3;// per node, events
+}
+
+message SeatInventory {
+  string seat_id = 1;
+  string launch_id = 2;            // current or last launch; empty if unknown
+  SessionLifecycle lifecycle = 3;
+  string native_session_id = 4;    // empty = not observed
+  uint64 first_buffered_seq = 5;   // 0 = nothing buffered
+  uint64 last_seq = 6;             // highest seq assigned in this node instance; 0 = none
+}
+
+// Node-observable lifecycle of a seat's harness process. Activity (working/idle/needs-input)
+// is not here: the SeatActor derives it from HarnessEvents (#13).
+enum SessionLifecycle {
+  SESSION_LIFECYCLE_UNSPECIFIED = 0;
+  SESSION_LIFECYCLE_LAUNCHING = 1; // process started, readiness not yet observed
+  SESSION_LIFECYCLE_RUNNING = 2;   // readiness observed, process alive
+  SESSION_LIFECYCLE_EXITED = 3;
+  SESSION_LIFECYCLE_UNKNOWN = 4;   // e.g. pane found after node restart, state not established
+}
+
+message Welcome {
+  ProtocolVersion protocol = 1;    // negotiated: major 1, minor = min(node, orchestrator)
+  string node_id = 2;              // derived from the token; authoritative
+  string connection_id = 3;        // for logs and traces
+  google.protobuf.Duration heartbeat_interval = 4;  // default 5 s
+  google.protobuf.Duration liveness_timeout = 5;    // default 15 s
+  repeated ReplayFrom replay = 6;
+  Limits limits = 7;               // orchestrator side; senders respect the lower value
+  google.protobuf.Timestamp server_time = 8;        // diagnostics only
+}
+
+message ReplayFrom {
+  string seat_id = 1;
+  uint64 next_seq = 2;             // first seq the orchestrator has not persisted for this node instance
+}
+
+message Heartbeat {
+  google.protobuf.Timestamp sent_at = 1;
+  uint32 buffered_events = 2;      // unacked events across all seats
+  uint32 inflight_commands = 3;
+}
+
+message Goodbye {
+  GoodbyeReason reason = 1;
+  string message = 2;
+  google.protobuf.Duration retry_after = 3;         // hint for the node's next Connect
+}
+
+enum GoodbyeReason {
+  GOODBYE_REASON_UNSPECIFIED = 0;
+  GOODBYE_REASON_SHUTDOWN = 1;     // sender is stopping
+  GOODBYE_REASON_SUPERSEDED = 2;   // a newer stream for this node replaced this one
+  GOODBYE_REASON_REVOKED = 3;      // node token revoked
+}
+
+// ───────────────────────────── Commands ─────────────────────────────
+
+message Command {
+  string command_id = 1;           // UUID; idempotency key, persisted by the orchestrator first
+  string seat_id = 2;              // all v1 commands are seat-scoped
+  google.protobuf.Duration timeout = 3;
+  uint32 attempt = 4;              // 1 = first send; >1 = resend after reconnect
+  oneof body {
+    StartSeat start_seat = 10;
+    DeliverInput deliver_input = 11;
+    SendKeys send_keys = 12;       // capability "command.send-keys"
+    CapturePane capture_pane = 13;
+    StopSeat stop_seat = 14;
+  }
+}
+
+message CommandAck {
+  string command_id = 1;
+  bool duplicate = 2;              // already known: not executed again
+}
+
+message StartSeat {
+  string launch_id = 1;            // UUID, new per launch attempt; idempotency key of the launch
+  string seat_address = 2;         // "member@rig"; for pane naming and AIAKOS_SEAT
+  string harness = 3;              // "claude-code" (M1), "opencode" (M2)
+  LaunchMode mode = 4;
+  string native_session_id = 5;    // orchestrator-owned; FRESH/RESUME: the session; FORK: the new one
+  string fork_from_session_id = 6; // FORK only
+  Workspace workspace = 7;
+  repeated string argv = 8;        // resolved command line; placeholders per R19
+  map<string, string> env = 9;     // non-secret environment
+  repeated SeatFile files = 10;    // projected files (settings, guidance, skills)
+  repeated SeatSecret secrets = 11;// per-seat token (M1); never logged
+  google.protobuf.Duration ready_timeout = 12;      // e.g. 15 s (spike 0002 F9)
+  TerminalSize terminal = 13;      // terminal-driven harnesses; e.g. 160x45
+}
+
+enum LaunchMode {
+  LAUNCH_MODE_UNSPECIFIED = 0;
+  LAUNCH_MODE_FRESH = 1;
+  LAUNCH_MODE_RESUME = 2;
+  LAUNCH_MODE_FORK = 3;            // capability "launch.fork"; not required in M1
+}
+
+message Workspace {
+  string path = 1;                 // absolute path on the node
+  WorktreeSpec worktree = 2;       // set for checkout policy seat-worktree: ensure it exists
+}
+
+message WorktreeSpec {
+  string repo_path = 1;            // absolute path of the main checkout on the node
+  string branch = 2;
+  string base_ref = 3;             // used only when the branch does not exist yet
+}
+
+message SeatFile {
+  FileRoot root = 1;
+  string path = 2;                 // relative; no "..", not absolute (R46)
+  bytes content = 3;
+  uint32 mode = 4;                 // POSIX permission bits, e.g. 0644; 0 = default
+  bool expand = 5;                 // expand ${AIAKOS_SEAT_HOME} / ${AIAKOS_WORKSPACE}
+}
+
+enum FileRoot {
+  FILE_ROOT_UNSPECIFIED = 0;
+  FILE_ROOT_SEAT_HOME = 1;
+  FILE_ROOT_WORKSPACE = 2;
+}
+
+message SeatSecret {
+  string name = 1;                 // e.g. "seat_token"
+  bytes value = 2;
+  oneof target {
+    string env_var = 3;            // not used for the seat token (R45)
+    string file_path = 4;          // relative to seat home; M1 seat token (R45) and M6 sandboxes
+  }
+}
+
+message TerminalSize {
+  uint32 columns = 1;
+  uint32 rows = 2;
+}
+
+message DeliverInput {
+  string lead = 1;                 // one line, typed (not pasted) by terminal harnesses; may be empty
+  string body = 2;                 // ≤ 1 MiB; pasted (terminal) or sent as prompt text (API)
+  bool expect_confirmation = 3;    // false for slash commands (no UserPromptSubmit, spike 0001)
+  google.protobuf.Duration confirm_timeout = 4;     // e.g. 5 s
+}
+
+message SendKeys {
+  repeated string keys = 1;        // allowlist per R23
+}
+
+message CapturePane {
+  uint32 history_lines = 1;        // scrollback lines in addition to the visible screen
+}
+
+message StopSeat {
+  google.protobuf.Duration grace = 1;               // graceful exit window before kill
+}
+
+// ───────────────────────────── Events ─────────────────────────────
+
+message EventAck {
+  string seat_id = 1;
+  uint64 through_seq = 2;          // cumulative, for the current node instance; sent after DB commit
+}
+
+message SeatEvent {
+  string seat_id = 1;              // node's attribution (via per-seat token); checked per R12
+  string launch_id = 2;
+  uint64 seq = 3;                  // per (node_instance_id, seat_id); starts at 1; +1; never reused
+  google.protobuf.Timestamp observed_at = 4;        // node clock; never used for ordering
+  uint64 source_seq = 5;           // hook relay stamp; 0 = absent (R28)
+  oneof body {
+    CommandResult command_result = 10;
+    HarnessEvent harness = 11;
+    SessionObserved session_observed = 12;
+    ProcessExited process_exited = 13;
+    ObservationGap gap = 14;
+  }
+}
+
+message CommandResult {
+  string command_id = 1;
+  CommandStatus status = 2;
+  Error error = 3;                 // set unless status = COMPLETED
+  oneof result {
+    LaunchResult launch = 10;
+    DeliveryResult delivery = 11;
+    PaneCapture capture = 12;
+    StopResult stop = 13;
+  }
+}
+
+enum CommandStatus {
+  COMMAND_STATUS_UNSPECIFIED = 0;
+  COMMAND_STATUS_COMPLETED = 1;    // ran to the end; see the typed result for the outcome
+  COMMAND_STATUS_REJECTED = 2;     // not started (validation, precondition, unsupported)
+  COMMAND_STATUS_FAILED = 3;       // started, failed on the node (e.g. session host error)
+  COMMAND_STATUS_TIMED_OUT = 4;
+}
+
+message LaunchResult {
+  LaunchOutcome outcome = 1;
+  string reason = 2;               // e.g. RESUME_SESSION_NOT_FOUND, READY_TIMEOUT, STOPPED
+  string observed_session_id = 3;  // empty = none observed
+  optional int32 exit_code = 4;    // set if the harness exited during the launch
+  PaneCapture evidence = 5;        // set for FAILED and UNKNOWN when a pane exists
+}
+
+enum LaunchOutcome {
+  LAUNCH_OUTCOME_UNSPECIFIED = 0;
+  LAUNCH_OUTCOME_READY = 1;        // FRESH: ready for input. RESUME/FORK: resume verified
+  LAUNCH_OUTCOME_FAILED = 2;       // RESUME/FORK: resume failed; never replaced by a fresh start
+  LAUNCH_OUTCOME_UNKNOWN = 3;      // no readiness signal in time (dialog, picker, hang)
+}
+
+message DeliveryResult {
+  DeliveryOutcome outcome = 1;
+  string turn_id = 2;              // harness correlation id (Claude prompt_id, OpenCode messageID)
+}
+
+enum DeliveryOutcome {
+  DELIVERY_OUTCOME_UNSPECIFIED = 0;
+  DELIVERY_OUTCOME_CONFIRMED = 1;
+  DELIVERY_OUTCOME_SUBMITTED_UNCONFIRMED = 2;
+  DELIVERY_OUTCOME_NOT_DELIVERED = 3;
+}
+
+message PaneCapture {
+  string text = 1;                 // plain text, no escape sequences; ≤ 1 MiB
+  bool truncated = 2;
+  google.protobuf.Timestamp captured_at = 3;
+  TerminalSize size = 4;
+  bool pane_dead = 5;
+}
+
+message StopResult {
+  StopOutcome outcome = 1;
+}
+
+enum StopOutcome {
+  STOP_OUTCOME_UNSPECIFIED = 0;
+  STOP_OUTCOME_STOPPED = 1;        // exited within grace
+  STOP_OUTCOME_KILLED = 2;         // grace expired, killed
+  STOP_OUTCOME_NOT_RUNNING = 3;
+}
+
+message HarnessEvent {
+  string harness = 1;              // "claude-code", "opencode"
+  string native_name = 2;          // "SessionStart", "statusLine", "permission.asked", …
+  HarnessEventKind kind = 3;       // normalized; OTHER is always valid
+  string native_session_id = 4;    // from the payload; empty = absent
+  map<string, string> attributes = 5;               // well-known keys, see table; values ≤ 1 KiB
+  Usage usage = 6;                 // set when the payload carries usage (TELEMETRY, turn end)
+  bytes raw = 7;                   // original payload, ≤ 256 KiB
+  string raw_content_type = 8;     // "application/json"
+  bool raw_truncated = 9;
+  uint32 raw_size = 10;            // original size in bytes
+  EventOrigin origin = 11;
+}
+
+enum HarnessEventKind {
+  HARNESS_EVENT_KIND_UNSPECIFIED = 0;
+  HARNESS_EVENT_KIND_OTHER = 1;
+  HARNESS_EVENT_KIND_SESSION_STARTED = 2;   // attribute source: startup|resume|fork|clear
+  HARNESS_EVENT_KIND_PROMPT_SUBMITTED = 3;
+  HARNESS_EVENT_KIND_ACTIVE = 4;            // level signal "working" (OpenCode status busy)
+  HARNESS_EVENT_KIND_TOOL_STARTED = 5;
+  HARNESS_EVENT_KIND_TOOL_FINISHED = 6;
+  HARNESS_EVENT_KIND_INPUT_REQUESTED = 7;   // permission / question
+  HARNESS_EVENT_KIND_INPUT_RESOLVED = 8;
+  HARNESS_EVENT_KIND_COMPACTION_STARTED = 9;
+  HARNESS_EVENT_KIND_COMPACTED = 10;
+  HARNESS_EVENT_KIND_TURN_ENDED = 11;
+  HARNESS_EVENT_KIND_TURN_FAILED = 12;      // Claude StopFailure, OpenCode session.error
+  HARNESS_EVENT_KIND_RETRYING = 13;
+  HARNESS_EVENT_KIND_SESSION_ENDED = 14;
+  HARNESS_EVENT_KIND_TELEMETRY = 15;        // statusLine tick, usage sample
+}
+
+enum EventOrigin {
+  EVENT_ORIGIN_UNSPECIFIED = 0;
+  EVENT_ORIGIN_LIVE = 1;           // pushed by the harness (hook, SSE)
+  EVENT_ORIGIN_RESYNC = 2;         // synthesized by re-reading harness state after a gap
+}
+
+// proto3 `optional`: an absent field means "unknown", never zero (rule 3).
+message Usage {
+  optional uint32 context_used_percent = 1;
+  optional uint64 context_window_tokens = 2;
+  optional uint64 context_used_tokens = 3;
+  optional double cost_usd = 4;
+  string model_id = 5;             // empty = unknown
+}
+
+message SessionObserved {
+  string native_session_id = 1;
+  SessionIdSource source = 2;
+  bool matches_expected = 3;       // equals StartSeat.native_session_id
+}
+
+enum SessionIdSource {
+  SESSION_ID_SOURCE_UNSPECIFIED = 0;
+  SESSION_ID_SOURCE_HARNESS_EVENT = 1;      // e.g. SessionStart.session_id
+  SESSION_ID_SOURCE_HARNESS_API = 2;        // e.g. OpenCode create/get session response
+}
+
+message ProcessExited {
+  optional int32 exit_code = 1;
+  optional int32 signal = 2;
+  ExitSource source = 3;
+}
+
+enum ExitSource {
+  EXIT_SOURCE_UNSPECIFIED = 0;
+  EXIT_SOURCE_PANE_DEAD = 1;       // session host reports the pane's process ended
+  EXIT_SOURCE_PROCESS_WAIT = 2;    // node's own child process
+  // 3–9 reserved for sandbox sources (container exec_die / die) in M6.
+}
+
+message ObservationGap {
+  GapReason reason = 1;
+  google.protobuf.Timestamp from = 2;       // unset = unknown
+  google.protobuf.Timestamp to = 3;
+  uint64 dropped_events = 4;                // BUFFER_OVERFLOW only
+}
+
+enum GapReason {
+  GAP_REASON_UNSPECIFIED = 0;
+  GAP_REASON_NODE_RESTARTED = 1;
+  GAP_REASON_HARNESS_STREAM_RECONNECTED = 2;
+  GAP_REASON_INGEST_UNAVAILABLE = 3;
+  GAP_REASON_BUFFER_OVERFLOW = 4;
+}
+
+// ───────────────────────────── Errors ─────────────────────────────
+
+message Error {
+  ErrorCode code = 1;
+  string reason = 2;               // stable UPPER_SNAKE_CASE, e.g. SEAT_NOT_READY
+  string message = 3;              // human-readable; no secrets, no payloads
+  bool retryable = 4;
+  map<string, string> metadata = 5;
+}
+
+// Values mirror google.rpc.Code so they map 1:1 onto gRPC status codes.
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_INVALID_ARGUMENT = 3;
+  ERROR_CODE_DEADLINE_EXCEEDED = 4;
+  ERROR_CODE_NOT_FOUND = 5;
+  ERROR_CODE_ALREADY_EXISTS = 6;
+  ERROR_CODE_PERMISSION_DENIED = 7;
+  ERROR_CODE_RESOURCE_EXHAUSTED = 8;
+  ERROR_CODE_FAILED_PRECONDITION = 9;
+  ERROR_CODE_ABORTED = 10;
+  ERROR_CODE_UNIMPLEMENTED = 12;
+  ERROR_CODE_INTERNAL = 13;
+  ERROR_CODE_UNAVAILABLE = 14;
+}
