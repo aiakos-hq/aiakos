@@ -1,0 +1,6 @@
+apiVersion: aiakos.dev/v1
+kind: Rig
+name: impl
+description: Implements issues
+defaults:
+  harness: claude-code

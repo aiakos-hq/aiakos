@@ -1,0 +1,2 @@
+rig.yaml:3:7: error AIK2004: invalid value 'Demo' for field 'name'
+  hint: must match ^[a-z][a-z0-9-]{1,39}$

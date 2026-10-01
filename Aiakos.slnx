@@ -9,6 +9,7 @@
     <Project Path="src/Aiakos.Node/Aiakos.Node.csproj" />
     <Project Path="src/Aiakos.Orchestrator/Aiakos.Orchestrator.csproj" />
     <Project Path="src/Aiakos.ServiceDefaults/Aiakos.ServiceDefaults.csproj" />
+    <Project Path="src/Aiakos.Spec/Aiakos.Spec.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Aiakos.AppHost.Tests/Aiakos.AppHost.Tests.csproj" />
@@ -16,5 +17,6 @@
     <Project Path="tests/Aiakos.Hosting.Wsl.Tests/Aiakos.Hosting.Wsl.Tests.csproj" />
     <Project Path="tests/Aiakos.Node.Tests/Aiakos.Node.Tests.csproj" />
     <Project Path="tests/Aiakos.Orchestrator.Tests/Aiakos.Orchestrator.Tests.csproj" />
+    <Project Path="tests/Aiakos.Spec.Tests/Aiakos.Spec.Tests.csproj" />
   </Folder>
 </Solution>

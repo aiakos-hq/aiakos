@@ -1,0 +1,2 @@
+rig.yaml:3:7: error AIK1003: anchors and aliases are not supported
+rig.yaml:12:18: error AIK1003: anchors and aliases are not supported

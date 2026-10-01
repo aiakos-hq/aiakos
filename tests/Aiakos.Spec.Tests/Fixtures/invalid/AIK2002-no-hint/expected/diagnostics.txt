@@ -1,0 +1,1 @@
+rig.yaml:12:1: error AIK2002: unknown field 'colour'

@@ -1,0 +1,1 @@
+rig.yaml:12:5: error AIK1003: merge keys ('<<') are not supported

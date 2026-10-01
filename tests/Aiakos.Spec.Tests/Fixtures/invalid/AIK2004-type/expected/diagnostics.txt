@@ -1,0 +1,1 @@
+rig.yaml:8:8: error AIK2004: field 'seats' must be a list

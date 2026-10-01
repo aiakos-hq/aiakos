@@ -1,0 +1,1 @@
+rig.yaml:1:1: error AIK2004: file must contain a mapping

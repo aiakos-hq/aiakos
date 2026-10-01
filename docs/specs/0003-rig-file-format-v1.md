@@ -259,14 +259,20 @@ rigs/<rig>/                       # rig root (shared, committed)
   rig.env.yaml                    # kind: RigEnv (local, NOT committed; .gitignore'd)
 ```
 
-The loader lives in the spec-model project defined by spec 0001 (tentatively `Aiakos.Spec`,
-YamlDotNet per plan §4). Public surface, for tests and the CLI:
+The loader lives in `src/Aiakos.Spec` (YamlDotNet per plan §4). Public surface, for tests and
+the CLI:
 
 ```csharp
 LoadResult RigLoader.Load(string rigRoot, string? envPath);   // envPath null → <rigRoot>/rig.env.yaml
 record LoadResult(ResolvedRig? Rig, IReadOnlyList<Diagnostic> Diagnostics);
 record Diagnostic(Severity Severity, string Code, string File, int Line, int Column, string Message, string? Hint);
+enum Severity { Error, Warning }
+string DiagnosticFormatter.Format(IEnumerable<Diagnostic> diagnostics);   // the R23 text form, LF
 ```
+
+`Diagnostic.File` is relative to the rig root with `/` separators (`rig.yaml`,
+`agents/impl/agent.yaml`); an env file outside the rig root is shown as passed. The CLI prefixes
+the rig root when it prints (#15).
 
 `Load` is pure apart from reading the rig root and the env file: it never touches the node, git,
 the network or the database. Node-side checks (paths exist, trust, git state) happen at launch
@@ -586,22 +592,48 @@ rigs/aiakos-dev/rig.env.yaml:9:11: error AIK5003: seat 'review' has no node
 | AIK5005 | error | Placement for an unknown or human seat |
 | AIK5006 | error | Binding for an unknown repo |
 | AIK5007 | error | Source for a secret no seat requires |
-| AIK5008 | error | Secret source other than `file:` (`value:` → "never inline secrets"; `store:` → M6) |
+| AIK5008 | error | Secret source `value:` ("never inline secrets"). `store:` and `env:` are reserved: AIK2005 |
 | AIK5009 | warning | Node path under `/mnt/<drive>/` |
 | AIK5010 | warning | `rig.env.yaml` is tracked by git (emitted by the CLI, #15) |
+
+#### Message texts, AIK1001–AIK2005
+
+Golden tests compare these texts exactly. `<where>` is empty for a top-level field,
+` in seat '<id>'` for a field directly in a seat with a valid ID, otherwise ` in <path>` with the
+dotted path of the containing mapping (`workspace.repos[0]`, `seats[1].requires`,
+`placement.seats`). A list item's field name is `<list>[<i>]`.
+
+| Code | Message | Hint | Position |
+|---|---|---|---|
+| AIK1001 | `file not found` | — | 1:1 |
+| AIK1002 | `YAML syntax error: <parser message>` (`malformed YAML` when the parser gives none); a second document is a syntax error | — | the parser's |
+| AIK1003 | `duplicate key '<key>'` · `anchors and aliases are not supported` · `merge keys ('<<') are not supported` · `tag '<tag>' is not supported` | — | the key, anchor, alias or tagged node |
+| AIK1004 | `file is larger than 256 KiB` · `file is not valid UTF-8` | — | 1:1 |
+| AIK2001 | `unsupported apiVersion '<v>'` · `missing apiVersion` · `expected kind '<K>', found '<v>'` · `missing kind, expected '<K>'` | `this version supports aiakos.dev/v1` (apiVersion cases) | the value, or the mapping start when missing |
+| AIK2002 | `unknown field '<f>'<where>` | `did you mean '<g>'?` when a field of the same mapping is at edit distance ≤ 2 (closest; ties: table order) | the key |
+| AIK2003 | `missing required field '<f>'<where>` | — | start of the mapping lacking it |
+| AIK2004 | `invalid value '<v>' for field '<f>'<where>` · `invalid key '<k>' in <path>` · `field '<f>'<where> must be a string` (or `a list`, `a mapping`) · `field 'workspace.repos' must have at least one item` · `file must contain a mapping` | `allowed values: a, b` · `must match <pattern>` | the value or key |
+| AIK2005 | `reserved field '<f>'<where> is not supported in this version (planned for <M>)` · `reserved value '<v>' for field '<f>'<where> is not supported in this version (planned for <M>)` | — | the key or value |
+
+Rules the texts depend on: any explicit tag counts as a custom tag; an empty scalar, `~` and
+`null` are not strings; after AIK1001, AIK1002 or AIK1004 the file reports nothing else; after
+AIK2001 the file's fields are not checked; an entry whose value is an alias or tagged counts as
+present. Diagnostics are ordered by file (rig, agents in order of first reference, env), then
+line, then column.
 
 ### Reserved fields and values
 
 Rejected with AIK2005 and the milestone, so users get a precise message and M2 can add them
 without a format break:
 
-- `rig.yaml`: `pods`, `edges`, `channels` (M4), `imports`, `profiles`, `egress` (M6);
-  seat `profile`, `uses`, `startup`, `pod`; checkout `shared-readonly`, `task-worktree`;
-  harness `opencode`, `codex`; `agent_ref` schemes `path:`, `git:`.
-- `agent.yaml`: `imports`, `resources`, `profiles`, `startup`, `subagents`;
-  `harnesses.opencode`, `harnesses.codex`. (`hooks`, `statusLine`, `apiKeyHelper` and `env` are
-  not reserved but Aiakos-owned: AIK4007.)
-- `rig.env.yaml`: `nodes`, `channels`, `secrets.<n>.store`, `secrets.<n>.env`.
+- `rig.yaml`: `pods`, `edges`, `imports`, `profiles` (M2), `channels` (M4), `egress` (M6);
+  seat `profile`, `uses`, `startup`, `pod` (M2); checkout `shared-readonly` (M6),
+  `task-worktree` (M8); harness `opencode`, `codex` (M2); `agent_ref` schemes `path:`, `git:`
+  (AIK3003, M2).
+- `agent.yaml`: `imports`, `resources`, `profiles`, `startup`, `subagents` (M2);
+  `harnesses.opencode`, `harnesses.codex` (M2). (`hooks`, `statusLine`, `apiKeyHelper` and `env`
+  are not reserved but Aiakos-owned: AIK4007.)
+- `rig.env.yaml`: `nodes` (M6), `channels` (M4), `secrets.<n>.store`, `secrets.<n>.env` (M6).
 
 ### Forward compatibility and M2 extensions
 
@@ -939,3 +971,15 @@ ADRs recording the cross-cutting decisions of this spec:
     (projection at the seat directory, `shared` seats failing) is removed, and the related risk
     is resolved. Source: spec 0005's verification experiment (E1–E8);
     [ADR 0027](../adr/0027-claude-projection-and-settings.md).
+- **2026-10-01 — slice 1 of #14 (envelope and diagnostics):**
+  - **Loader project and surface.** The project is `Aiakos.Spec`. `Severity` and
+    `DiagnosticFormatter.Format` are added to the public surface, and `Diagnostic.File` is
+    defined as rig-root-relative.
+  - **Message texts for AIK1001–AIK2005** are now part of the spec (Diagnostics), because golden
+    tests compare exact text and the spec gave only the AIK2002 example.
+  - **Milestones for every reserved name.** The list gave them for some names only; the rest
+    follow the Non-goals section. `secrets.<n>.env` is set to M6 (it had none).
+  - **`secrets.<n>.store` is AIK2005, not AIK5008.** It was listed under both; a reserved key is
+    reported as reserved. AIK5008 keeps `value:`.
+  - **Implemented in slices.** Slice 1 covers R1–R5 and R23. `Load` returns no `ResolvedRig`
+    until slice 2; AIK3xxx–AIK5xxx, hashing and projection follow in slices 2–4.

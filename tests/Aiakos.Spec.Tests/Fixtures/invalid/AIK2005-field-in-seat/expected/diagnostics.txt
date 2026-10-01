@@ -1,0 +1,1 @@
+rig.yaml:12:5: error AIK2005: reserved field 'profile' in seat 'impl' is not supported in this version (planned for M2)

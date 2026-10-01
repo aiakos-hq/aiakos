@@ -1,0 +1,2 @@
+rig.env.yaml:12:5: error AIK2005: reserved field 'store' in secrets.api_key is not supported in this version (planned for M6)
+rig.env.yaml:13:1: error AIK2005: reserved field 'nodes' is not supported in this version (planned for M6)

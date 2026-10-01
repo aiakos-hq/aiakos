@@ -1,0 +1,2 @@
+rig.yaml:13:26: error AIK2004: invalid value 'Bad' for field 'secrets[1]' in seats[0].requires
+  hint: must match ^[a-z][a-z0-9_]{0,63}$

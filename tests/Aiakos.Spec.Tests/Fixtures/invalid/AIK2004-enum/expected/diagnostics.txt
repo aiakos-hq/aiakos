@@ -1,0 +1,2 @@
+rig.yaml:12:11: error AIK2004: invalid value 'robot' for field 'kind' in seat 'impl'
+  hint: allowed values: agent, human

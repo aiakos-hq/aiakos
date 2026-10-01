@@ -1,0 +1,1 @@
+agents/impl/agent.yaml:2:7: error AIK2001: expected kind 'Agent', found 'Rig'
