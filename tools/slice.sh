@@ -6,16 +6,18 @@
 #   tools/slice.sh start <issue> [--dry-run]
 #                                         worktree + branch from origin/main, brief copied in,
 #                                         label ready -> in-progress, prints the run command
-#   tools/slice.sh done <issue>           label in-progress -> needs-review, prints review inputs
-#   tools/slice.sh rework <issue>         copies the follow-up brief in, label -> in-progress,
-#                                         prints the run command
+#   tools/slice.sh done <issue>           copies the review inputs into the worktree, label
+#                                         in-progress -> needs-review, prints the reviewer inputs
+#   tools/slice.sh rework <issue>         removes the review inputs again, label -> in-progress,
+#                                         prints the run command for the follow-up brief
 #   tools/slice.sh pr <issue>             pushes the branch and opens the pull request from
 #                                         artifacts/trials/<slice>/pr-body.md
 #   tools/slice.sh cleanup <issue>        removes the worktree and the local branch after merge
 #
 # Conventions: issue title "<slice id>: <title>" (for example "14-2: semantic validation"),
 # body contains "Part of #<parent>", one routing label impl/opencode or impl/sonnet.
-# Local, git-ignored inputs live in the main checkout: artifacts/trials/<slice id>/.
+# Review inputs are written in the main checkout, artifacts/trials/<slice id>/ (git-ignored).
+# The review itself happens inside the worktree's artifacts/; results are copied back.
 set -euo pipefail
 
 REPO="${AIAKOS_REPO:-aiakos-hq/aiakos}"
@@ -68,6 +70,28 @@ load_issue() {
 }
 
 has_label() { case " $labels " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
+# The reviewer works and writes only inside the worktree's git-ignored artifacts/ folder.
+# Review inputs (scoring test, probes, review.md) are hidden from the implementer: they are
+# copied in for the review and removed again before a rework run. Uses $slice and $worktree.
+copy_review_inputs() {
+  local source="$main_root/artifacts/trials/$slice" target="$worktree/artifacts/trials/$slice"
+  mkdir -p "$target"
+  cp -R "$source"/. "$target"/
+}
+
+# Keeps what the reviewer wrote (findings, probe output, PR body, follow-up briefs) in the main
+# checkout as well, so it survives the worktree. Uses $slice and $worktree.
+sync_results() {
+  local source="$worktree/artifacts/trials/$slice" target="$main_root/artifacts/trials/$slice" file
+  mkdir -p "$target" "$main_root/artifacts/briefs"
+  for file in "$source"/findings.md "$source"/pr-body.md "$source"/probe-run-*.txt; do
+    if [ -f "$file" ]; then cp "$file" "$target"/; fi
+  done
+  for file in "$worktree/artifacts/briefs/$slice"?-*.md; do
+    if [ -f "$file" ]; then cp "$file" "$main_root/artifacts/briefs"/; fi
+  done
+}
 
 print_run_command() {
   local brief="$1" prompt
@@ -125,23 +149,33 @@ cmd_start() {
 cmd_done() {
   load_issue "${1:-}"
   [ -d "$worktree" ] || die "no worktree for $slice: $worktree"
+  [ -f "$trial/review.md" ] || die "review inputs missing: $trial/review.md"
+  copy_review_inputs
   gh issue edit "$number" --repo "$REPO" --remove-label in-progress --add-label needs-review >/dev/null
   echo "slice    $slice (#$number)"
   echo "label    needs-review"
-  echo "Review inputs for the slice-reviewer agent:"
+  echo "Review inputs for the slice-reviewer agent (all inside the worktree):"
   echo "  slice     $slice"
   echo "  worktree  $(native "$worktree")"
   echo "  brief     $(native "$worktree/artifacts/briefs/$slice.md")"
-  echo "  trial     $(native "$trial")"
+  echo "  trial     $(native "$worktree/artifacts/trials/$slice")"
 }
 
 cmd_rework() {
   load_issue "${1:-}"
   [ -d "$worktree" ] || die "no worktree for $slice: $worktree"
-  local follow_up
-  follow_up="$(ls -t "$main_root/artifacts/briefs/$slice"?-*.md 2>/dev/null | head -n 1 || true)"
-  [ -n "$follow_up" ] || die "no follow-up brief found: artifacts/briefs/$slice<letter>-*.md"
-  cp "$follow_up" "$worktree/artifacts/briefs/"
+  local follow_up wt_trial="$worktree/artifacts/trials/$slice"
+  sync_results
+  # The newest follow-up brief: the reviewer writes it in the worktree; an older flow left it
+  # in the main checkout.
+  follow_up="$(ls -t "$worktree/artifacts/briefs/$slice"?-*.md 2>/dev/null | head -n 1 || true)"
+  if [ -z "$follow_up" ]; then
+    follow_up="$(ls -t "$main_root/artifacts/briefs/$slice"?-*.md 2>/dev/null | head -n 1 || true)"
+    [ -n "$follow_up" ] || die "no follow-up brief found: artifacts/briefs/$slice<letter>-*.md"
+    cp "$follow_up" "$worktree/artifacts/briefs/"
+  fi
+  # Hide the review inputs from the implementer again; findings.md stays for it to read.
+  if [ -d "$wt_trial" ]; then find "$wt_trial" -type f ! -name findings.md -delete; fi
   gh issue edit "$number" --repo "$REPO" --remove-label needs-review --add-label in-progress >/dev/null
   echo "slice    $slice (#$number)"
   echo "label    in-progress"
@@ -151,7 +185,8 @@ cmd_rework() {
 cmd_pr() {
   load_issue "${1:-}"
   [ -d "$worktree" ] || die "no worktree for $slice: $worktree"
-  [ -f "$trial/pr-body.md" ] || die "missing $trial/pr-body.md (first line 'Title: ...', then the body)"
+  sync_results
+  [ -f "$trial/pr-body.md" ] || die "missing pr-body.md in artifacts/trials/$slice (first line 'Title: ...', then the body)"
   [ -z "$(git -C "$worktree" status --porcelain)" ] || die "worktree has uncommitted changes"
   local pr_title body_file
   pr_title="$(head -n 1 "$trial/pr-body.md" | sed -E 's/^Title:[[:space:]]*//')"
@@ -174,6 +209,7 @@ cmd_cleanup() {
   branch="feat/$slice-$slug"
   worktree="$main_root/.claude/worktrees/slice-$slice"
   if [ -d "$worktree" ]; then
+    sync_results
     git worktree remove "$worktree" || die "worktree not removed (uncommitted changes?): $worktree"
     echo "removed worktree $(native "$worktree")"
   fi

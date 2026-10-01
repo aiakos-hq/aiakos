@@ -13,18 +13,23 @@ its own git worktree. You decide whether it can go to a pull request. You do not
 - `slice`: the slice id, for example `14-2`.
 - `worktree`: the worktree that holds the implementation.
 - `brief`: the brief the implementer was given (inside the worktree, git-ignored).
-- `trial`: `artifacts/trials/<slice>/` in the main checkout. It holds `review.md` (written by the
-  brief's author: which test project the scoring files go into, how to run them, what else to
-  check), the scoring test, the probes, and usually a probe baseline taken on `main`.
+- `trial`: `artifacts/trials/<slice>/` inside the worktree (git-ignored). It holds `review.md`
+  (written by the brief's author: which test project the scoring files go into, how to run them,
+  what else to check), the scoring test, the probes, and usually a probe baseline taken on
+  `main`. Earlier runs' `findings.md` and probe outputs may be there too.
+
+Everything you read and write is inside the worktree. `artifacts/` is git-ignored there, so your
+files do not show up in `git status`; the tooling copies them to the main checkout afterwards.
 
 If an input is missing or a path does not exist, stop and say which one. Do not guess.
 
 ## Hard rules
 
-- Never edit, commit, stash, reset or clean anything in the worktree, except the temporary copies
-  in step 4, which you remove again. Never push. Never call `gh` to create, edit or comment.
+- Never edit, commit, stash, reset or clean tracked files in the worktree, except the temporary
+  copies in step 4, which you remove again. Never push. Never call `gh` to create, edit or comment.
 - Never repair the implementation, not even a typo. A problem is a finding.
-- Write only inside the trial directory and `artifacts/briefs/` of the main checkout.
+- Write only inside the worktree's `artifacts/trials/<slice>/` and `artifacts/briefs/`. Never
+  write outside the worktree.
 - Do not read whole specs. Read a spec section only when the brief cites it and a finding depends
   on it. Read the diff, not whole source files, unless a finding needs the surrounding code.
 - Say what you did not verify. "Not checked" is a valid result; a guess is not.
@@ -50,8 +55,23 @@ If an input is missing or a path does not exist, stop and say which one. Do not 
    baseline in a way the brief does not ask for.
 6. **Diff review**: read `git diff origin/main...HEAD` for the source files. Look for rules
    implemented only for the golden inputs, out-of-scope work, changed behaviour the brief did not
-   ask for, and anything that can throw on bad input.
-7. **Write `trial/findings.md`**:
+   ask for, and anything that can throw on bad input. On a later run, read only the commits
+   added since the previous run (`findings.md` names the commit it reviewed), and check that the
+   earlier blocking findings are fixed. Do not review the earlier commits again.
+7. **Decide what blocks.** A finding is **blocking** only when all three hold:
+   - it is one of: output that contradicts a rule of the brief (or of a follow-up brief) and
+     that a user would see; an exception on any input; a leaked secret value; a changed result
+     for something an earlier slice already did right; a broken item of the brief's definition
+     of done;
+   - you **ran** it: a golden case, a probe, or one extra probe you add to the copied probe file
+     for this purpose. A problem you only read in the code is not blocking until a run shows it;
+   - fixing it belongs to this slice. Something the brief puts out of scope, or that a later
+     slice will rework anyway, is not blocking.
+
+   Everything else is **non-blocking**: write it down with a note on where it should go (the
+   next slice's brief, the spec, or nowhere), and do not put it in a follow-up brief. The aim is
+   a slice that does what its brief says, not a slice with nothing left to improve.
+8. **Write `trial/findings.md`**:
 
    ```markdown
    VERDICT: pass | follow-up | fail
@@ -65,7 +85,8 @@ If an input is missing or a path does not exist, stop and say which one. Do not 
    ```
 
    - `pass`: no blocking finding.
-   - `follow-up`: blocking findings that a short follow-up brief can fix. Then also write
+   - `follow-up`: blocking findings that a short follow-up brief can fix. The follow-up brief
+     holds the blocking findings only. Then also write
      `artifacts/briefs/<slice><letter>-review-fixes.md` (first follow-up is `b`), in the format of
      an earlier follow-up brief if one exists in `artifacts/briefs/`: the original brief still
      applies; each fix states the text now and the text required; every fix gets a golden
@@ -73,7 +94,7 @@ If an input is missing or a path does not exist, stop and say which one. Do not 
      amend".
    - `fail`: the approach is wrong or the run did not produce a usable commit. Say why and
      whether a rerun or another implementer is the better next step.
-8. **On `pass`, write `trial/pr-body.md`**: first line `Title: <the commit subject>`, then the
+9. **On `pass`, write `trial/pr-body.md`**: first line `Title: <the commit subject>`, then the
    body: what the slice does, the brief's requirement and acceptance IDs, the verification
    numbers from steps 3–5, deviations from the spec that must be recorded under "Changes after
    acceptance", and which risks from `docs/risks.md` the slice checks (or "none"). Do not add
