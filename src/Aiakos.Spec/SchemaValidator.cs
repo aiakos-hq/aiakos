@@ -234,7 +234,7 @@ internal sealed class SchemaValidator
             var field = schema.FirstOrDefault(candidate => candidate.Name == name);
             if (TryGetReservedField(path, name, out var milestone))
             {
-                Add("AIK2005", entry.Key.Mark, $"reserved field '{name}' is not supported in this version (planned for {milestone})", context: Context(path, mapping, isSeat));
+                Add("AIK2005", entry.Key.Mark, $"reserved field '{name}'{Context(path, mapping, isSeat)} is not supported in this version (planned for {milestone})");
                 continue;
             }
 
@@ -366,7 +366,7 @@ internal sealed class SchemaValidator
             }
             else
             {
-                ValidateFieldValue(itemSchema, item, itemPath, itemSchema.Name, containingMapping, isSeat);
+                ValidateFieldValue(itemSchema, item, parentPath, $"{fieldName}[{index}]", containingMapping, isSeat);
             }
         }
     }
@@ -404,7 +404,7 @@ internal sealed class SchemaValidator
             var regex = field.MapKeyPattern!;
             if (!Regex.IsMatch(key, regex, RegexOptions.CultureInvariant))
             {
-                Add("AIK2004", entry.Key.Mark, $"invalid key '{key}' in {field.MapKeyKind}s", $"must match {regex}");
+                Add("AIK2004", entry.Key.Mark, $"invalid key '{key}' in {path}", $"must match {regex}");
             }
 
             if (!entry.Value.IsTaggedOrAlias)

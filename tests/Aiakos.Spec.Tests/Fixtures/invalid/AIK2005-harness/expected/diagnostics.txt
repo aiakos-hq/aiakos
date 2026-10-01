@@ -1,0 +1,1 @@
+agents/impl/agent.yaml:8:3: error AIK2005: reserved field 'opencode' in harnesses is not supported in this version (planned for M2)

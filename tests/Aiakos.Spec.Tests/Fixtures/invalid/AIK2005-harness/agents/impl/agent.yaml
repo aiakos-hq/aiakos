@@ -1,0 +1,8 @@
+apiVersion: aiakos.dev/v1
+kind: Agent
+name: impl
+description: Implements issues
+defaults:
+  harness: claude-code
+harnesses:
+  opencode: {}
