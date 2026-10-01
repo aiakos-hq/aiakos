@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Reusable AppHost API for Linux processes in WSL (spec 0001 R22–R26). It knows nothing
+       about Aiakos resources. -->
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting" />
+  </ItemGroup>
+
+</Project>

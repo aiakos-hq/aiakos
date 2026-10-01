@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build (warnings are errors)
+        run: dotnet build -c Release --no-restore
+
+      # Postgres for the database tests comes from Testcontainers, using the runner's Docker.
+      - name: Test
+        run: dotnet test -c Release --no-build --results-directory artifacts/test-results --report-trx
+
+      - name: Publish node (linux-x64, self-contained)
+        run: dotnet publish src/Aiakos.Node -c Release -r linux-x64 --self-contained -o artifacts/node/linux-x64
+
+      - name: Pack placeholder tool
+        run: dotnet pack src/Aiakos.Cli -c Release --no-build -o artifacts/packages
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-results
+          path: artifacts/test-results

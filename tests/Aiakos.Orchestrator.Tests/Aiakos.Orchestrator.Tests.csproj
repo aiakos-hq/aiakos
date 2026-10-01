@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.HealthCheck" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Aiakos.Orchestrator\Aiakos.Orchestrator.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- One Postgres container per test assembly, shared with the data tests. -->
+    <Compile Include="..\Aiakos.Data.Tests\Infrastructure\PostgresContainerFixture.cs" Link="Infrastructure\PostgresContainerFixture.cs" />
+  </ItemGroup>
+
+</Project>

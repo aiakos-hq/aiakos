@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Node agent "Ergates" (spec 0001 R34–R40). No business logic: it must not reference the
+       orchestrator, the data layer, Akka or Npgsql (ADR 0004). ASP.NET Core is referenced only
+       for the hook ingest (spec 0005). Published self-contained for linux-x64, not AOT (D10). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>aiakos-node</AssemblyName>
+    <RootNamespace>Aiakos.Node</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- Source-generated configuration binding keeps options binding trim- and AOT-safe. -->
+    <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+    <!-- Required by the LibraryImport source generator: InstanceLock reads the holder's pid
+         through a raw open(2), because every FileStream open on Linux takes a flock. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The WSL distro has no libicu by default and a self-contained .NET fails fast without it.
+         The node needs no culture data, so it runs with invariant globalization. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.HealthCheck" />
+    <PackageReference Include="Grpc.Net.Client" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Aiakos.Contracts\Aiakos.Contracts.csproj" />
+    <ProjectReference Include="..\Aiakos.Core\Aiakos.Core.csproj" />
+    <ProjectReference Include="..\Aiakos.ServiceDefaults\Aiakos.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+</Project>

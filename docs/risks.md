@@ -33,7 +33,7 @@ The quick view for "before each implementation PR": the IDs to check, by owner i
 
 | Issue | Open risks to check |
 |---|---|
-| [#9](https://github.com/aiakos-hq/aiakos/issues/9) solution skeleton | 0001-RK1, 0001-RK2, 0001-RK3, 0001-RK5 |
+| [#9](https://github.com/aiakos-hq/aiakos/issues/9) solution skeleton | none (0001-RK1, RK2 and RK5 resolved, RK3 accepted in the #9 PR) |
 | [#10](https://github.com/aiakos-hq/aiakos/issues/10) gRPC contract | 0002-RK1, 0002-RK2, 0006-RK6, 0006-RK9 |
 | [#11](https://github.com/aiakos-hq/aiakos/issues/11) tmux session host | 0003-RK1, 0004-RK1, 0004-RK2, 0004-RK3, 0004-RK4, 0004-RK8, 0005-RK14, 0004-FU1 (validation test) |
 | [#12](https://github.com/aiakos-hq/aiakos/issues/12) Claude Code adapter | 0004-RK6, 0004-RK7, 0005-RK1 to 0005-RK12, 0006-RK2, 0006-RK5, 0006-RK7, 0006-RK10, 0008-RK8, S0001-1; M6 follow-up 0005-RK13 |
@@ -47,11 +47,11 @@ The quick view for "before each implementation PR": the IDs to check, by owner i
 
 | ID | Risk (one line) | Source | How it's checked | Owner issue | Milestone | Status |
 |---|---|---|---|---|---|---|
-| 0001-RK1 | `wslinfo --networking-mode` may be missing in the installed WSL; the preflight needs its `.wslconfig` fallback | [0001 Risks](specs/0001-solution-skeleton.md#risks) | Preflight parsing tests plus a run on the maintainer's WSL in the implementation PR | [#9](https://github.com/aiakos-hq/aiakos/issues/9) | M1 | open |
-| 0001-RK2 | Per-endpoint Kestrel protocols may conflict with Aspire-injected endpoint configuration | [0001 Risks](specs/0001-solution-skeleton.md#risks) | AC6 (orchestrator healthy) and the orchestrator tests; fallback recorded under "Changes after acceptance" | [#9](https://github.com/aiakos-hq/aiakos/issues/9) | M1 | open |
-| 0001-RK3 | Aspire version churn changes `EndpointReference` handling and event names | [0001 Risks](specs/0001-solution-skeleton.md#risks) | AppHost model tests pin the behaviour; Aspire upgrades only in a dedicated PR | [#9](https://github.com/aiakos-hq/aiakos/issues/9) | M1 | open |
+| 0001-RK1 | `wslinfo --networking-mode` may be missing in the installed WSL; the preflight needs its `.wslconfig` fallback | [0001 Risks](specs/0001-solution-skeleton.md#risks) | Preflight parsing tests plus a run on the maintainer's WSL in the implementation PR | [#9](https://github.com/aiakos-hq/aiakos/issues/9) | M1 | resolved (#9 PR: `wslinfo` works on WSL 2.7.10) |
+| 0001-RK2 | Per-endpoint Kestrel protocols may conflict with Aspire-injected endpoint configuration | [0001 Risks](specs/0001-solution-skeleton.md#risks) | AC6 (orchestrator healthy) and the orchestrator tests; fallback recorded under "Changes after acceptance" | [#9](https://github.com/aiakos-hq/aiakos/issues/9) | M1 | resolved (#9 PR: per-endpoint protocols work under Aspire, AC6) |
+| 0001-RK3 | Aspire version churn changes `EndpointReference` handling and event names | [0001 Risks](specs/0001-solution-skeleton.md#risks) | AppHost model tests pin the behaviour; Aspire upgrades only in a dedicated PR | [#9](https://github.com/aiakos-hq/aiakos/issues/9) | M1 | accepted (#9 PR: pinned by the AppHost model tests) |
 | 0001-RK4 | Akka.TestKit may not support xUnit v3 | [0001 Risks](specs/0001-solution-skeleton.md#risks) | Compatibility check before #13 starts; fall back to xUnit v2 for that one test project (D5) | [#13](https://github.com/aiakos-hq/aiakos/issues/13) | M1 | open |
-| 0001-RK5 | Node publish on every AppHost start may be too slow | [0001 Risks](specs/0001-solution-skeleton.md#risks) | Measure in the implementation PR | [#9](https://github.com/aiakos-hq/aiakos/issues/9) | M1 | open |
+| 0001-RK5 | Node publish on every AppHost start may be too slow | [0001 Risks](specs/0001-solution-skeleton.md#risks) | Measure in the implementation PR | [#9](https://github.com/aiakos-hq/aiakos/issues/9) | M1 | resolved (#9 PR: about 5 s publish plus 5 s install per start) |
 | 0002-RK1 | statusLine event volume may dominate the stream despite rate limiting | [0002 Risks](specs/0002-orchestrator-node-grpc-contract.md#risks) | Event volume in the #12 end-to-end run and the M1 demo; if too high, a separate unsequenced message in a minor revision | [#10](https://github.com/aiakos-hq/aiakos/issues/10) | M1 | open |
 | 0002-RK2 | Secrets travel over h2c, safe only on loopback | [0002 Risks](specs/0002-orchestrator-node-grpc-contract.md#risks) | R43 startup refusal test in M1; TLS before any remote node | [#10](https://github.com/aiakos-hq/aiakos/issues/10) | M1, M6 | open |
 | 0003-RK1 | Seat roots of two Aiakos instances (release and dev) may collide on one node | [0003 Risks](specs/0003-rig-file-format-v1.md#risks) | Ownership marker in each seat directory; dev tests use their own rig names and `seat_root` | [#11](https://github.com/aiakos-hq/aiakos/issues/11), [#16](https://github.com/aiakos-hq/aiakos/issues/16) (never `up` aiakos-dev on a dev instance, spec 0008 R14) | M1 | open |
