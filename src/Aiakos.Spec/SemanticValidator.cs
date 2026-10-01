@@ -134,10 +134,17 @@ internal sealed class SemanticValidator
     private void ValidateHarness(SeatInfo seat)
     {
         var harnessNode = Get(seat.Node, "harness");
-        var harness = ReadScalar(rig, harnessNode);
-        if (harness is not null && harness != "claude-code")
+        var harness = harnessNode is { Kind: YamlNodeKind.Scalar, IsNull: false, IsTaggedOrAlias: false, Value: { } value } ? value : null;
+        if (harnessNode is not null && harness is not null)
         {
-            Report(rig, harnessNode!, "AIK4002", $"harness '{harness}'{SeatWhere(seat)} is not supported in this version (planned for M2)");
+            if (harness is "opencode" or "codex")
+            {
+                Report(rig, harnessNode, "AIK4002", $"harness '{harness}'{SeatWhere(seat)} is not supported in this version (planned for M2)");
+            }
+            else if (harness != "claude-code")
+            {
+                Report(rig, harnessNode, "AIK2004", $"invalid value '{harness}' for field 'harness'{SeatWhere(seat)}", "allowed values: claude-code");
+            }
         }
 
         var agent = FindAgent(seat);
@@ -222,10 +229,17 @@ internal sealed class SemanticValidator
     {
         var defaults = Get(agent.Root!, "defaults");
         var harness = Get(defaults, "harness");
-        var harnessValue = ReadScalar(agent, harness);
-        if (harnessValue is not null && harnessValue != "claude-code")
+        var harnessValue = harness is { Kind: YamlNodeKind.Scalar, IsNull: false, IsTaggedOrAlias: false, Value: { } value } ? value : null;
+        if (harness is not null && harnessValue is not null)
         {
-            Report(agent, harness!, "AIK4002", $"harness '{harnessValue}' in defaults is not supported in this version (planned for M2)");
+            if (harnessValue is "opencode" or "codex")
+            {
+                Report(agent, harness, "AIK4002", $"harness '{harnessValue}' in defaults is not supported in this version (planned for M2)");
+            }
+            else if (harnessValue != "claude-code")
+            {
+                Report(agent, harness, "AIK2004", $"invalid value '{harnessValue}' for field 'harness' in defaults", "allowed values: claude-code");
+            }
         }
 
         var claude = Get(Get(agent.Root!, "harnesses"), "claude-code");
