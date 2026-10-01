@@ -127,6 +127,24 @@ public sealed class ValidTests
         }
     }
 
+    [Fact]
+    public void KeepsParserMessageInYamlSyntaxDiagnostic()
+    {
+        var root = CopyMinimalRig();
+        try
+        {
+            File.AppendAllText(Path.Combine(root, "rig.yaml"), "---\nname: other\n");
+
+            var formatted = DiagnosticFormatter.Format(RigLoader.Load(root, null).Diagnostics);
+
+            Assert.Equal("rig.yaml:12:1: error AIK1002: YAML syntax error: Only one YAML document is supported.\n", formatted);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string CopyMinimalRig()
     {
         var root = Path.Combine(Path.GetTempPath(), $"aiakos-rig-{Guid.NewGuid():N}");

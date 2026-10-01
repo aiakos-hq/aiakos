@@ -147,7 +147,7 @@ public static class RigLoader
         }
         catch (YamlException exception)
         {
-            allDiagnostics.Add(new Diagnostic(Severity.Error, "AIK1002", displayPath, Math.Max(1, (int)exception.Start.Line), Math.Max(1, (int)exception.Start.Column), "YAML syntax error: malformed YAML", null));
+            allDiagnostics.Add(new Diagnostic(Severity.Error, "AIK1002", displayPath, Math.Max(1, (int)exception.Start.Line), Math.Max(1, (int)exception.Start.Column), $"YAML syntax error: {exception.Message}", null));
             return null;
         }
         catch (Exception)
