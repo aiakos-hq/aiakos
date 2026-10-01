@@ -55,8 +55,21 @@ edit docs there) and `aiakos-hq/.github` (org profile, CONTRIBUTING, SECURITY, C
 - **Risks** are indexed in [`docs/risks.md`](docs/risks.md); check the relevant ones before
   implementing an issue and at milestone boundaries.
 
-Labels: `type/*` (feature, bug, spike, chore, docs), `area/*`, and status labels
-`spec-needed`, `ready`, `in-progress`, `needs-review`, `blocked`.
+- **Slices** (stage A): an M1 issue is implemented as several slices, each one pull request.
+  A slice has its own issue, titled `<issue>-<n>: <title>`, whose body is a self-contained
+  **brief** from [`docs/briefs/TEMPLATE.md`](docs/briefs/TEMPLATE.md) and starts with
+  `Part of #<issue>`. The issue is created when the maintainer approves the brief, gets a routing
+  label `impl/opencode` or `impl/sonnet`, and gets `ready` once its dependencies are merged and
+  its scoring test and probes exist in `artifacts/trials/<slice>/` (local, git-ignored).
+  The flow: `/slice next` prepares a worktree and prints the run command; the maintainer runs
+  the implementer; `/slice done` starts the `slice-reviewer` agent, which writes a verdict;
+  then `/slice pr`. The orchestrator chat ([`.claude/skills/slice`](.claude/skills/slice/SKILL.md))
+  runs in a cheap model and only relays; briefs, scoring tests and spec amendments are written
+  in a separate chat.
+
+Labels: `type/*` (feature, bug, spike, chore, docs), `area/*`, routing labels `impl/opencode`
+and `impl/sonnet` (slices), and status labels `spec-needed`, `ready`, `in-progress`,
+`needs-review`, `blocked`.
 Milestones `M0`–`M8` follow the roadmap in `docs/plan.md` §10.
 
 ## Rules
@@ -94,6 +107,8 @@ Prerequisites: .NET SDK 10.0.1xx+ (see `global.json`); Docker Desktop running; W
 - WSL end-to-end test (Windows only, stack not running): `$env:AIAKOS_E2E_WSL=1; dotnet test --project tests/Aiakos.AppHost.Tests`
 - Pack the placeholder tool: `dotnet pack src/Aiakos.Cli -c Release -o artifacts/packages`
 - Check the proto (needs buf 1.73.0): `buf lint` and `buf breaking --against '.git#branch=main'`
+- Slice workflow helper (Git Bash): `bash tools/slice.sh status|start|done|rework|pr|cleanup`
+  (see the header of [`tools/slice.sh`](tools/slice.sh))
 - Add a migration: `src/Aiakos.Data/Migrations/NNNN_description.sql` (next number; never edit a
   merged one; every table in schema `aiakos` gets `tenant_id`).
 - Reset the dev database (stack stopped): `docker rm -f <postgres container>` then
