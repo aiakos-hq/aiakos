@@ -1,0 +1,1 @@
+rig.yaml:11:15: error AIK2005: reserved value 'task-worktree' for field 'checkout' in seat 'impl' is not supported in this version (planned for M8)

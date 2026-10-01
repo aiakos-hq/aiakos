@@ -1,0 +1,1 @@
+rig.yaml:9:5: error AIK2003: missing required field 'agent_ref' in seat 'impl'

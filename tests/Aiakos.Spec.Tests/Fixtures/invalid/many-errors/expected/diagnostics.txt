@@ -1,0 +1,6 @@
+rig.yaml:11:5: error AIK2002: unknown field 'chekout' in seat 'impl'
+  hint: did you mean 'checkout'?
+rig.yaml:12:1: error AIK2005: reserved field 'pods' is not supported in this version (planned for M2)
+agents/impl/agent.yaml:2:7: error AIK2001: expected kind 'Agent', found 'Rig'
+rig.env.yaml:7:3: error AIK2004: invalid key 'App' in repos
+  hint: must match ^[a-z][a-z0-9._-]{0,63}$

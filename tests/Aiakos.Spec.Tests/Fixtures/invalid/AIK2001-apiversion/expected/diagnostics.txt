@@ -1,0 +1,2 @@
+rig.yaml:1:13: error AIK2001: unsupported apiVersion 'aiakos.dev/v2'
+  hint: this version supports aiakos.dev/v1

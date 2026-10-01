@@ -1,0 +1,1 @@
+rig.yaml:12:1: error AIK2005: reserved field 'pods' is not supported in this version (planned for M2)

@@ -1,0 +1,2 @@
+rig.env.yaml:7:3: error AIK2004: invalid key 'App' in repos
+  hint: must match ^[a-z][a-z0-9._-]{0,63}$

@@ -1,0 +1,2 @@
+rig.yaml:11:5: error AIK2002: unknown field 'chekout' in seat 'impl'
+  hint: did you mean 'checkout'?

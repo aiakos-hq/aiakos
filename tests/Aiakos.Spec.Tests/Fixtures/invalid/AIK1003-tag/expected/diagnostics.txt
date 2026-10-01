@@ -1,0 +1,1 @@
+rig.yaml:3:7: error AIK1003: tag '!!str' is not supported

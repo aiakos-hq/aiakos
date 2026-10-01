@@ -51,4 +51,8 @@
     <PackageVersion Include="xunit.v3" Version="4.0.1" />
   </ItemGroup>
 
+  <ItemGroup Label="Spec">
+    <PackageVersion Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+
 </Project>
