@@ -4,6 +4,8 @@ title: "#10 slice 2 — contract helpers and contract tests"
 issue: 10
 status: draft
 route: impl/opencode
+paths: [src/Aiakos.Contracts/Node/, tests/Aiakos.Contracts.Tests/]
+max_outputs: 26
 date: 2026-10-01
 ---
 
@@ -90,9 +92,9 @@ public static class HarnessEventLimits { public static void Apply(HarnessEvent h
 
 ## Rules
 
-1. **Negotiate.** Either argument null, or majors differ → `null`. Otherwise a new
+R1. **Negotiate.** Either argument null, or majors differ → `null`. Otherwise a new
    `ProtocolVersion` with that major and the lower minor.
-2. **Error catalogue.** `ErrorReasons.Create` sets `reason`, `message`, `metadata`, and `code` and
+R2. **Error catalogue.** `ErrorReasons.Create` sets `reason`, `message`, `metadata`, and `code` and
    `retryable` from this table. An unknown reason gets `ERROR_CODE_UNSPECIFIED`, not retryable.
 
    | Reason | Code | Retryable |
@@ -111,14 +113,14 @@ public static class HarnessEventLimits { public static void Apply(HarnessEvent h
    | `INPUT_NOT_ALLOWED` | `INVALID_ARGUMENT` | no |
    | `INVALID_LAUNCH` | `INVALID_ARGUMENT` | no |
    | `SESSION_HOST_UNAVAILABLE` | `FAILED_PRECONDITION` | no |
-3. **Paths** (`SeatPaths.IsAllowed`). Split on `/`. Allowed only when the path is not empty, has
+R3. **Paths** (`SeatPaths.IsAllowed`). Split on `/`. Allowed only when the path is not empty, has
    no `\`, no NUL, no `:`, and no segment that is empty, `.` or `..`.
-4. **Placeholders.** Replace every exact occurrence of the two tokens, in one pass over the
+R4. **Placeholders.** Replace every exact occurrence of the two tokens, in one pass over the
    input: text that comes from a replacement is never expanded again. Nothing else is touched:
    not `$AIAKOS_SEAT_HOME`, not `${OTHER}`, not other casing. The `ByteString` overload does the
    same on bytes (tokens and values as UTF-8) and leaves every other byte as it is, valid UTF-8
    or not.
-5. **Command validator.** Returns the first failure in this order, or `null`. Sizes are UTF-8
+R5. **Command validator.** Returns the first failure in this order, or `null`. Sizes are UTF-8
    bytes. It checks nothing else (no IDs, no timeouts, no lead or body characters).
    1. No `body` case set → `UNSUPPORTED`.
    2. `SendKeys`: `command.send-keys` not in `capabilities`, or any key not in `SendKeyNames` →
@@ -132,10 +134,10 @@ public static class HarnessEventLimits { public static void Apply(HarnessEvent h
       `PAYLOAD_TOO_LARGE`.
    6. `DeliverInput`: `body` above `MaxDeliverBodyBytes` → `PAYLOAD_TOO_LARGE`.
    7. `CapturePane`, `StopSeat`: always valid.
-6. **Messages never carry payload.** `Error.message` is a short English sentence that may name
+R6. **Messages never carry payload.** `Error.message` is a short English sentence that may name
    the field, the capability, the limit and the size, and never contains a body, a lead, an argv
    element, an environment value, file content or a secret value. A rejected path may be shown.
-7. **Harness event limits.** `raw_size` = the original `raw` length, always. `raw` longer than
+R7. **Harness event limits.** `raw_size` = the original `raw` length, always. `raw` longer than
    `MaxHarnessRawBytes` is cut to exactly that many bytes and `raw_truncated = true`; otherwise
    `raw` and `raw_truncated` are untouched. Every attribute value longer than
    `MaxAttributeValueBytes` in UTF-8 is cut to the longest prefix that fits and ends on a
@@ -148,32 +150,32 @@ with harness `claude-code`, mode `FRESH`, one file `{SEAT_HOME, "aiakos/claude-s
 
 | Case | Input | Expected |
 |---|---|---|
-| N1–N5 | `Negotiate`: (1.0, 1.0); (1.3, 1.1); (1.0, 1.2); (2.0, 1.0); (null, 1.0) | 1.0; 1.1; 1.0; null; null |
-| E1 | `Create("SEAT_BUSY", "x")` | code `FailedPrecondition`, retryable true |
-| E2 | `Create("NOT_IN_CATALOGUE", "x")` | code `Unspecified`, retryable false, reason kept |
-| E3 | every catalogue row | code and retryable as in the table (one theory) |
-| P1 | allowed paths: `a`, `aiakos/claude-settings.json`, `.claude/skills/x/SKILL.md`, `a..b/c` | true |
-| P2 | not allowed: empty, `/etc/x`, `../x`, `a/../b`, `./a`, `a/./b`, `a//b`, `a/`, `a\b`, `C:x`, a path with NUL | false |
-| X1 | `Expand("${AIAKOS_SEAT_HOME}/a ${AIAKOS_WORKSPACE}", "/h", "/w")` | `/h/a /w` |
-| X2 | `Expand("$AIAKOS_SEAT_HOME ${OTHER} ${aiakos_workspace} $${AIAKOS_SEAT_HOME}", "/h", "/w")` | `$AIAKOS_SEAT_HOME ${OTHER} ${aiakos_workspace} $/h` |
-| X3 | `Expand("${AIAKOS_SEAT_HOME}", "${AIAKOS_WORKSPACE}", "/w")` | `${AIAKOS_WORKSPACE}` |
-| X4 | bytes `FF` + token `${AIAKOS_WORKSPACE}` + `FE`, workspace `/w` | bytes `FF 2F 77 FE` |
-| V1 | `Command` with no body | `UNSUPPORTED` |
-| V2 | `SendKeys [Enter, C-c]` | null; with caps lacking `command.send-keys`: `UNSUPPORTED` |
-| V3 | `SendKeys [F1]`; `SendKeys [enter]`; `SendKeys []` | `UNSUPPORTED`; `UNSUPPORTED`; null |
-| V4 | valid start | null |
-| V5 | valid start with harness `opencode` | `UNSUPPORTED` |
-| V6 | valid start with mode `UNSPECIFIED`; mode `(LaunchMode)99`; mode `FORK`; `FORK` with caps lacking `launch.fork` | `UNSUPPORTED`; `UNSUPPORTED`; null; `UNSUPPORTED` |
-| V7 | valid start, file path `../x`; file root `UNSPECIFIED`; secret `file_path` `/abs` | `PATH_NOT_ALLOWED` each |
-| V8 | valid start, secret with `env_var` set; secret with no target | null; `UNSUPPORTED` |
-| V9 | valid start, files totalling exactly 2 MiB; one byte more | null; `PAYLOAD_TOO_LARGE` |
-| V10 | harness `opencode` **and** file path `../x` | `UNSUPPORTED` (order) |
-| V11 | `DeliverInput` body of 1 MiB of `a`; one byte more; 524289 times `é` | null; `PAYLOAD_TOO_LARGE`; `PAYLOAD_TOO_LARGE` |
-| V12 | `CapturePane`; `StopSeat` | null; null |
-| V13 | the `PAYLOAD_TOO_LARGE` error of V11 with a body that starts with `SENTINEL-BODY` | `message` does not contain `SENTINEL-BODY` |
-| H1 | `raw` of 262144 bytes | unchanged, `raw_size` 262144, `raw_truncated` false |
-| H2 | `raw` of 262145 bytes | length 262144, `raw_size` 262145, `raw_truncated` true |
-| H3 | attribute of 1024 `a`; of 1025 `a`; of 600 `é`; of 1023 `a` + `é` | unchanged; 1024 bytes; 512 `é`; 1023 `a` |
+| `N` | N1–N5: `Negotiate`: (1.0, 1.0); (1.3, 1.1); (1.0, 1.2); (2.0, 1.0); (null, 1.0) | 1.0; 1.1; 1.0; null; null |
+| `E1` | `Create("SEAT_BUSY", "x")` | code `FailedPrecondition`, retryable true |
+| `E2` | `Create("NOT_IN_CATALOGUE", "x")` | code `Unspecified`, retryable false, reason kept |
+| `E3` | every catalogue row | code and retryable as in the table (one theory) |
+| `P1` | allowed paths: `a`, `aiakos/claude-settings.json`, `.claude/skills/x/SKILL.md`, `a..b/c` | true |
+| `P2` | not allowed: empty, `/etc/x`, `../x`, `a/../b`, `./a`, `a/./b`, `a//b`, `a/`, `a\b`, `C:x`, a path with NUL | false |
+| `X1` | `Expand("${AIAKOS_SEAT_HOME}/a ${AIAKOS_WORKSPACE}", "/h", "/w")` | `/h/a /w` |
+| `X2` | `Expand("$AIAKOS_SEAT_HOME ${OTHER} ${aiakos_workspace} $${AIAKOS_SEAT_HOME}", "/h", "/w")` | `$AIAKOS_SEAT_HOME ${OTHER} ${aiakos_workspace} $/h` |
+| `X3` | `Expand("${AIAKOS_SEAT_HOME}", "${AIAKOS_WORKSPACE}", "/w")` | `${AIAKOS_WORKSPACE}` |
+| `X4` | bytes `FF` + token `${AIAKOS_WORKSPACE}` + `FE`, workspace `/w` | bytes `FF 2F 77 FE` |
+| `V1` | `Command` with no body | `UNSUPPORTED` |
+| `V2` | `SendKeys [Enter, C-c]` | null; with caps lacking `command.send-keys`: `UNSUPPORTED` |
+| `V3` | `SendKeys [F1]`; `SendKeys [enter]`; `SendKeys []` | `UNSUPPORTED`; `UNSUPPORTED`; null |
+| `V4` | valid start | null |
+| `V5` | valid start with harness `opencode` | `UNSUPPORTED` |
+| `V6` | valid start with mode `UNSPECIFIED`; mode `(LaunchMode)99`; mode `FORK`; `FORK` with caps lacking `launch.fork` | `UNSUPPORTED`; `UNSUPPORTED`; null; `UNSUPPORTED` |
+| `V7` | valid start, file path `../x`; file root `UNSPECIFIED`; secret `file_path` `/abs` | `PATH_NOT_ALLOWED` each |
+| `V8` | valid start, secret with `env_var` set; secret with no target | null; `UNSUPPORTED` |
+| `V9` | valid start, files totalling exactly 2 MiB; one byte more | null; `PAYLOAD_TOO_LARGE` |
+| `V10` | harness `opencode` **and** file path `../x` | `UNSUPPORTED` (order) |
+| `V11` | `DeliverInput` body of 1 MiB of `a`; one byte more; 524289 times `é` | null; `PAYLOAD_TOO_LARGE`; `PAYLOAD_TOO_LARGE` |
+| `V12` | `CapturePane`; `StopSeat` | null; null |
+| `V13` | the `PAYLOAD_TOO_LARGE` error of V11 with a body that starts with `SENTINEL-BODY` | `message` does not contain `SENTINEL-BODY` |
+| `H1` | `raw` of 262144 bytes | unchanged, `raw_size` 262144, `raw_truncated` false |
+| `H2` | `raw` of 262145 bytes | length 262144, `raw_size` 262145, `raw_truncated` true |
+| `H3` | attribute of 1024 `a`; of 1025 `a`; of 600 `é`; of 1023 `a` + `é` | unchanged; 1024 bytes; 512 `é`; 1023 `a` |
 
 ## Tests (`tests/Aiakos.Contracts.Tests`)
 
@@ -181,9 +183,9 @@ Every test class carries `[Trait("Category", "Contract")]`. One class per helper
 (`NodeProtocolTests`, `ErrorReasonsTests`, `SeatPathsTests`, `PlaceholdersTests`,
 `CommandValidatorTests`, `HarnessEventLimitsTests`) with the cases above, plus:
 
-- `CapabilityAndKeyTests`: the four capability strings and the nine key names, exact text and
+- T1. `CapabilityAndKeyTests`: the four capability strings and the nine key names, exact text and
   order; `ForHarness("claude-code")` equals `HarnessClaudeCode`.
-- `ForwardCompatibilityTests` (build the bytes with `CodedOutputStream`):
+- T2. `ForwardCompatibilityTests` (build the bytes with `CodedOutputStream`):
   - a `ConnectRequest` with an extra field 1000 (varint 7) parses, and `ToByteArray()` returns
     the same bytes;
   - a `HarnessEvent` with `kind` = 99 parses, `(int)Kind == 99`, `Enum.IsDefined(Kind)` is false;
@@ -191,7 +193,7 @@ Every test class carries `[Trait("Category", "Contract")]`. One class per helper
     `BodyCase == None`, and `CommandValidator.Validate` returns `UNSUPPORTED`;
   - a `SeatEvent` whose only body is field 99 parses with `BodyCase == None` and re-serializes to
     the same bytes.
-- `RoundTripTests`: for **every** message type in `NodeLinkReflection.Descriptor.MessageTypes`,
+- T3. `RoundTripTests`: for **every** message type in `NodeLinkReflection.Descriptor.MessageTypes`,
   fill an instance through the descriptor accessors (string → `"x"`, bytes → 3 bytes, bool →
   true, numbers → 7, enum → its first non-zero value, message → filled recursively to depth 4,
   repeated → one element, map → one entry), with one instance per `oneof` case, then assert it

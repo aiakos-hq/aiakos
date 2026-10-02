@@ -1,35 +1,45 @@
 # Briefs
 
-A brief is the whole task for one slice: an implementer reads the brief and nothing else. Briefs
-are written from [`TEMPLATE.md`](TEMPLATE.md) and kept here, so they are versioned with the code
-they produce. When the maintainer approves a brief, its text becomes the body of the slice issue
-(see the "Slices" paragraph in [`CLAUDE.md`](../../CLAUDE.md)).
+A brief is the closed description of one slice of an M1 issue. It is written from
+[`TEMPLATE.md`](TEMPLATE.md), split into stories, reviewed and then implemented story by story.
+The flow, with the definitions of ready and done, is in [`../workflow.md`](../workflow.md).
 
-Status in each brief's header:
+Each slice has a folder:
 
-- `draft`: written, waiting for the maintainer's approval. Not ready to implement.
-- `approved`: a slice issue exists. It is ready once its dependencies are merged and its scoring
-  test and probes exist.
-- `implemented`: merged.
+| File | What |
+|---|---|
+| `brief.md` | The brief. Its header has the status, the route, the allowed paths and, when needed, its own size caps |
+| `items.tsv` | Every rule, change, expected output and test of the brief, with what it needs |
+| `stories.md` | The split into stories, IDs only |
+| `findings.md` | The story review. A line that starts with `- [ ]` is an open finding |
+| `followup-*.md` | Only in slices from before the story workflow: the follow-up briefs of the review loop |
+
+Status in a brief's header:
+
+- `draft`: written, waiting for the maintainer's approval. Its stories cannot become ready.
+- `approved`: its stories can become ready, one by one.
+- `implemented`: all its stories are merged.
 - `superseded`: replaced; kept only when something still refers to it.
 
-Follow-up briefs (`<slice>b`, `<slice>c`) come out of a review and apply on top of the slice's
-brief. Scoring tests and probes are not here: they stay local, so an implementer cannot read them.
+Acceptance tests are not here: they stay local, so that an implementer cannot read them.
+`bash tools/story.sh status` shows every story and its state.
 
 ## Index
 
-| Brief | Issue | Route | Status | Slice issue / pull request |
-|---|---|---|---|---|
-| [10-1 Proto and buf checks](10-1-proto-and-buf-ci.md) | #10 | `impl/opencode` | implemented | PR #44 |
-| [10-2 Contract helpers and contract tests](10-2-contract-helpers.md) | #10 | `impl/opencode` | draft | |
-| [11-1 Session host interface, validators and the fake](11-1-session-host-interface-and-fake.md) | #11 | `impl/sonnet` | draft | |
-| [13-1 Pure seat state machine and harness state profile](13-1-seat-state-machine.md) | #13 | `impl/sonnet` | draft | |
-| [13-2 Seat model migration and `SeatQueries`](13-2-seat-schema-and-queries.md) | #13 | `impl/sonnet` | draft | |
-| [14-1 Rig file envelope and diagnostics](14-1-envelope-and-diagnostics.md) | #14 | `impl/opencode` | implemented | PR #43 |
-| [14-1b Review fixes](14-1b-review-fixes.md) | #14 | `impl/opencode` | implemented | PR #43 |
-| [14-2 Semantic validation of the three YAML files](14-2-semantic-validation.md) | #14 | `impl/opencode` | approved | #45 |
-| [14-2b Review fixes](14-2b-review-fixes.md) | #14 | `impl/opencode` | approved | #45 |
-| [14-2c Review fixes, second round](14-2c-review-fixes.md) | #14 | `impl/opencode` | approved | #45 |
+| Slice | Issue | Route | Status | Stories | Open findings | Issue / pull request |
+|---|---|---|---|---|---|---|
+| [10-1 Proto and buf checks](10-1/brief.md) | #10 | `impl/opencode` | implemented | not split (before the story workflow) | | PR #44 |
+| [10-2 Contract helpers and contract tests](10-2/brief.md) | #10 | `impl/opencode` | draft | [1](10-2/stories.md) | [1](10-2/findings.md) | |
+| [11-1 Session host interface, validators and the fake](11-1/brief.md) | #11 | `impl/sonnet` | draft | [4](11-1/stories.md) | [2](11-1/findings.md) | |
+| [13-1 Pure seat state machine and harness state profile](13-1/brief.md) | #13 | `impl/sonnet` | draft | [6](13-1/stories.md) | [4](13-1/findings.md) | |
+| [13-2 Seat model migration and `SeatQueries`](13-2/brief.md) | #13 | `impl/sonnet` | draft | [2](13-2/stories.md) | [1](13-2/findings.md) | |
+| [14-1 Rig file envelope and diagnostics](14-1/brief.md) | #14 | `impl/opencode` | implemented | not split (before the story workflow) | | PR #43 |
+| [14-2 Semantic validation of the three YAML files](14-2/brief.md) | #14 | `impl/opencode` | approved | not split (before the story workflow) | | #45 |
+
+Slices 10-1, 14-1 and 14-2 were implemented as one piece each, before stories existed. 14-1 and
+14-2 went through the review loop, whose follow-up briefs are kept next to them. 14-2 is
+finished on its branch and goes through the gate and the pull request as one legacy story
+(`tools/story.sh done 45`, then `pr 45`).
 
 ## Not briefed yet
 
@@ -43,4 +53,4 @@ brief. Scoring tests and probes are not here: they stay local, so an implementer
 | #15 CLI and released instance | 15-1 skeleton and dry run, 15-2 local API, 15-3 client commands, 15-4 instance host, 15-5 release |
 | #16 aiakos-dev rig, M1 acceptance | 16-1 rig files, 16-2 pin and rig-compat, 16-3 acceptance run |
 
-Update the index in the same pull request that adds a brief or changes its status.
+Update the index in the same pull request that adds a brief, splits it or changes its status.
