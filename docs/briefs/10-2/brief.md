@@ -2,7 +2,7 @@
 id: 10-2
 title: "#10 slice 2 — contract helpers and contract tests"
 issue: 10
-status: draft
+status: approved
 route: impl/opencode
 paths: [src/Aiakos.Contracts/Node/, tests/Aiakos.Contracts.Tests/]
 max_outputs: 26

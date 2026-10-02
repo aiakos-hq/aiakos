@@ -5,7 +5,7 @@ Stories: 1. Check: ok.
 
 ## Findings
 
-- [ ] Brief: `status` is `draft`. Fix: the maintainer approves it.
+- [x] Brief: `status` is `draft`. Fix: the maintainer approves it. Approved by the maintainer on 2026-10-02.
 
 ## Not checked
 
