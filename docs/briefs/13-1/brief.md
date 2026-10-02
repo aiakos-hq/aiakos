@@ -4,6 +4,8 @@ title: "#13 slice 1 — pure seat state machine and harness state profile"
 issue: 13
 status: draft
 route: impl/sonnet
+paths: [src/Aiakos.Orchestrator/Seats/, tests/Aiakos.Orchestrator.Tests/, Directory.Packages.props]
+max_outputs: 9
 date: 2026-10-01
 ---
 
@@ -159,25 +161,31 @@ proto enum, `*_UNSPECIFIED` and undefined numbers are stored as `unknown`.
 
 ## Rules
 
-1. **Pure.** `Apply` reads only its arguments. `now` is used only for the `…Since` fields and
+The rules of this brief are B1–B22; "rule 7" in the text means B7. (R10, R16, R17 and R18 below
+are requirement IDs of the spec, used as `SeatTransition.Rule` values.)
+
+B1. **Pure.** `Apply` reads only its arguments. `now` is used only for the `…Since` fields and
    `LastEventAt`. Equal arguments give equal results.
-2. **Tables.** Implement S1–S16, A1–A16, U1–U8, the launch mode decision table and the delivery
+B2. **Tables.** Implement S1–S16, A1–A16, U1–U8, the launch mode decision table and the delivery
    table as written. `—` and `n/a` mean: no transition, no finding. Open only findings that a
    cell or rule below names. `SeatTransition.Rule` is the row id (`S11`, `A2`, `U8`), or `R10`,
    `R16`, `R17`, `R18` for derived changes. Emit a transition only when value or reason changes.
-3. **Known and reported.** Tables act on `Known*`. Without an overlay, reported = known and each
+B2a. **Session table:** rows S1–S16 of the spec lines.
+B2b. **Activity table:** rows A1–A16 of the spec lines.
+B2c. **Resumability table:** rows U1–U8 of the spec lines.
+B3. **Known and reported.** Tables act on `Known*`. Without an overlay, reported = known and each
    change is one transition with `Reported = true`. With an overlay, reported session and
    activity are `unknown` with the overlay's reason; known changes are transitions with
    `Reported = false`. Resumability has no overlay.
-4. **R10 always holds** for known and for reported values: activity is `none` exactly when
+B4. **R10 always holds** for known and for reported values: activity is `none` exactly when
    session is `absent` or `exited`; activity is `unknown` when session is `starting`
    (`not-ready`) or `unknown` (`session-unknown`). While known session is `starting` or
    `unknown`, activity rows A2–A12 change nothing (the event is still `Applied`); only readiness
    (S11 then A1) leaves that state. This overrides the sentence "evaluated while starting,
    present or unknown".
-5. **Entering `present`.** By S11: activity `idle` (A1). By S5 from `starting` without
+B5. **Entering `present`.** By S11: activity `idle` (A1). By S5 from `starting` without
    `ReadinessSeen`: `unknown/sources-disagree`. By S5 from `unknown`, or by S15: `unknown/observation-gap`.
-6. **Event pipeline**, per `EventReceived`, in this order:
+B6. **Event pipeline**, per `EventReceived`, in this order:
    1. *Epoch.* `NodeInstanceId` differs from the state's: when the state's is null, adopt it and
       set `NextSeq = 1`; otherwise apply rule 11 first, adopt it, `NextSeq = 1`.
    2. *Duplicate.* `Seq < NextSeq` → `Duplicate`, state unchanged.
@@ -193,38 +201,38 @@ proto enum, `*_UNSPECIFIED` and undefined numbers are stored as `unknown`.
       `present` opens `sources-disagree` and changes no axis.
    Every `HarnessBody` of the current launch, late or not, sets `LastEventAt = now` and resolves
    `activity-stale`.
-7. **Stale guard.** Only a `HarnessBody` with `SourceSeq > 0` whose kind is not `TELEMETRY`,
+B7. **Stale guard.** Only a `HarnessBody` with `SourceSeq > 0` whose kind is not `TELEMETRY`,
    `OTHER` or unspecified takes part. `SourceSeq <= LastSourceSeq` → `Late`: only U2 and U8 may
    apply. Otherwise `LastSourceSeq = SourceSeq`. `TELEMETRY` and `OTHER` are never late and never
    move `LastSourceSeq`: a statusLine tick that overtakes a `Stop` hook must not make the `Stop`
    late. `LastSourceSeq` is kept across launches.
-8. **Readiness and native IDs.** An event is a readiness event only when `profile.IsReadiness`
+B8. **Readiness and native IDs.** An event is a readiness event only when `profile.IsReadiness`
    is true **and** its `NativeSessionId` equals the state's. It sets `ReadinessSeen`. With another
    ID: U8 when `profile.IsSessionRotation` is true, the attribute `previous_session_id` equals
    the state's ID and `profile.IsValidNativeSessionId(new)`; otherwise U7. A mismatching event is
    never S11 or A1. U8 sets `NativeSessionId` to the new ID, emits `AdoptRotatedSession`, sets
    `ReadinessSeen`, applies A1 and resolves `session-id-mismatch`.
-9. **Conversation evidence (U2)** counts only when `profile.IsConversationEvidence` is true and
+B9. **Conversation evidence (U2)** counts only when `profile.IsConversationEvidence` is true and
    the event's `NativeSessionId` equals the state's. It applies to late events too.
-10. **Pending input.** A6 stores the attribute `request_id`, or `*` when absent. A5 and A7 resolve
+B10. **Pending input.** A6 stores the attribute `request_id`, or `*` when absent. A5 and A7 resolve
     when the pending value is `*` or equals the event's `tool_use_id` or `request_id`. A2, A10,
     A11 and any change of session clear it. A4 detail is `tool:<tool_name>`.
-11. **Lost observation** (sequence gap, `ObservationGapBody`, new epoch, new node instance): open
+B11. **Lost observation** (sequence gap, `ObservationGapBody`, new epoch, new node instance): open
     `observation-gap`; U6; when known session is `present`, activity → `unknown/observation-gap`
     (A16); when a launch exists and known session is `starting`, `present` or `unknown`, emit
     `RequestCapture`. Never synthesize an event.
-12. **`NodeAttached`.** Resolve `node-not-connected`. *Same instance, or the state has none:*
+B12. **`NodeAttached`.** Resolve `node-not-connected`. *Same instance, or the state has none:*
     adopt the ID; with an overlay, set `CatchUpSeq = Inventory?.LastSeq ?? 0` and clear the
     overlay as soon as `NextSeq > CatchUpSeq` (now, or after a later event); the inventory is
     otherwise ignored. *Different instance:* adopt it, `NextSeq = 1`, clear the overlay and
     `CatchUpSeq`, then S15 when the inventory has the current `LaunchId`, else S16, then rule 11.
     S15 lifecycles: `LAUNCHING` → `starting`, `RUNNING` → `present`, `EXITED` → `exited`,
     `UNKNOWN` and anything else → `unknown/orphan-or-running`. S15 resolves `inventory-mismatch`.
-13. **Overlays.** `NodeLinkLost` and `OrchestratorRestarted` set the overlay only when known
+B13. **Overlays.** `NodeLinkLost` and `OrchestratorRestarted` set the overlay only when known
     session is not `absent` or `exited`; transitions have rule `R16`. Clearing it restores
     reported = known with rule `R17`. Under an overlay a second overlay input changes only the
     overlay kind and reasons.
-14. **`UpRequested`**, in this order, on reported values: `NodeConnected` false → `Rejected
+B14. **`UpRequested`**, in this order, on reported values: `NodeConnected` false → `Rejected
     NODE_NOT_CONNECTED` and open `node-not-connected`; session `starting` or `present` →
     `AlreadyUp`, `Desired = Up`; `unknown` → `Rejected SEAT_STATE_UNKNOWN`; otherwise the launch
     mode decision table (`lost` without `Fresh` → `Rejected RESUME_LOST`). Accepted: `Desired =
@@ -233,33 +241,33 @@ proto enum, `*_UNSPECIFIED` and undefined numbers are stored as `unknown`.
     `NativeSessionId` is `NewNativeSessionId` for a new session, else kept; one `StartLaunch`
     effect (`AbandonPreviousSession` when a session with an ID is replaced). `Fresh` accepted
     resolves `resume-lost` and `session-id-mismatch`. A rejected `up` changes nothing else.
-15. **`DownRequested`**: `Desired = Down`; resolve `unexpected-exit`; when a launch exists and
+B15. **`DownRequested`**: `Desired = Down`; resolve `unexpected-exit`; when a launch exists and
     known session is not `absent`: `DispatchStop` and `StopRequested = true`. Always `Accepted`.
     S3 also resolves `orphan-harness`.
-16. **`SendRequested`**, in this order, on reported values: `NodeConnected` false →
+B16. **`SendRequested`**, in this order, on reported values: `NodeConnected` false →
     `NODE_NOT_CONNECTED` (open `node-not-connected`); session `unknown` → `SEAT_STATE_UNKNOWN`;
     session not `present` → `SEAT_NOT_PRESENT`; `DeliveryInFlight` → `DELIVERY_IN_FLIGHT`;
     activity `working` → `SEAT_WORKING`; `needs-input` → `SEAT_NEEDS_INPUT`; `unknown` without
     `Force` → `SEAT_ACTIVITY_UNKNOWN`; otherwise `Accepted(Forced: activity was unknown)`. It
     never changes an axis.
-17. **Launch results.** S5 or S11 into `present` resolves `launch-unconfirmed`,
+B17. **Launch results.** S5 or S11 into `present` resolves `launch-unconfirmed`,
     `launch-rejected`, `launch-failed`, `unexpected-exit`. U3 needs `Launch.Mode == RESUME`. U5
     needs mode `FRESH` with `ReusedNativeSessionId`. `LaunchResult FAILED` with another reason in
     mode `RESUME` opens `launch-failed` and leaves resumability. Known session entering `exited`
     while `Desired == Up` and `StopRequested` is false opens `unexpected-exit`.
-18. **`CommandDispatchFailed`**: `Start` → S9; `Stop` → S4; others change nothing.
-19. **Timers are validated, not trusted.** `QuietTimeoutFired` acts (A15) only when known session
+B18. **`CommandDispatchFailed`**: `Start` → S9; `Stop` → S4; others change nothing.
+B19. **Timers are validated, not trusted.** `QuietTimeoutFired` acts (A15) only when known session
     is `present`, known activity is `working` and `now - LastEventAt >= profile.QuietTimeout`.
     `LaunchWatchdogFired` acts (S10, reason `launch-result-missing`) only when known session is
     `starting`. `UnknownProlongedFired` opens `state-unknown-prolonged` only when reported session
     is `unknown` and `now - SessionSince >= 5 min`; the finding resolves when reported session
     leaves `unknown`. Otherwise each returns the state unchanged.
-20. **Other resolutions.** `TURN_ENDED` resolves `turn-failed`; `PROMPT_SUBMITTED` resolves
+B20. **Other resolutions.** `TURN_ENDED` resolves `turn-failed`; `PROMPT_SUBMITTED` resolves
     `delivery-unconfirmed`. `sources-disagree` and `observation-gap` are never resolved here.
-21. **Unrecognized enum values are the honest unknown:** `LaunchOutcome` → S7; `StopOutcome` →
+B21. **Unrecognized enum values are the honest unknown:** `LaunchOutcome` → S7; `StopOutcome` →
     S4; `HarnessEventKind` → `OTHER`; `SessionLifecycle` → `UNKNOWN`; `CommandStatus` in
     `StartNotCompletedBody` → S10 (`launch-unconfirmed`), in `DeliveryNotCompleted` → `Unknown`.
-22. **Delivery table.** Final states absorb every input. `SubmittedUnconfirmed` opens
+B22. **Delivery table.** Final states absorb every input. `SubmittedUnconfirmed` opens
     `delivery-unconfirmed`.
 
 ## Tests (`tests/Aiakos.Orchestrator.Tests/Seats/`)
@@ -272,41 +280,51 @@ no overlay ⇒ reported = known. `TestProfiles.cs` holds two test doubles. `Clau
 and `previous_session_id`; reuses the ID; no `INPUT_RESOLVED`; quiet 10 min. `OpenCodeLike`:
 readiness and evidence = `SESSION_STARTED`; no rotation; new ID; emits `INPUT_RESOLVED`.
 
-- `SessionTableTests`, `ActivityTableTests`, `ResumabilityTableTests`: one test per row, named
-  by row id (`S05_LaunchResultReady`), covering every column of the row, with values, reasons,
-  findings and effects.
-- `LaunchDecisionTests`: every resumability value with and without `Fresh`, for both profiles.
-- `SendDecisionTests`, `DeliveryTableTests`, `OverlayTests`, `PipelineTests` (each pipeline step,
-  rule 7 with a `TELEMETRY` overtaking a `TURN_ENDED`, rule 12 both branches), `TimerTests`.
-- `VocabularyTests`: for every value of every proto enum above (`Enum.GetValues`) `ToStored`
+The three table test classes have one test per row, named by row id (`S05_LaunchResultReady`),
+covering every column of the row, with values, reasons, findings and effects:
+
+- T1. `SessionTableTests`: rows S1–S16.
+- T2. `ActivityTableTests`: rows A1–A16.
+- T3. `ResumabilityTableTests`: rows U1–U8.
+- T4. `LaunchDecisionTests`: every resumability value with and without `Fresh`, for both profiles.
+- T5. `SendDecisionTests`: every clause of rule 16.
+- T6. `DeliveryTableTests`: the delivery table and rule 22.
+- T7. `OverlayTests`: rules 3 and 13.
+- T8. `PipelineTests`: each pipeline step, rule 7 with a `TELEMETRY` overtaking a `TURN_ENDED`,
+  rule 12 both branches.
+- T9. `TimerTests`: rule 19.
+- T10. `VocabularyTests`: for every value of every proto enum above (`Enum.GetValues`) `ToStored`
   returns a non-empty lower-kebab string, defined values are distinct, and the exact strings in
   the surface comments hold.
-- `GoldenScriptTests`, each a list of inputs with the expected axes after every step:
-  1. *Permission turn:* readiness; `PROMPT_SUBMITTED`; `TOOL_STARTED` (`Bash`, `t1`);
-     `INPUT_REQUESTED` (`request_id=t1`); `OTHER`; `TOOL_FINISHED` (`t1`); `TURN_ENDED`;
-     `COMPACTION_STARTED`; `COMPACTED` → idle, working `tool:Bash`, needs-input, same, working,
-     idle, working `compacting`, idle; resumability becomes `resumable` at the prompt.
-  2. *Kill and resume:* a ready seat with one turn; `ProcessExited(signal 9)` → `exited`,
-     `unexpected-exit`; `up` → `RESUME`, decision `resume`; a `SESSION_ENDED` before readiness is
-     `Orphan`; readiness → `present`; `LaunchResult READY` changes nothing.
-  3. *Failed resume:* as 2, then `ProcessExited(exit 1)` and `LaunchResult FAILED
-     RESUME_SESSION_NOT_FOUND` → `exited`, `lost`, `resume-lost`, no `StartLaunch`; `up` →
-     `RESUME_LOST`; `up` with `Fresh` → `FRESH`, `fresh-explicit`, new ID, previous abandoned.
-  4. *Turn failure:* prompt, then `TURN_FAILED` → idle and `turn-failed`; the next `TURN_ENDED`
-     resolves it.
-  5. *Exit without `SESSION_ENDED`:* working, then `ProcessExited` → `exited` / `none`.
-  6. *Rotation:* idle and `resumable`; `OTHER` (`reason=clear`); `SESSION_STARTED` (`source=clear`,
-     new ID, `previous_session_id`) → `present`, idle, `fresh-only`, `AdoptRotatedSession`, no
-     `session-id-mismatch`; a prompt with the new ID → `resumable`; `down`, `StopResult`, `up` →
-     `RESUME` with the new ID. With an invalid new ID the same event is U7.
-  7. *Escape denial:* needs-input and no event → `send` is `SEAT_NEEDS_INPUT`, with `Force` too;
-     the next `PROMPT_SUBMITTED` → working.
-  8. *Parallel tools:* two `TOOL_STARTED`, `INPUT_REQUESTED` without an ID, `TOOL_FINISHED` of
-     the other tool → working (the accepted early resolve); with `request_id` set it stays
-     needs-input.
-  9. *OpenCode:* `ACTIVE`; `INPUT_REQUESTED p1`; `ACTIVE` (still needs-input); `INPUT_RESOLVED
-     p1` → working; `TURN_ENDED` → idle.
-- `SeatPropertyTests` (CsCheck, at least 1 000 cases each). The generator builds complete Claude
+
+`GoldenScriptTests`: each script is a list of inputs with the expected axes after every step.
+
+- GS1. *Permission turn:* readiness; `PROMPT_SUBMITTED`; `TOOL_STARTED` (`Bash`, `t1`);
+  `INPUT_REQUESTED` (`request_id=t1`); `OTHER`; `TOOL_FINISHED` (`t1`); `TURN_ENDED`;
+  `COMPACTION_STARTED`; `COMPACTED` → idle, working `tool:Bash`, needs-input, same, working,
+  idle, working `compacting`, idle; resumability becomes `resumable` at the prompt.
+- GS2. *Kill and resume:* a ready seat with one turn; `ProcessExited(signal 9)` → `exited`,
+  `unexpected-exit`; `up` → `RESUME`, decision `resume`; a `SESSION_ENDED` before readiness is
+  `Orphan`; readiness → `present`; `LaunchResult READY` changes nothing.
+- GS3. *Failed resume:* as 2, then `ProcessExited(exit 1)` and `LaunchResult FAILED
+  RESUME_SESSION_NOT_FOUND` → `exited`, `lost`, `resume-lost`, no `StartLaunch`; `up` →
+  `RESUME_LOST`; `up` with `Fresh` → `FRESH`, `fresh-explicit`, new ID, previous abandoned.
+- GS4. *Turn failure:* prompt, then `TURN_FAILED` → idle and `turn-failed`; the next `TURN_ENDED`
+  resolves it.
+- GS5. *Exit without `SESSION_ENDED`:* working, then `ProcessExited` → `exited` / `none`.
+- GS6. *Rotation:* idle and `resumable`; `OTHER` (`reason=clear`); `SESSION_STARTED` (`source=clear`,
+  new ID, `previous_session_id`) → `present`, idle, `fresh-only`, `AdoptRotatedSession`, no
+  `session-id-mismatch`; a prompt with the new ID → `resumable`; `down`, `StopResult`, `up` →
+  `RESUME` with the new ID. With an invalid new ID the same event is U7.
+- GS7. *Escape denial:* needs-input and no event → `send` is `SEAT_NEEDS_INPUT`, with `Force` too;
+  the next `PROMPT_SUBMITTED` → working.
+- GS8. *Parallel tools:* two `TOOL_STARTED`, `INPUT_REQUESTED` without an ID, `TOOL_FINISHED` of
+  the other tool → working (the accepted early resolve); with `request_id` set it stays
+  needs-input.
+- GS9. *OpenCode:* `ACTIVE`; `INPUT_REQUESTED p1`; `ACTIVE` (still needs-input); `INPUT_RESOLVED
+  p1` → working; `TURN_ENDED` → idle.
+
+- T11. `SeatPropertyTests` (CsCheck, at least 1 000 cases each). The generator builds complete Claude
   turns (prompt, zero or more tool calls with an optional permission request, an optional
   compaction, `TURN_ENDED`), statusLine `TELEMETRY` ticks anywhere, increasing `Seq` and
   `SourceSeq`:
@@ -317,7 +335,7 @@ readiness and evidence = `SESSION_STARTED`; no rotation; new ID; emits `INPUT_RE
   - dropping a run of `Seq` gives activity `unknown/observation-gap` until the next event that
     the activity table's `unknown` column maps to a value, and turns `fresh-only` into `unknown`;
   - switching `NodeInstanceId` mid-stream applies rule 11 once and restarts `NextSeq`.
-- `KnownLimitationTests`: one pinned case where the guard loses history mid-turn (arrival
+- T12. `KnownLimitationTests`: one pinned case where the guard loses history mid-turn (arrival
   `COMPACTED`, `PROMPT_SUBMITTED`, `COMPACTION_STARTED` for `SourceSeq` 3, 1, 2 ends `idle`,
   sorted order ends `working`). The test asserts the `idle` and its comment says why.
 
