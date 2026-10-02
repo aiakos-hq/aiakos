@@ -1,6 +1,16 @@
+---
+id: <issue>-<n>
+title: "#<issue> slice <n> — <short title>"
+issue: <issue>
+status: draft            # draft | approved | implemented | superseded
+route: impl/opencode     # or impl/sonnet
+date: <yyyy-mm-dd>
+---
+
 # Brief: #<issue> slice <n> — <short title>
 
 <!--
+File name: docs/briefs/<issue>-<n>-<slug>.md. Add a row to docs/briefs/README.md.
 A brief is the whole task for an implementer that reads nothing else. It becomes the body of the
 slice issue (title "<issue>-<n>: <short title>", first body line "Part of #<issue>."), with a
 routing label impl/opencode or impl/sonnet. Aim for two pages. Delete these comments.

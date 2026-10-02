@@ -56,9 +56,12 @@ edit docs there) and `aiakos-hq/.github` (org profile, CONTRIBUTING, SECURITY, C
   implementing an issue and at milestone boundaries.
 
 - **Slices** (stage A): an M1 issue is implemented as several slices, each one pull request.
-  A slice has its own issue, titled `<issue>-<n>: <title>`, whose body is a self-contained
-  **brief** from [`docs/briefs/TEMPLATE.md`](docs/briefs/TEMPLATE.md) and starts with
-  `Part of #<issue>`. The issue is created when the maintainer approves the brief, gets a routing
+  Every slice has a self-contained **brief**, `docs/briefs/<issue>-<n>-<slug>.md`, written from
+  [`docs/briefs/TEMPLATE.md`](docs/briefs/TEMPLATE.md), with its status (`draft`, `approved`,
+  `implemented`) in its header and a row in the index,
+  [`docs/briefs/README.md`](docs/briefs/README.md), which also lists what is not briefed yet.
+  A slice has its own issue, titled `<issue>-<n>: <title>`, whose body is the brief and starts
+  with `Part of #<issue>`. The issue is created when the maintainer approves the brief, gets a routing
   label `impl/opencode` or `impl/sonnet`, and gets `ready` once its dependencies are merged and
   its scoring test and probes exist in `artifacts/trials/<slice>/` (local, git-ignored).
   The flow: `/slice next` prepares a worktree and prints the run command; the maintainer runs
