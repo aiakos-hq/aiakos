@@ -391,6 +391,8 @@ internal sealed class SemanticValidator
         return result;
     }
 
+    internal static bool IsCredentialLike(string? text) => FindCredential(text) is not null;
+
     private static (string Kind, string Text)? FindCredential(string? text)
     {
         if (text is null) return null;

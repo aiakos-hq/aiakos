@@ -36,8 +36,10 @@ public static class RigLoader
                         continue;
                     }
 
+                    // The agent file's diagnostics carry its path. A credential-like agent_ref is
+                    // reported as AIK4020 on the seat and must not reach the output through a path.
                     var agentDirectory = text["local:".Length..];
-                    if (IsUnsafeAgentPath(agentDirectory))
+                    if (IsUnsafeAgentPath(agentDirectory) || SemanticValidator.IsCredentialLike(text))
                     {
                         continue;
                     }

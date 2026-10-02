@@ -681,7 +681,8 @@ Rules the texts depend on:
   so is every other diagnostic whose message or hint contains a match. When the scan did not
   report that text itself (a mapping key, or a value in a file with AIK2001), the removed
   diagnostic is replaced by an AIK4020 at its position, so a file never ends up without a
-  diagnostic.
+  diagnostic. An agent file is not loaded through a credential-like `agent_ref`, because its
+  diagnostics would carry that path in their file name.
 
 ### Reserved fields and values
 

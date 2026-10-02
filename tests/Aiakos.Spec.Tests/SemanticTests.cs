@@ -366,6 +366,46 @@ public sealed class SemanticTests
         Assert.DoesNotContain("sk-ant-example", DiagnosticFormatter.Format(diagnostics), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("local:https://bob:hunter2@example.com/x", "URL with user info", "hunter2")]
+    [InlineData("local:agents/sk-ant-example", "Anthropic API key", "sk-ant-example")]
+    public void DoesNotLoadAnAgentFileThroughACredentialLikeReference(string reference, string kind, string secret)
+    {
+        var rig = MinimalRig.Replace("local:agents/impl", reference, StringComparison.Ordinal);
+
+        var diagnostics = Load(rig).Diagnostics;
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(("AIK4020", "rig.yaml", 10, 16), (diagnostic.Code, diagnostic.File, diagnostic.Line, diagnostic.Column));
+        Assert.Equal($"credential-like value ({kind})", diagnostic.Message);
+        Assert.DoesNotContain(secret, DiagnosticFormatter.Format(diagnostics), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DoesNotReportAnAgentFileWhoseDirectoryNameIsCredentialLike()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aiakos-semantic-{Guid.NewGuid():N}");
+        var agentDirectory = Path.Combine(root, "agents", "ghp_example");
+        Directory.CreateDirectory(agentDirectory);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "rig.yaml"), MinimalRig.Replace("local:agents/impl", "local:agents/ghp_example", StringComparison.Ordinal));
+            File.WriteAllText(Path.Combine(agentDirectory, "agent.yaml"), MinimalAgent.Replace("claude-code", "foo", StringComparison.Ordinal));
+            File.WriteAllText(Path.Combine(root, "rig.env.yaml"), MinimalEnv);
+
+            var formatted = DiagnosticFormatter.Format(RigLoader.Load(root, null).Diagnostics);
+
+            Assert.Equal(
+                "rig.yaml:10:16: error AIK4020: credential-like value (GitHub token)\n" +
+                "  hint: never put secrets in rig files; name the secret and bind it in rig.env.yaml\n",
+                formatted);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void SkipsCrossFileChecksForSyntaxErrorButStillRunsEnvironmentOnlyPathChecks()
     {
