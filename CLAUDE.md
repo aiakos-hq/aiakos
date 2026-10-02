@@ -55,20 +55,24 @@ edit docs there) and `aiakos-hq/.github` (org profile, CONTRIBUTING, SECURITY, C
 - **Risks** are indexed in [`docs/risks.md`](docs/risks.md); check the relevant ones before
   implementing an issue and at milestone boundaries.
 
-- **Slices** (stage A): an M1 issue is implemented as several slices, each one pull request.
-  Every slice has a self-contained **brief**, `docs/briefs/<issue>-<n>-<slug>.md`, written from
-  [`docs/briefs/TEMPLATE.md`](docs/briefs/TEMPLATE.md), with its status (`draft`, `approved`,
-  `implemented`) in its header and a row in the index,
-  [`docs/briefs/README.md`](docs/briefs/README.md), which also lists what is not briefed yet.
-  A slice has its own issue, titled `<issue>-<n>: <title>`, whose body is the brief and starts
-  with `Part of #<issue>`. The issue is created when the maintainer approves the brief, gets a routing
-  label `impl/opencode` or `impl/sonnet`, and gets `ready` once its dependencies are merged and
-  its scoring test and probes exist in `artifacts/trials/<slice>/` (local, git-ignored).
-  The flow: `/slice next` prepares a worktree and prints the run command; the maintainer runs
-  the implementer; `/slice done` starts the `slice-reviewer` agent, which writes a verdict;
-  then `/slice pr`. The orchestrator chat ([`.claude/skills/slice`](.claude/skills/slice/SKILL.md))
-  runs in a cheap model and only relays; briefs, scoring tests and spec amendments are written
-  in a separate chat.
+- **Slices and stories** (stage A): an M1 issue is implemented as several slices. A slice is one
+  **brief**, `docs/briefs/<issue>-<n>/brief.md`, written from
+  [`docs/briefs/TEMPLATE.md`](docs/briefs/TEMPLATE.md): a closed description in which every rule,
+  change, expected output and test is an item with an ID (`items.tsv`). A cheap model splits the
+  brief into small **stories** (`stories.md`), a script checks the split, a reviewer writes
+  `findings.md`, and merging that analysis is its approval. A story that meets the definition of
+  ready becomes a GitHub sub-issue of the M1 issue, titled `<issue>-<n>-<m>: <title>`, with a
+  routing label `impl/opencode` or `impl/sonnet` and the label `ready`; each story is one pull
+  request. Done is decided before the run: a story's acceptance tests are written first, stay
+  local in `artifacts/trials/<story>/` (git-ignored), and `tools/story.sh done` runs them as a
+  gate. Only a failed acceptance test, an exception, a leaked secret or an earlier test turned
+  red blocks a story; anything else becomes a new item. One retry at most, and no follow-up
+  briefs. The whole flow, with the definitions of ready and done, is in
+  [`docs/workflow.md`](docs/workflow.md); the index of briefs is
+  [`docs/briefs/README.md`](docs/briefs/README.md). The relay chat
+  ([`.claude/skills/story`](.claude/skills/story/SKILL.md)) runs in a cheap model and only runs
+  the script; briefs and acceptance tests are written in a separate chat. Do not use the earlier
+  slice review loop (`tools/slice.sh`, `/slice`, follow-up briefs): it is removed.
 
 Labels: `type/*` (feature, bug, spike, chore, docs), `area/*`, routing labels `impl/opencode`
 and `impl/sonnet` (slices), and status labels `spec-needed`, `ready`, `in-progress`,
@@ -110,8 +114,8 @@ Prerequisites: .NET SDK 10.0.1xx+ (see `global.json`); Docker Desktop running; W
 - WSL end-to-end test (Windows only, stack not running): `$env:AIAKOS_E2E_WSL=1; dotnet test --project tests/Aiakos.AppHost.Tests`
 - Pack the placeholder tool: `dotnet pack src/Aiakos.Cli -c Release -o artifacts/packages`
 - Check the proto (needs buf 1.73.0): `buf lint` and `buf breaking --against '.git#branch=main'`
-- Slice workflow helper (Git Bash): `bash tools/slice.sh status|start|done|rework|pr|cleanup`
-  (see the header of [`tools/slice.sh`](tools/slice.sh))
+- Story workflow helper (Git Bash): `bash tools/story.sh status|check|split|show|ready|next|start|done|pr|cleanup`
+  (see [`docs/workflow.md`](docs/workflow.md))
 - Add a migration: `src/Aiakos.Data/Migrations/NNNN_description.sql` (next number; never edit a
   merged one; every table in schema `aiakos` gets `tenant_id`).
 - Reset the dev database (stack stopped): `docker rm -f <postgres container>` then
