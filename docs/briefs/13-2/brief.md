@@ -4,6 +4,8 @@ title: "#13 slice 2 — seat model migration and `SeatQueries`"
 issue: 13
 status: draft
 route: impl/sonnet
+paths: [src/Aiakos.Data/, tests/Aiakos.Data.Tests/, tests/Aiakos.Orchestrator.Tests/]
+max_outputs: 9
 date: 2026-10-01
 ---
 
@@ -81,13 +83,18 @@ public sealed record SeatFindingRow(
     DateTime FirstSeenAt, DateTime LastSeenAt, Guid? LaunchId);
 ```
 
+## Changes to earlier behaviour
+
+- C1. An existing test that counts or names the applied migration scripts: only that expectation
+  changes.
+
 ## Rules
 
-1. **Migration verbatim.** The file is the spec block unchanged: same tables, columns, checks,
+R1. **Migration verbatim.** The file is the spec block unchanged: same tables, columns, checks,
    indexes, comments and order. Do not "fix" or reformat it. LF, final newline.
-2. **Tenant first.** Every query has `tenant_id = @tenantId` on the row it starts from and joins
+R2. **Tenant first.** Every query has `tenant_id = @tenantId` on the row it starts from and joins
    every other table on `tenant_id` as well. No method works without a tenant ID.
-3. **`ListAsync`** is one SQL statement and one round trip. One row per seat with
+R3. **`ListAsync`** is one SQL statement and one round trip. One row per seat with
    `retired_at IS NULL`, agent and human, ordered by rig name then `member`; `rigName` null means
    all rigs. Columns and joins:
    - `seat` joined to `rig`; `seat_state`, `seat_session` (by `current_session_id`) and
@@ -105,18 +112,18 @@ public sealed record SeatFindingRow(
      `usage ->> 'model_id'`. A missing key or a null `usage` gives null, never 0.
    - `OpenFindings` = number of `seat_finding` rows of the seat with status `open` (0 when
      none). `WorstSeverity` = `error`, else `warning`, else `info` among them; null when none.
-4. **`GetDetailAsync`** finds the seat by `address` (not retired) and returns null when there is
+R4. **`GetDetailAsync`** finds the seat by `address` (not retired) and returns null when there is
    none. `Seat` is the same row `ListAsync` gives. `Launch` is the current launch or null.
    `Transitions`: the newest 20 by `at`, newest first. `Findings`: status `open`, `error` first,
    then `warning`, then `info`, each newest `last_seen_at` first. `Deliveries`: the newest 5
    commands of kind `deliver`, newest first. Several statements on one connection are fine.
-5. **`GetLaunchAsync`, `GetCommandAsync`**: the row with that ID and tenant, or null.
-6. **Never returned:** `seat_command.payload` (it holds the delivery body), `seat_launch.seat_token_hash`,
+R5. **`GetLaunchAsync`, `GetCommandAsync`**: the row with that ID and tenant, or null.
+R6. **Never returned:** `seat_command.payload` (it holds the delivery body), `seat_launch.seat_token_hash`,
    `seat_event.raw`. `SeatCommandRow.Result` is `result::text`.
-7. **Conventions.** As in `TenantRepository`: raw string SQL constants, Dapper with
+R7. **Conventions.** As in `TenantRepository`: raw string SQL constants, Dapper with
    `CommandDefinition` and the cancellation token, `ConfigureAwait(false)`, XML summary on public
    types. Timestamps are `DateTime` in UTC.
-8. **Read only.** No `INSERT`, `UPDATE` or `DELETE` anywhere under `src/` in this slice.
+R8. **Read only.** No `INSERT`, `UPDATE` or `DELETE` anywhere under `src/` in this slice.
 
 ## Expected outputs: seed and exact results
 
@@ -134,24 +141,24 @@ tenant **T** = the default tenant, tenant **U** = a second tenant inserted by th
 | `impl` in rig `other` | same tenant, another rig |
 | `impl` in rig `demo`, tenant U | another tenant, same rig name and address |
 
-| Call | Expected |
-|---|---|
-| `ListAsync(T, null)` | 6 rows in order `demo`: `drift`, `impl`, `lead`, `review`, `stale`; then `other`: `impl` |
-| `ListAsync(T, "demo")` | those 5; `ListAsync(T, "nope")`: empty; `ListAsync(U, null)`: exactly U's one row |
-| row `impl@demo` | `Session` `present`, `Activity` `working`, `ActivityDetail` `tool:Bash`, `Resumability` `resumable`, `LaunchOutcome` `ready`, `LaunchDecision` `resume`, `SpecDrift` false, `PendingOp` `deliver`, `LastDeliveryOutcome` null (the newest delivery has none), `ContextUsedPercent` 42, `Model` `opus`, `OpenFindings` 2, `WorstSeverity` `error` |
-| row `review@demo` | `Session` `absent`, `Activity` `none`, `LaunchId` null, `SpecDrift` false, `ContextUsedPercent` null, `OpenFindings` 0, `WorstSeverity` null |
-| row `lead@demo` | `Kind` `human`, `Harness` null, `Session` null, `SpecDrift` false, `OpenFindings` 0 |
-| rows `drift`, `stale` | `SpecDrift` true; false |
-| `GetDetailAsync(T, "impl@demo")` | `Launch.Mode` `resume`; 20 transitions, newest first; findings `turn-failed` then `activity-stale`; 2 deliveries, newest first |
-| `GetDetailAsync(T, "gone@demo")`, `(T, "nope@demo")`, `(U, "review@demo")` | null |
-| `GetLaunchAsync(U, <impl@demo launch of T>)`, `GetCommandAsync(U, <T's command>)` | null |
+| ID | Call | Expected |
+|---|---|---|
+| `L1` | `ListAsync(T, null)` | 6 rows in order `demo`: `drift`, `impl`, `lead`, `review`, `stale`; then `other`: `impl` |
+| `L2` | `ListAsync(T, "demo")` | those 5; `ListAsync(T, "nope")`: empty; `ListAsync(U, null)`: exactly U's one row |
+| `L3` | row `impl@demo` | `Session` `present`, `Activity` `working`, `ActivityDetail` `tool:Bash`, `Resumability` `resumable`, `LaunchOutcome` `ready`, `LaunchDecision` `resume`, `SpecDrift` false, `PendingOp` `deliver`, `LastDeliveryOutcome` null (the newest delivery has none), `ContextUsedPercent` 42, `Model` `opus`, `OpenFindings` 2, `WorstSeverity` `error` |
+| `L4` | row `review@demo` | `Session` `absent`, `Activity` `none`, `LaunchId` null, `SpecDrift` false, `ContextUsedPercent` null, `OpenFindings` 0, `WorstSeverity` null |
+| `L5` | row `lead@demo` | `Kind` `human`, `Harness` null, `Session` null, `SpecDrift` false, `OpenFindings` 0 |
+| `L6` | rows `drift`, `stale` | `SpecDrift` true; false |
+| `D1` | `GetDetailAsync(T, "impl@demo")` | `Launch.Mode` `resume`; 20 transitions, newest first; findings `turn-failed` then `activity-stale`; 2 deliveries, newest first |
+| `D2` | `GetDetailAsync(T, "gone@demo")`, `(T, "nope@demo")`, `(U, "review@demo")` | null |
+| `Q1` | `GetLaunchAsync(U, <impl@demo launch of T>)`, `GetCommandAsync(U, <T's command>)` | null |
 
 ## Tests (`tests/Aiakos.Data.Tests`)
 
 Same fixture pattern as `TenantRepositoryTests` (`IClassFixture<DatabaseFixture>`, migrate in
 `InitializeAsync`). They need Docker running.
 
-- `SeatModelMigrationTests`: the nine tables exist in schema `aiakos` (`rig`, `seat`,
+- T1. `SeatModelMigrationTests`: the nine tables exist in schema `aiakos` (`rig`, `seat`,
   `seat_session`, `seat_launch`, `seat_command`, `seat_event`, `seat_transition`, `seat_state`,
   `seat_finding`); `seat_event` has a unique constraint on exactly `(tenant_id,
   node_instance_id, seat_id, seq)`; a second `seat_event` insert with the same key and
@@ -161,8 +168,10 @@ Same fixture pattern as `TenantRepositoryTests` (`IClassFixture<DatabaseFixture>
   violation (`23505`), while a `resolved` one plus a new `open` one is accepted; a `seat` row
   whose `rig_id` belongs to another tenant is a foreign key violation (`23503`). The existing
   rule 6 guard test must pass unchanged.
-- `SeatQueriesTests`: the table above, one test per row.
-- A test that serialises every returned record of the `impl@demo` detail with
+
+`SeatQueriesTests` holds the expected outputs above, one test per row.
+
+- T2. A test that serialises every returned record of the `impl@demo` detail with
   `System.Text.Json` and asserts the text does not contain the seeded delivery body
   `SENTINEL-BODY` nor the seeded token hash bytes.
 
