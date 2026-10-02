@@ -1,0 +1,2 @@
+rig.env.yaml:7:5: error AIK5005: placement for unknown seat 'imp'
+  hint: agent seats: impl

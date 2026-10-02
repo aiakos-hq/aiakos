@@ -16,6 +16,17 @@ public sealed class ValidTests
     }
 
     [Fact]
+    public void LoadsFullRigWithoutDiagnostics()
+    {
+        var fullRoot = Path.Combine(AppContext.BaseDirectory, "Fixtures", "valid", "full");
+
+        var result = RigLoader.Load(fullRoot, null);
+
+        Assert.Null(result.Rig);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
     public void AcceptsUtf8Bom()
     {
         var root = CopyMinimalRig();
@@ -68,25 +79,6 @@ public sealed class ValidTests
         {
             Directory.Delete(root, recursive: true);
             File.Delete(externalEnv);
-        }
-    }
-
-    [Fact]
-    public void AcceptsDeferredHarnessAndSecretFields()
-    {
-        var root = CopyMinimalRig();
-        try
-        {
-            var agentPath = Path.Combine(root, "agents", "impl", "agent.yaml");
-            File.AppendAllText(agentPath, "harnesses: {claude-code: {permission_mode: bypassPermissions, hooks: {}, statusLine: x, apiKeyHelper: x, env: {A: b}}}\n");
-            var envPath = Path.Combine(root, "rig.env.yaml");
-            File.AppendAllText(envPath, "secrets: {api_key: {value: abc}}\n");
-
-            Assert.Empty(RigLoader.Load(root, null).Diagnostics);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
         }
     }
 

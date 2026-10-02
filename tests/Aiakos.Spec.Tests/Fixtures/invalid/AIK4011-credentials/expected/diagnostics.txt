@@ -1,0 +1,2 @@
+rig.yaml:7:12: error AIK4011: repo url in workspace.repos[0] contains credentials
+  hint: URLs must not contain user info; use a credential helper or SSH

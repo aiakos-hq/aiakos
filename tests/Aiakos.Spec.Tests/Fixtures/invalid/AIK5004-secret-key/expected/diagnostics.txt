@@ -1,0 +1,2 @@
+rig.env.yaml:9:1: error AIK5004: secret 'deploy_key' has no source
+  hint: set secrets.deploy_key.file

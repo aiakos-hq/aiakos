@@ -1,0 +1,2 @@
+rig.env.yaml:4:1: error AIK5003: seat 'impl' has no node
+  hint: set placement.default_node or placement.seats.impl.node

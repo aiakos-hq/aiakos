@@ -1,0 +1,2 @@
+rig.yaml:14:18: error AIK2004: invalid value 'Bad' for field 'repos[1]' in seat 'impl'
+  hint: must match ^[a-z][a-z0-9._-]{0,63}$

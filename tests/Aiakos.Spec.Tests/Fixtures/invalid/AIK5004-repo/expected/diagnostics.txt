@@ -1,0 +1,2 @@
+rig.env.yaml:1:1: error AIK5004: repo 'app' has no path
+  hint: set repos.app.path

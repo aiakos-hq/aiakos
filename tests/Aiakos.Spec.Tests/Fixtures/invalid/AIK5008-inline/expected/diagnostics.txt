@@ -1,0 +1,2 @@
+rig.env.yaml:11:5: error AIK5008: inline secret value in secrets.deploy_key
+  hint: never inline secrets; use file: with a node-local path

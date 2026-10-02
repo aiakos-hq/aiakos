@@ -1,0 +1,2 @@
+rig.env.yaml:9:3: error AIK5006: binding for unknown repo 'lib'
+  hint: defined repos: app

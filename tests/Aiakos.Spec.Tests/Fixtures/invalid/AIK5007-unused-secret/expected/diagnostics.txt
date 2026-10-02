@@ -1,0 +1,1 @@
+rig.env.yaml:10:3: error AIK5007: secret 'old_key' is not required by any seat

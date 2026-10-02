@@ -1,0 +1,2 @@
+rig.yaml:13:13: warning AIK4012: seat 'impl' uses auth: api-key but does not list secret 'anthropic_api_key'
+  hint: add anthropic_api_key to requires.secrets

@@ -1,0 +1,2 @@
+agents/impl/agent.yaml:10:21: error AIK4009: malformed permission rule 'Bash(dotnet test' for field 'allow[1]' in harnesses.claude-code.permissions
+  hint: expected Tool or Tool(specifier)

@@ -1,0 +1,1 @@
+rig.yaml:12:14: error AIK4002: harness 'opencode' in seat 'impl' is not supported in this version (planned for M2)

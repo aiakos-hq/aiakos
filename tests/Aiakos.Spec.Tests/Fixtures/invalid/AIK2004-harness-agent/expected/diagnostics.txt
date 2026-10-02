@@ -1,0 +1,2 @@
+agents/impl/agent.yaml:6:12: error AIK2004: invalid value 'foo' for field 'harness' in defaults
+  hint: allowed values: claude-code

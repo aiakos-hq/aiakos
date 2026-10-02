@@ -286,7 +286,11 @@ internal sealed class SchemaValidator
 
             if (field.Values is not null && !field.Values.Contains(value.Value, StringComparer.Ordinal))
             {
-                if (TryGetReservedScalar(fieldName, parentPath, value.Value!, out var milestone))
+                if (fieldName == "harness" && value.Value is "opencode" or "codex")
+                {
+                    Add("AIK4002", value.Mark, $"harness '{value.Value}'{context} is not supported in this version (planned for M2)");
+                }
+                else if (TryGetReservedScalar(fieldName, parentPath, value.Value!, out var milestone))
                 {
                     Add("AIK2005", value.Mark, $"reserved value '{value.Value}' for field '{fieldName}'{context} is not supported in this version (planned for {milestone})");
                 }
@@ -337,6 +341,12 @@ internal sealed class SchemaValidator
         if (field.NonEmpty && value.Items.Count == 0)
         {
             Add("AIK2004", value.Mark, "field 'workspace.repos' must have at least one item");
+            return;
+        }
+
+        if (fieldName == "repos" && parentPath.StartsWith("seats[", StringComparison.Ordinal) && value.Items.Count == 0)
+        {
+            Add("AIK2004", value.Mark, $"field 'repos'{Context(parentPath, containingMapping, isSeat: true)} must have at least one item");
             return;
         }
 
@@ -529,7 +539,6 @@ internal sealed class SchemaValidator
     private static bool TryGetReservedScalar(string field, string path, string value, out string milestone)
     {
         milestone = "M2";
-        if (field == "harness" && value is "opencode" or "codex" && (path.StartsWith("seats[", StringComparison.Ordinal) || path == "defaults")) return true;
         if (field == "checkout" && value == "shared-readonly") { milestone = "M6"; return true; }
         if (field == "checkout" && value == "task-worktree") { milestone = "M8"; return true; }
         if (field == "harnesses" && value is "opencode" or "codex") return true;

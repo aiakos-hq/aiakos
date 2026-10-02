@@ -1,0 +1,2 @@
+rig.yaml:12:14: error AIK2004: invalid value 'foo' for field 'harness' in seat 'impl'
+  hint: allowed values: claude-code

@@ -1,0 +1,11 @@
+apiVersion: aiakos.dev/v1
+kind: Rig
+name: demo
+workspace:
+  repos:
+    - name: app
+      url: https://github.com/example/app.git
+seats:
+  - id: impl
+    agent_ref: path:../shared/impl
+    checkout: shared

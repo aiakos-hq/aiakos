@@ -1,0 +1,1 @@
+rig.yaml:14:5: error AIK4005: field 'checkout' is not allowed on human seat 'pm'

@@ -1,0 +1,2 @@
+rig.yaml:12:18: error AIK4004: unknown repo 'lib' in seat 'impl'
+  hint: defined repos: app

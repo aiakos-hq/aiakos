@@ -1,0 +1,2 @@
+rig.yaml:8:13: error AIK4003: duplicate repo name 'app'
+  hint: first defined at line 6

@@ -1,0 +1,10 @@
+apiVersion: aiakos.dev/v1
+kind: Agent
+name: impl
+description: Implements issues
+defaults:
+  harness: claude-code
+harnesses:
+  claude-code:
+    permissions:
+      allow: [Edit, "Bash(dotnet test", "mcp__github__get_issue", "Bash(git log:*)"]

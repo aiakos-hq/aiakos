@@ -1,0 +1,2 @@
+agents/impl/agent.yaml:9:22: error AIK4008: permission_mode 'bypassPermissions' is not supported in this version
+  hint: it needs a sandbox (planned for M6)

@@ -1,0 +1,4 @@
+rig.yaml:12:11: error AIK2004: invalid value 'robot' for field 'kind' in seat 'impl'
+  hint: allowed values: agent, human
+rig.yaml:13:14: error AIK2004: invalid value 'foo' for field 'harness' in seat 'impl'
+  hint: allowed values: claude-code

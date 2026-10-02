@@ -1,0 +1,2 @@
+rig.env.yaml:8:11: warning AIK5009: node path '/mnt/c/src/app' for field 'path' in repos.app is on the Windows filesystem
+  hint: /mnt/<drive> paths are slow and file watching is unreliable

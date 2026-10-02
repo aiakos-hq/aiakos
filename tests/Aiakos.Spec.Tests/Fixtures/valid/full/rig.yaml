@@ -1,0 +1,21 @@
+apiVersion: aiakos.dev/v1
+kind: Rig
+name: demo
+workspace:
+  repos:
+    - name: app
+      url: https://github.com/example/app.git
+    - name: lib
+      url: git@github.com:example/lib.git
+seats:
+  - id: impl
+    agent_ref: local:agents/impl
+    checkout: shared
+  - id: review
+    agent_ref: local:agents/impl
+    repos: [app]
+    workdir_repo: app
+    requires: {auth: api-key, secrets: [anthropic_api_key]}
+  - id: pm
+    kind: human
+    description: Product owner

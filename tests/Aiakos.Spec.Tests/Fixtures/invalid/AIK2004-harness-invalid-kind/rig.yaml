@@ -1,0 +1,13 @@
+apiVersion: aiakos.dev/v1
+kind: Rig
+name: demo
+workspace:
+  repos:
+    - name: app
+      url: https://github.com/example/app.git
+seats:
+  - id: impl
+    agent_ref: local:agents/impl
+    checkout: shared
+    kind: robot
+    harness: foo

@@ -1,0 +1,1 @@
+rig.yaml:8:1: error AIK4006: rig has no agent seat
