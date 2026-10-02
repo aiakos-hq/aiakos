@@ -2,7 +2,7 @@
 id: 14-2
 title: "#14 slice 2 — semantic validation of the three YAML files"
 issue: 14
-status: approved
+status: implemented
 route: impl/opencode
 date: 2026-10-01
 ---

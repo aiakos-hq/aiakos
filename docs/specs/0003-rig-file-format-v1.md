@@ -552,7 +552,7 @@ Format (R23), one per line, all collected before failing:
 ```text
 rigs/aiakos-dev/rig.yaml:21:5: error AIK2002: unknown field 'chekout' in seat 'impl'
   hint: did you mean 'checkout'?
-rigs/aiakos-dev/rig.env.yaml:9:11: error AIK5003: seat 'review' has no node
+rigs/aiakos-dev/rig.env.yaml:4:1: error AIK5003: seat 'review' has no node
   hint: set placement.default_node or placement.seats.review.node
 ```
 
@@ -619,7 +619,69 @@ Rules the texts depend on: any explicit tag counts as a custom tag; an empty sca
 `null` are not strings; after AIK1001, AIK1002 or AIK1004 the file reports nothing else; after
 AIK2001 the file's fields are not checked; an entry whose value is an alias or tagged counts as
 present. Diagnostics are ordered by file (rig, agents in order of first reference, env), then
-line, then column.
+line, then column, then code.
+
+#### Message texts, AIK3003–AIK5009
+
+Golden tests compare these texts exactly. `<where>` is as above. For a seat without a valid ID
+it is ` in seats[<i>]`, and the rules whose message names the seat ID (AIK4001, AIK4005, AIK4012
+and the `workdir_repo` case of AIK4004) are not reported for that seat.
+
+| Code | Message | Hint | Position |
+|---|---|---|---|
+| AIK2004 | `invalid value '<v>' for field 'agent_ref'<where>` (not `local:<path>` and not a reserved scheme) · `field 'repos'<where> must have at least one item` (a seat's `repos: []`) · `invalid value '<v>' for field 'harness'<where>` | `must be local:<path>` · — · `allowed values: claude-code` | the value |
+| AIK3003 | `agent_ref scheme '<scheme>:'<where> is not supported in this version (planned for M2)` (`path:`, `git:`) | — | the value |
+| AIK4001 | `seat '<id>' has no harness` | `set harness on the seat or defaults.harness in <agent file>` | start of the seat mapping |
+| AIK4002 | `harness '<v>'<where> is not supported in this version (planned for M2)` (`opencode`, `codex`; on a seat and in `defaults`) | — | the value |
+| AIK4003 | `duplicate seat id '<id>'` · `duplicate repo name '<n>'` | `first defined at line <l>` | the second value |
+| AIK4004 | `unknown repo '<n>'<where>` · `workdir_repo '<n>' is not in the repos of seat '<id>'` | `defined repos: a, b` · `repos of the seat: a, b` | the item · the value |
+| AIK4005 | `field '<f>' is not allowed on human seat '<id>'` (one per field other than `id`, `kind`, `description`) | — | the key |
+| AIK4006 | `rig has no agent seat` | — | the `seats` key |
+| AIK4007 | `setting '<key>' in harnesses.claude-code is owned by Aiakos` (`hooks`, `statusLine`, `apiKeyHelper`, `env`) | — | the key |
+| AIK4008 | `permission_mode 'bypassPermissions' is not supported in this version` | `it needs a sandbox (planned for M6)` | the value |
+| AIK4009 | `malformed permission rule '<rule>' for field '<list>[<i>]' in harnesses.claude-code.permissions` | `expected Tool or Tool(specifier)` | the item |
+| AIK4010 | `seat id '<id>' is reserved` | `reserved ids: all, aiakos, system, orchestrator, node, human` | the value |
+| AIK4011 | `repo url<where> contains credentials` · `repo url<where> has an unsupported form` | `URLs must not contain user info; use a credential helper or SSH` · `use https://host/path or git@host:org/repo.git` | the value |
+| AIK4012 | `seat '<id>' uses auth: api-key but does not list secret 'anthropic_api_key'` | `add anthropic_api_key to requires.secrets` | the `auth` value |
+| AIK4020 | `credential-like value (<kind>)`; kinds: `Anthropic API key`, `GitHub token`, `Slack token`, `private key`, `URL with user info` | `never put secrets in rig files; name the secret and bind it in rig.env.yaml` | the value |
+| AIK5001 | `rig '<v>' does not match rig name '<name>'` | — | the value |
+| AIK5002 | `invalid node path '<p>' for field '<f>'<where>` | first that applies: `Windows paths are not valid; node paths are POSIX paths on the node` · `'$' expansion is not supported` · `must be absolute or start with ~/` | the value |
+| AIK5003 | `seat '<id>' has no node` | `set placement.default_node or placement.seats.<id>.node` | the `placement` key, or 1:1 when there is none |
+| AIK5004 | `repo '<n>' has no path` · `secret '<n>' has no source` | `set repos.<n>.path` · `set secrets.<n>.file` | the `<n>` key when the entry exists, else the `repos` or `secrets` key, else 1:1 |
+| AIK5005 | `placement for unknown seat '<id>'` · `placement for human seat '<id>'` | `agent seats: a, b` · `human seats take no placement` | the key |
+| AIK5006 | `binding for unknown repo '<n>'` | `defined repos: a, b` | the key |
+| AIK5007 | `secret '<n>' is not required by any seat` | — | the key |
+| AIK5008 | `inline secret value in secrets.<id>` | `never inline secrets; use file: with a node-local path` | the `value` key |
+| AIK5009 | `node path '<p>' for field '<f>'<where> is on the Windows filesystem` | `/mnt/<drive> paths are slow and file watching is unreliable` | the value |
+
+Rules the texts depend on:
+
+- **What a rule reads.** A rule reads only values that passed the checks above. A seat whose
+  `kind` is invalid counts as an agent seat for AIK4006 only and is skipped by every other seat
+  rule. Lists in hints are in file order, each name once.
+- **Which files.** Rules inside one file run when that file parsed and has no AIK2001. Rules
+  that compare files (AIK5001, AIK5003–AIK5007, and AIK4001 and AIK4012, which need the agent
+  file) run only when every file they read is in that state. A cross-file rule is also skipped
+  when an earlier check reported anything inside a container it reads: the env `repos` mapping or
+  a seat's `repos` list for AIK5004 (repos) and AIK5006; the env `secrets` mapping or a seat's
+  `requires` for AIK5004 (secrets) and AIK5007; `placement` for AIK5003 and AIK5005.
+- **Agent file of a seat.** A seat's agent is the directory its `agent_ref` resolves to, so
+  `local:agents/impl` and `local:./agents/impl/` name the same agent, loaded once.
+- **Required secrets** are every name in an agent seat's `requires.secrets`, plus
+  `anthropic_api_key` for a seat with `auth: api-key` and harness `claude-code`, listed or not.
+- **Node paths.** AIK5009 applies to a path that passed AIK5002 and matches `^/mnt/[a-z](/|$)`.
+- **Repo URLs.** Valid forms are `https://<host>/<path>` without user info and
+  `git@<host>:<path>`. A repo URL never gets AIK4020.
+- **Credential-like values (R22).** Every scalar value in the three files, also under `x-`
+  fields, is matched against: `(?<![A-Za-z0-9])sk-ant-[A-Za-z0-9_-]{6,}`;
+  `(?<![A-Za-z0-9])(ghp_|github_pat_)[A-Za-z0-9_]{6,}`; `(?<![A-Za-z0-9])xox[bp]-[A-Za-z0-9-]{6,}`;
+  `-----BEGIN [A-Z ]*PRIVATE KEY-----`; `[A-Za-z][A-Za-z0-9+.-]*://[^/\s@]+@`. The scan also reads
+  values that failed an earlier check.
+- **No secret in output.** Every other diagnostic at the position of an AIK4020 is removed, and
+  so is every other diagnostic whose message or hint contains a match. When the scan did not
+  report that text itself (a mapping key, or a value in a file with AIK2001), the removed
+  diagnostic is replaced by an AIK4020 at its position, so a file never ends up without a
+  diagnostic.
 
 ### Reserved fields and values
 
@@ -628,8 +690,8 @@ without a format break:
 
 - `rig.yaml`: `pods`, `edges`, `imports`, `profiles` (M2), `channels` (M4), `egress` (M6);
   seat `profile`, `uses`, `startup`, `pod` (M2); checkout `shared-readonly` (M6),
-  `task-worktree` (M8); harness `opencode`, `codex` (M2); `agent_ref` schemes `path:`, `git:`
-  (AIK3003, M2).
+  `task-worktree` (M8). Recognised with their own codes: harness `opencode`, `codex` (AIK4002,
+  M2) and `agent_ref` schemes `path:`, `git:` (AIK3003, M2).
 - `agent.yaml`: `imports`, `resources`, `profiles`, `startup`, `subagents` (M2);
   `harnesses.opencode`, `harnesses.codex` (M2). (`hooks`, `statusLine`, `apiKeyHelper` and `env`
   are not reserved but Aiakos-owned: AIK4007.)
@@ -983,3 +1045,21 @@ ADRs recording the cross-cutting decisions of this spec:
     reported as reserved. AIK5008 keeps `value:`.
   - **Implemented in slices.** Slice 1 covers R1–R5 and R23. `Load` returns no `ResolvedRig`
     until slice 2; AIK3xxx–AIK5xxx, hashing and projection follow in slices 2–4.
+- **2026-10-02 — slice 2 of #14 (semantic validation):**
+  - **Message texts for AIK3003–AIK5009** are now part of the spec (Diagnostics), with the rules
+    they depend on, for the same reason as in slice 1.
+  - **`opencode` and `codex` are AIK4002, not AIK2005.** The table had AIK4002 for a recognised
+    harness while the reserved list sent the same values to AIK2005. Any other harness value
+    stays AIK2004.
+  - **A seat's `repos: []` is AIK2004.** An empty list would mean "no repos", which a seat
+    cannot have.
+  - **The example for AIK5003** showed position 9:11; the position is the `placement` key.
+  - **Diagnostics are ordered by code** after file, line and column.
+  - **Not in the brief, decided during implementation:** a seat without a valid ID is named
+    `seats[<i>]` and gets no diagnostic whose message needs the ID; AIK4001 is for agent seats
+    only and not for an agent file that is not a mapping; hints list each name once; a
+    credential-like mapping key, or one in a file with AIK2001, is reported as AIK4020 where the
+    removed diagnostic stood.
+  - **Still no `ResolvedRig`.** `Load` returns none until slice 3 (file references and the
+    resolved rig); the sentence above said slice 2. AIK3001, AIK3002, AIK3004 and AIK3005 follow
+    there.
