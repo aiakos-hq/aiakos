@@ -14,8 +14,8 @@ date: 2026-10-04
 **Start only after #10 slice 1 is merged** (the proto enums in `Aiakos.Contracts.Node.V1`).
 
 This brief is self-contained. **Do not read `docs/specs/` or `docs/adr/`**, with one exception:
-`docs/specs/0006-seat-actor.md` lines 379–638 (axis definitions and event pipeline) and
-707–726 (findings). The transition, launch-decision and delivery tables are copied below as
+`docs/specs/0006-seat-actor.md` lines 379–644 (axis definitions and event pipeline) and
+713–732 (findings). The transition, launch-decision and delivery tables are copied below as
 items; their rules and tests are self-contained. This brief says how to read the spec lines
 where they are silent or disagree. Where the brief and those lines disagree, **the brief wins**;
 say so in the commit body. Where both are silent, do the thing that changes no axis and opens no

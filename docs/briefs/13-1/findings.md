@@ -397,10 +397,11 @@ The spec amendment matches the brief: pipeline step 1 is B6c step 1, step 4 is t
 exemption, and the activity note with the "Changes after acceptance" entry is B4 with B3's
 overlay reasons. Two things it leaves behind:
 
-- [ ] F35 (judgment-gap) The amendment adds six lines inside the range the brief points at, so
+- [x] F35 (judgment-gap) The amendment adds six lines inside the range the brief points at, so
   brief lines 17–18 ("lines 379–638 … and 707–726 (findings)") are stale: the pipeline now ends
   at line 644 and the findings table is lines 713–732. Fix: `author` changes the numbers to
-  379–644 and 713–732.
+  379–644 and 713–732. Done: both live brief citations now use those ranges, verified
+  against the amended spec; stories and items contain no spec line-range citations.
 - [x] F36 (context-gap) B7 and B8 say a late U8 never applies A1 and call that a resolution of
   the spec's own tension; spec lines 575–577 still say "activity follows A1" and "rotation is
   applied even when the event is late", and the amendment does not record the choice. Fix:
