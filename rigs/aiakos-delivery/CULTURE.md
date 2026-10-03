@@ -31,7 +31,8 @@ the seats work together.
 
 ## Git and GitHub
 
-- One worktree per story, created by `tools/story.sh start`. Never build, test or commit in the
+- One worktree per story (`tools/story.sh start`) and per slice analysis
+  (`tools/story.sh analysis`). Never create a worktree by hand. Never build, test or commit in the
   main checkout.
 - Do not read `artifacts/trials/` unless your role says so. It holds the acceptance tests.
 - `lead` creates issues and pull requests; `tools/story.sh pr` pushes the story branch. Nobody
