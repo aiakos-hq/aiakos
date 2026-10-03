@@ -475,6 +475,8 @@ transition of the last-known value.
 
 Only evaluated while the last-known session is `starting`, `present` or `unknown`; otherwise it is
 `none` (R10). Late events (R13) and stale-launch events (R12) are never inputs here.
+(Amended 2026-10-04: while the session is `starting` or `unknown`, rows A2–A12 change nothing;
+see Changes after acceptance.)
 
 ```mermaid
 stateDiagram-v2
@@ -613,16 +615,20 @@ A delivery outcome never sets activity; the `PROMPT_SUBMITTED` event does (R32).
 
 For each `SeatEvents` batch, in order:
 
-1. **Epoch.** If `node_instance_id` differs from `seat_state.node_instance_id` and the seat
-   expected events from the previous instance, apply R18 first and set `next_seq = 1` for the new
-   instance.
+1. **Epoch.** If `node_instance_id` differs from `seat_state.node_instance_id`: when the state
+   has none, adopt it; otherwise apply R18 first. Either way set `next_seq = 1` for the new
+   instance. (Amended 2026-10-04: the condition "and the seat expected events from the previous
+   instance" is dropped; see Changes after acceptance.)
 2. **Dedupe.** `seq < next_seq` → duplicate (R14). Counted as committed.
 3. **Gap.** `seq > next_seq` → sequence gap: apply A16/U6, open `observation-gap`, set
    `next_seq = seq`.
-4. **Attribute.** `launch_id` ≠ current launch → disposition `stale-launch` (R12). Orphan
-   `SESSION_ENDED` → `orphan` (R15).
+4. **Attribute.** `launch_id` ≠ current launch → disposition `stale-launch` (R12), except an
+   `ObservationGapBody`, which applies R18 whatever its launch (observation loss belongs to the
+   node, not to a launch). Orphan `SESSION_ENDED` → `orphan` (R15).
 5. **Order.** Harness event with `source_seq > 0` and `source_seq <= last_source_seq` → `late`
-   (R13); otherwise `applied` and `last_source_seq = source_seq`.
+   (R13); otherwise `applied` and `last_source_seq = source_seq`. `TELEMETRY`, `OTHER` and
+   unspecified kinds are exempt: never late, and they never move `last_source_seq`, so a
+   statusLine tick that overtakes a `Stop` hook cannot make the `Stop` late.
 6. **Apply** the tables (session, then activity, then resumability) with the pure state machine.
 7. **Commit** events, transitions, findings, state (`next_seq = last seq + 1`) in one
    transaction; then send `EventsCommitted` and any effects.
@@ -1323,6 +1329,27 @@ Stable IDs; a central register links to them.
 | **RK11** | **Vocabulary drift** between spec 0002's proto enums and the strings stored here. | A unit test maps every proto enum value (`HarnessEventKind`, outcomes, reasons) to its stored string exhaustively and fails on an unmapped value. | #13 |
 
 ## Changes after acceptance
+
+- **2026-10-04 — brief 13-1 amendment** (findings F22–F25 of `docs/briefs/13-1/findings.md`;
+  the pure state machine and its tests follow the brief, and this section records where the
+  brief departs from the text above):
+  - **Pipeline step 1 (epoch).** R18 is applied for every differing previously-known
+    `node_instance_id`, not only when the seat expected events from the previous instance. A
+    state with no instance adopts the new one without R18.
+  - **Pipeline step 4 (attribute).** An `ObservationGapBody` applies R18 whatever its launch;
+    every other body of another launch is `stale-launch`.
+  - **Pipeline step 5 (order).** `TELEMETRY`, `OTHER` and unspecified harness kinds are exempt
+    from the stale guard. *Rationale:* statusLine ticks are unordered against hooks (RK4).
+  - **Rotation and a late event (U8, R13).** A late `SESSION_STARTED` with `source: clear` still
+    rotates the native session ID, updates resumability and emits the adoption (the spec's
+    "applied even when the event is late"), but it never applies A1 and never changes activity:
+    a late event carries no evidence about the present moment. The sentence "activity follows A1
+    (`idle`)" holds for an event that is not late.
+  - **Session and activity (R10).** While the known session is `starting` or `unknown`, activity
+    rows A2–A12 change nothing; only readiness leaves that state. This replaces "evaluated while
+    the last-known session is `starting`, `present` or `unknown`" for those two states. The
+    R10 reasons (`not-ready`, `session-unknown`) apply to known values only; reported values
+    under an overlay keep the overlay's reason.
 
 - **2026-10-01 — wave 3 amendment** (spec 0007 D15, accepted in review of PR #36):
   - **D12 answered.** Spec 0007 adds the append-only `rig_revision` table and
