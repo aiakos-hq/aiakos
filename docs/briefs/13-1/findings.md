@@ -324,35 +324,59 @@ F19 → F31). The 39 axis rows, LD1–LD5 and DV1–DV5 are identical to the spe
 script). The split is table 2; needs are complete for order, and over-declared in places
 (B8 → B17a, B19 → B20, A8 and A9 → B10), which is harmless.
 
-- [ ] F27 (judgment-gap) Brief line 322: the second sentence of B19 (`UnknownProlongedFired`
+- [x] F27 (judgment-gap) Brief line 322: the second sentence of B19 (`UnknownProlongedFired`
   …) starts in column 0, so `story.sh show` prints it in every story from 3 on (seen in
   `show 13-1 3`, `5` and `9`). Fix: indent the line.
-- [ ] F28 (context-gap) An input whose rule belongs to a later story has no stated result:
+- [x] F28 (context-gap) An input whose rule belongs to a later story has no stated result:
   story 3 creates `Apply` and receives `UpRequested`, `HarnessBody`, `NodeAttached` and the
   timers with no rule for them, and an exception on any input blocks a story. Fix: say in B2
   what `Apply` returns for an input or body whose rule is not owned yet.
-- [ ] F29 (judgment-gap) B6a (story 3) holds the sentence that an `ObservationGapBody` applies
+- [x] F29 (judgment-gap) B6a (story 3) holds the sentence that an `ObservationGapBody` applies
   B11, and B11 is in story 8; story 3 cannot build it and B6a cannot need it. Fix: move the
   sentence, with its deviation note, to B11 or B6c.
-- [ ] F30 (context-gap) B5 says S5 into `present` with `ReadinessSeen` true preserves known
+- [x] F30 (context-gap) B5 says S5 into `present` with `ReadinessSeen` true preserves known
   activity; from `unknown` that is `unknown/session-unknown`, and from `starting` after a U8
   (which sets `ReadinessSeen` and leaves the session) it is `unknown/not-ready`, both under a
   `present` session. Fix: name the value and reason for that case.
-- [ ] F31 (context-gap) B2 gives `Applied` for `—` and `Evidence` for `n/a`, and no answer when
+- [x] F31 (context-gap) B2 gives `Applied` for `—` and `Evidence` for `n/a`, and no answer when
   one axis has `n/a` and another `—` (S5 in `absent` with U3 in `resumable`), or when no row is
   selected (a current-launch `PROMPT_SUBMITTED` while known session is `exited`). Fix: one
   sentence for each.
-- [ ] F32 (context-gap) Three clauses have no output that asserts them, because the row they
+- [x] F32 (context-gap) Three clauses have no output that asserts them, because the row they
   act on is tested in an earlier story that ignores extra resolves: B15 `orphan-harness` on
   S3, B20 `delivery-unconfirmed` on A2, B6b `activity-stale` and `LastEventAt`. Fix: name them
   in an output of the owning story (the S2 row test with a following `StopResult`, the prompt
   step of GS4, the A14 row test).
-- [ ] F33 (context-gap) B21 gives `COMPLETED` in `StopNotCompletedBody` and not in
+- [x] F33 (context-gap) B21 gives `COMPLETED` in `StopNotCompletedBody` and not in
   `StartNotCompletedBody`. Fix: add it.
-- [ ] F34 (context-gap) "Definition of done" gives all eleven stories the same commit subject
+- [x] F34 (context-gap) "Definition of done" gives all eleven stories the same commit subject
   and the same sentence "Risks: checks 0006-RK4 …", so a commit claims checks its story does
   not make (RK4 is story 9 only). Fix: say that a story's commit names the risks of its own
   items, and which story has which.
 
 Not checked in the second read: `show` for stories other than 3, 5 and 9; the over-declared
 needs one by one; anything built or run except `tools/story.sh check 13-1` and `show`.
+
+## Author repairs after the second read
+
+- F27 (judgment-gap): UnknownProlongedFired is indented inside B19; extraction checks
+  exclude its condition from stories 3/5/9 and retain it in story 11.
+- F28 (context-gap): B2 gives exact unchanged fallback for unhandled local inputs and an
+  Evidence fallback for unhandled event bodies after already-implemented pipeline work.
+  No missing handler throws; later stories introduce their tests with their behavior.
+- F29 (judgment-gap): ObservationGapBody's B11 call and launch-attribution deviation move
+  from B6a into B11, so story 3 does not need the story 8 rule.
+- F30 (context-gap): S5 entering present from starting/unknown with readiness true has
+  activity unknown/sources-disagree; S5 tests both flags/source sessions. Cell findings
+  stay unchanged; activity is never preserved with a stale session/not-ready reason.
+- F31 (context-gap): B2 makes mixed n/a and dash Applied, and no selected axis row Evidence
+  unless an explicit disposition rule says otherwise.
+- F32 (context-gap): S2 owns the down/StopResult orphan-harness resolve test; GS4 explicitly
+  asserts delivery-unconfirmed resolved on prompt; A14 asserts LastEventAt and activity-stale
+  resolved. S2 needs B6a for the following event. The split/caps remain unchanged.
+- F33 (context-gap): StartNotCompletedBody COMPLETED is unchanged/Evidence, tested in S10.
+- F34 (context-gap): subjects use each story's title and the risk table maps only the owned
+  proofs (S1 vocabulary, S5 parallel tools, S9 ordering property, S11 Escape denial).
+
+These boxes record author repair, pending review. F26 remains maintainer approval;
+the brief is draft. Lead's spec amendment and F25 closure commits are preserved.

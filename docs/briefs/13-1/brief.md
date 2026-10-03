@@ -182,6 +182,10 @@ B2. **Tables and row tests.** Implement the output items below with their owning
    `—` means no axis transition and no row-specific finding; an otherwise applicable
    current-launch event is `Applied`. `n/a` means no axis transition and no row-specific
    finding, recorded as `Evidence` if no selected row on another axis is applicable.
+   If one selected axis row has `n/a` and another has `—`, the dash row is applicable:
+   disposition is `Applied`. A current-launch event with no selected axis row is `Evidence`
+   (for example, PROMPT_SUBMITTED while known session is exited), unless an explicit rule
+   supplies another disposition, such as B4's ignored starting/unknown activity events.
    Pipeline dispositions (`Duplicate`, `StaleLaunch`, `Orphan`, `Late`) take precedence.
    Command/timer/attachment inputs have null disposition, since they are not events.
    Open only findings named by the selected cells or a rule. Resolve requests are emitted
@@ -203,6 +207,14 @@ B2. **Tables and row tests.** Implement the output items below with their owning
    annotations for persisted usage, exit-code merging, node_instance_id, seat_session rows,
    and timer reset describe the later actor's bookkeeping, not fields added to these pure
    functions. Assert the specified axes, findings and existing effects here.
+   Before an input's owning story lands, an otherwise unhandled non-event input returns
+   `SeatStep(state, null, null, [], [], [])`, unchanged, rather than throwing or guessing
+   future behavior. An otherwise unhandled EventReceived body runs only the pipeline
+   rules already implemented, then returns Evidence unless a pipeline rule classified it
+   otherwise; its missing body/table handler changes no axis and adds no finding/effect.
+   Existing generic pipeline work (such as LastEventAt or sequencing) is retained.
+   Tests for a later handler are introduced by its owning story; this fallback is not a
+   permanent substitute for that handler.
 B3. **Known and reported.** Tables act on `Known*`. Without an overlay, reported = known and each
    change is one transition with `Reported = true`. With an overlay, reported session and
    activity are `unknown` with the overlay's reason; known changes are transitions with
@@ -217,15 +229,14 @@ B4. **R10 always holds** for known and for reported values: activity is `none` e
    present or unknown".
 B5. **Entering `present`.** By S11: activity `idle` (A1). By S5 without
    `ReadinessSeen`, from either `starting` or `unknown`: `unknown/sources-disagree`.
-   When S5 enters `present` with `ReadinessSeen` true, preserve known activity and its
-   detail/reason. S15 into `present`: `unknown/observation-gap`. S15 into `starting`
+   When S5 enters `present` with `ReadinessSeen` true from `starting` or `unknown`,
+   known activity is also `unknown/sources-disagree`, not `unknown/not-ready` or
+   `unknown/session-unknown`; the flag does not establish an activity value. Test both
+   flags and both source sessions within S5. Existing cell-specific finding rules remain. S15 into `present`: `unknown/observation-gap`. S15 into `starting`
    clears `ReadinessSeen`, so a subsequent S5 follows the no-readiness branch.
-B6a. **Event attribution and table application.** For `EventReceived`, after B6c's
-   sequencing and before table application, an `ObservationGapBody` applies B11 whatever
-   its launch, unless this input has already applied B11 through B6c. This is an explicit
-   deviation from spec pipeline step 4, which marks all
-   foreign-launch bodies stale: observation loss belongs to the node, not a launch.
-   Any other body whose `LaunchId` is not the current launch's (or there is none) is
+B6a. **Event attribution and table application.** For `EventReceived`, after the
+   implemented sequencing/body-specific handling and before table application,
+   a body whose `LaunchId` is not the current launch's (or there is none) is
    `StaleLaunch`, with no axis change; a `HarnessBody` recognized by the profile as readiness,
    or of kind `PROMPT_SUBMITTED`, `TOOL_STARTED`, `TOOL_FINISHED` or `INPUT_REQUESTED`, also
    opens `orphan-harness`. For a current-launch event, after B6b's orphan check and B7's
@@ -277,7 +288,11 @@ B10. **Pending input.** A6 stores the attribute `request_id`, or `*` when absent
 B11. **Lost observation** (sequence gap, `ObservationGapBody`, new epoch, new node instance): open
     `observation-gap`; U6; when known session is `present`, activity → `unknown/observation-gap`
     (A16); when a launch exists and known session is `starting`, `present` or `unknown`, emit
-    `RequestCapture`. Never synthesize an event.
+    `RequestCapture`. Never synthesize an event. `ObservationGapBody` is handled before
+    launch attribution and applies this rule whatever its launch, unless this input has
+    already applied it through B6c. This is the explicit deviation from spec pipeline
+    step 4: observation loss belongs to the node, not a launch. This body-specific exception
+    is introduced here, not in the earlier B6a story.
 B12. **`NodeAttached`.** Resolve `node-not-connected`. *Same instance, or the state has none:*
     adopt the ID; with an overlay, set `CatchUpSeq = Inventory?.LastSeq ?? 0` and clear the
     overlay as soon as `NextSeq > CatchUpSeq` (now, or after a later event); the inventory is
@@ -319,7 +334,7 @@ B17b. **Resumability of launch results.** U3 needs `Launch.Mode == RESUME`. U5 n
 B18. **`CommandDispatchFailed`**: `Start` → S9; `Stop` → S4; others change nothing.
 B19. **Timers are validated, not trusted.** `QuietTimeoutFired` acts (A15) only when known session
     is `present`, known activity is `working` and `now - LastEventAt >= profile.QuietTimeout`.
-`UnknownProlongedFired` opens `state-unknown-prolonged` only when reported session
+    `UnknownProlongedFired` opens `state-unknown-prolonged` only when reported session
     is `unknown` and `now - SessionSince >= 5 min`; the finding resolves when reported session
     leaves `unknown`. Otherwise each returns the state unchanged.
 B19w. **Launch watchdog.** `LaunchWatchdogFired` acts only when known session is
@@ -330,7 +345,9 @@ B20. **Other resolutions.** `TURN_ENDED` resolves `turn-failed`; `PROMPT_SUBMITT
 B21. **Unrecognized session result enums.** `LaunchOutcome` unspecified or undefined
     uses S7; `StopOutcome` unspecified or undefined uses S4. `CommandStatus` unspecified
     or undefined in `StartNotCompletedBody` uses S10 with reason `launch-unconfirmed` and
-    opens `launch-unconfirmed`; recognized `TIMED_OUT` does the same. In
+    opens `launch-unconfirmed`; recognized `TIMED_OUT` does the same. `COMPLETED` in
+    `StartNotCompletedBody` changes no axis, finding or effect and is `Evidence`.
+    Test it as an additional S10 variant. In
     `StopNotCompletedBody`, `REJECTED`, `FAILED`, `TIMED_OUT` and unspecified/undefined
     statuses use S4; `COMPLETED` has no row-specific change and is `Evidence`.
     Test each of these enum variants within S4/S7/S10, including the S10 finding for both
@@ -356,7 +373,7 @@ are part of the test for that row, not new requirements introduced by a test.
 | ID | Input (current launch) | `absent` | `starting` | `present` | `exited` | `unknown` |
 |---|---|---|---|---|---|---|
 | `S1` | `up` accepted | `starting` | — (no-op, returns launch) | — (no-op) | `starting` | rejected `SEAT_STATE_UNKNOWN` |
-| `S2` | `down` accepted (StopSeat dispatched) | — (desired only) | — | — | — (StopSeat sent to clean up the pane) | — |
+| `S2` | `down` accepted (StopSeat dispatched); additionally test from `present` with a launch, then current-launch `StopResult STOPPED`: session `absent` and resolve `orphan-harness` | — (desired only) | — | — | — (StopSeat sent to clean up the pane) | — |
 | `S3` | `StopResult` STOPPED / KILLED / NOT_RUNNING | n/a | `absent` | `absent` | `absent` | `absent` |
 | `S4` | `StopSeat` FAILED / TIMED_OUT | n/a | `unknown`/stop-failed | `unknown`/stop-failed | — | — |
 | `S5` | `LaunchResult READY` | n/a | `present` (no readiness event was seen: +F(sources-disagree), activity `unknown`) | — | `unknown`/sources-disagree +F(sources-disagree) | `present` |
@@ -392,7 +409,7 @@ with the row that consumes them. A13 is omitted: its complete outputs are S12/S1
 | `A10` | `TURN_ENDED` | — | `idle` | `idle` (dialog closed, e.g. denial) | `idle` |
 | `A11` | `TURN_FAILED` | — +F(turn-failed) | `idle` +F(turn-failed) | `idle` +F(turn-failed) | `idle` +F(turn-failed) |
 | `A12` | `RETRYING` | `working` detail `retrying` | detail `retrying` | — | `working` detail `retrying` |
-| `A14` | `TELEMETRY`, `OTHER` | — (usage updated; quiet timer reset) | — | — | — |
+| `A14` | `TELEMETRY`, `OTHER`; each current-launch nonduplicate variant sets `LastEventAt = now` and resolves `activity-stale` | — (usage updated; quiet timer reset) | — | — | — |
 | `A15` | `QuietTimeout` (R19) | n/a | `unknown`/quiet-timeout +F(activity-stale) | n/a | n/a |
 | `A16` | `ObservationGap`, sequence gap, new node instance (R18) | `unknown`/observation-gap +F(observation-gap) | same | same | same |
 
@@ -481,8 +498,8 @@ by the script; do not assert unrelated future resolve requests (B2).
 - GS3. *Failed resume:* as 2, then `ProcessExited(exit 1)` and `LaunchResult FAILED
   RESUME_SESSION_NOT_FOUND` → `exited`, `lost`, `resume-lost`, no `StartLaunch`; `up` →
   `RESUME_LOST`; `up` with `Fresh` → `FRESH`, `fresh-explicit`, new ID, previous abandoned.
-- GS4. *Turn failure:* prompt, then `TURN_FAILED` → idle and `turn-failed`; the next `TURN_ENDED`
-  resolves it.
+- GS4. *Turn failure:* prompt → working and resolve `delivery-unconfirmed`; then
+  `TURN_FAILED` → idle and `turn-failed`; the next `TURN_ENDED` resolves it.
 - GS5. *Exit without `SESSION_ENDED`:* working, then `ProcessExited` → `exited` / `none`.
 - GS6. *Rotation:* idle and `resumable`; `OTHER` (`reason=clear`); `SESSION_STARTED` (`source=clear`,
   new ID, `previous_session_id`) → `present`, idle, `fresh-only`, `AdoptRotatedSession`, no
@@ -520,12 +537,18 @@ by the script; do not assert unrelated future resolve requests (B2).
   Aiakos.Orchestrator.Tests.Seats`: all green. The project's other tests need Docker; do not
   change them or their fixture.
 - All files LF, UTF-8 without BOM, final newline.
-- One commit on the current branch, subject
-  `feat(orchestrator): seat state machine and harness state profile (#13)`. The body lists every
-  place where you followed the brief against the spec lines, and has the sentence "Risks: checks
-  0006-RK4 (permutation property and the pinned limitation), 0006-RK11 (vocabulary test),
-  0005-RK3 and 0006-RK10 (Escape denial script), 0005-RK9 and 0006-RK2 (parallel tools script)."
-  Do not push, do not open a PR.
+- One commit on the current branch, subject `feat(orchestrator): <story title> (#13)`, using
+  the exact title of that story in `stories.md`. The body lists every place where the story
+  followed this brief against the spec lines. Include only the risk sentence for that story
+  from this table; another story's checks are not claimed. Do not push, do not open a PR.
+
+| Story | Exact commit-body risk sentence |
+|---|---|
+| S1 | Risks: checks 0006-RK11 (vocabulary test). |
+| S2, S3, S4, S6, S7, S8, S10 | Risks: this story checks none of the slice's listed open risks. |
+| S5 | Risks: checks 0005-RK9 and 0006-RK2 (parallel tools script). |
+| S9 | Risks: checks 0006-RK4 (permutation property and the pinned limitation). |
+| S11 | Risks: checks 0005-RK3 and 0006-RK10 (Escape denial script). |
 
 ## Out of scope (do not implement, do not stub)
 

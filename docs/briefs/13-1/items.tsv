@@ -27,7 +27,7 @@ B20	rule	once	B6a,B6b,B10
 B21	rule	once	B6a
 B22	rule	once	V1
 S1	output	once	B14
-S2	output	once	B15
+S2	output	once	B15,B6a
 S3	output	once	B6a,B17a
 S4	output	once	B6a,B18,B21
 S5	output	once	B6a,B5,B17a
