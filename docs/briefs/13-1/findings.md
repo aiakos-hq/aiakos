@@ -13,46 +13,46 @@ In this file "story 1" to "story 6" are the stories of `stories.md` (`S1`–`S6`
 
 Closure and order:
 
-- [ ] F1 (context-gap) Brief is not closed: B2a, B2b and B2c point at the 40 rows of spec lines
+- [x] F1 (context-gap) Brief is not closed: B2a, B2b and B2c point at the 40 rows of spec lines
   452–469, 500–517 and 555–564, and no row is an item. Fix: copy the three tables into the brief
   with one row per line marked `` | `S5` | … `` and list each row in `items.tsv` as type
   `output` with the needs of table 1 below.
-- [ ] F2 (context-gap) The launch mode decision table (spec 587–593, 5 rows) and the delivery
+- [x] F2 (context-gap) The launch mode decision table (spec 587–593, 5 rows) and the delivery
   table (spec 602–608, 5 rows) are in the same position: B2 says "as written" and their values
   are not in the brief. Fix: copy them in as output items too, needing B14 and B22.
-- [ ] F3 (judgment-gap) No row can be tested completely in the story it sits in (table 1): the
+- [x] F3 (judgment-gap) No row can be tested completely in the story it sits in (table 1): the
   rule that hands an event to a table, B6, is in story 5, and stories 1, 2 and 3 do not depend
   on it and `story.sh show 13-1 1` does not show it. Of 40 rows, 2 (S4, S9) have one variant
   that story 1 can test (`CommandDispatchFailed`, B18), 3 (S7, S8, U4) pass only if the
   implementer guesses the dispatch, and 35 need a rule of story 5 or 6. Fix: the re-split of
   table 2.
-- [ ] F4 (judgment-gap) The same holds for the scripts of story 2: GS4, GS5, GS8 and GS9 are
+- [x] F4 (judgment-gap) The same holds for the scripts of story 2: GS4, GS5, GS8 and GS9 are
   event sequences and need B6 (and B8 for a readiness step), which story 2 does not depend on.
   Fix: table 2.
-- [ ] F5 (judgment-gap) Moving every row to the first story that has its rules, without
+- [x] F5 (judgment-gap) Moving every row to the first story that has its rules, without
   splitting a rule, puts 25 rows in story 5 and 14 in story 6, against `max_outputs: 9`.
   Fix: split B6, B17 and one sentence of B19 as listed under table 2.
-- [ ] F6 (judgment-gap) T1, T2 and T3 each cover rows of several stories, so no story can own
+- [x] F6 (judgment-gap) T1, T2 and T3 each cover rows of several stories, so no story can own
   them. Fix: remove T1–T3 as items and make "one test per row, named by row id, every column"
   part of what a row item means; the test class is created by the first story that has a row
   of that table.
-- [ ] F7 (context-gap) The `needs` column under-declares 26 items (table 3), which is why the
+- [x] F7 (context-gap) The `needs` column under-declares 26 items (table 3), which is why the
   check passes on a split that cannot be built in order. Fix: correct the lines marked
   "breaks order" in table 3.
-- [ ] F8 (context-gap) The stored vocabulary has no rule: the strings are comments in the
+- [x] F8 (context-gap) The stored vocabulary has no rule: the strings are comments in the
   surface block and the `*_UNSPECIFIED` sentence (brief lines 158–160) has no ID, so T10 needs
   `-`. Fix: give that sentence a rule ID and let T10 need it.
-- [ ] F9 (judgment-gap) Story 4 (delivery, `depends: -`) uses `FindingChange` and the finding
+- [x] F9 (judgment-gap) Story 4 (delivery, `depends: -`) uses `FindingChange` and the finding
   kind constants of `SeatVocabulary`, which story 1 creates; built in parallel, both define the
   same types. Fix: one first story creates the surface types and the delivery story depends on
   it (P1, P2).
-- [ ] F10 (judgment-gap) B21's clause "`CommandStatus` … in `DeliveryNotCompleted` → `Unknown`"
+- [x] F10 (judgment-gap) B21's clause "`CommandStatus` … in `DeliveryNotCompleted` → `Unknown`"
   is behaviour of `DeliveryStateMachine` (story 4) owned by story 1, and its clause
   "`SessionLifecycle` → `UNKNOWN`" repeats B12 (story 5). Fix: move the first into B22 and
   delete the second.
-- [ ] F11 (context-gap) Row A13 has no cells ("handled by S12 / S13"), but T2 asks for a test of
+- [x] F11 (context-gap) Row A13 has no cells ("handled by S12 / S13"), but T2 asks for a test of
   every row A1–A16. Fix: A13 is not an item; say so in the brief.
-- [ ] F12 (context-gap) Several rules add a resolve to rows of other stories: B6's last
+- [x] F12 (context-gap) Several rules add a resolve to rows of other stories: B6's last
   paragraph (`activity-stale`, every harness row), B19 (`state-unknown-prolonged`, every row
   that leaves `unknown`), B15 (`orphan-harness` on S3), B17, B20. `SeatState` holds no open
   findings, so a resolve can only be emitted every time, and a row test that compares the whole
@@ -62,42 +62,42 @@ Closure and order:
 
 Inputs for which the brief gives a wrong answer or none:
 
-- [ ] F13 (context-gap) B8 says a mismatching event "is never S11 or A1" and then that U8
+- [x] F13 (context-gap) B8 says a mismatching event "is never S11 or A1" and then that U8
   "applies A1"; when the rotation event arrives while known session is `unknown`, `starting` or
   `exited`, A1 gives activity `idle` and breaks B4. Fix: say that U8 applies A1 only while
   known session is `present`.
-- [ ] F14 (context-gap) B7 lets a late event apply U8, and U8 applies A1, while the activity
+- [x] F14 (context-gap) B7 lets a late event apply U8, and U8 applies A1, while the activity
   table takes no late input (spec 476–477, R13). Fix: say whether a late U8 changes activity.
-- [ ] F15 (context-gap) B5 gives no activity for S5 from `starting` with `ReadinessSeen` true;
+- [x] F15 (context-gap) B5 gives no activity for S5 from `starting` with `ReadinessSeen` true;
   it is reachable: `present` after readiness, `NodeAttached` with a new instance and inventory
   `LAUNCHING` (S15 → `starting`), then `LaunchResult READY`. Fix: name the activity for that
   case, or say that S15 into `starting` clears `ReadinessSeen`.
-- [ ] F16 (context-gap) An event with a new `NodeInstanceId` and `Seq > 1` meets B6 step 1 and
+- [x] F16 (context-gap) An event with a new `NodeInstanceId` and `Seq > 1` meets B6 step 1 and
   step 3, so rule 11 applies twice (two `observation-gap`, two `RequestCapture`), and T11 says
   "applies rule 11 once". Fix: say that rule 11 applies at most once per input.
-- [ ] F17 (context-gap) B2 lists `R18` as a `SeatTransition.Rule` value, and the changes of
+- [x] F17 (context-gap) B2 lists `R18` as a `SeatTransition.Rule` value, and the changes of
   rule 11 are rows A16 and U6. Fix: say which transitions carry `R18`, or drop it.
-- [ ] F18 (context-gap) `StopNotCompletedBody` with `REJECTED`, or with a status B21 would call
+- [x] F18 (context-gap) `StopNotCompletedBody` with `REJECTED`, or with a status B21 would call
   unrecognized, has no row (S4 names FAILED and TIMED_OUT) and no clause in B21. Fix: add it to
   B21 (S4, or no change).
-- [ ] F19 (context-gap) B2 says `—` and `n/a` mean "no transition, no finding" and does not
+- [x] F19 (context-gap) B2 says `—` and `n/a` mean "no transition, no finding" and does not
   give the `EventDisposition`; the spec says `n/a` is "recorded as evidence" (421) and B4 says
   `Applied` for one case. Fix: name the disposition for both cells in B2.
-- [ ] F20 (context-gap) Row S10 has no `+F` in its cell and the findings table (712) says S10
+- [x] F20 (context-gap) Row S10 has no `+F` in its cell and the findings table (712) says S10
   opens `launch-unconfirmed`; B2 allows "only findings that a cell or rule below names". Fix:
   say in B19 and B21 whether S10 opens it, for the timeout and for the watchdog.
-- [ ] F21 (context-gap) B3 gives reported activity the overlay's reason and B4 says, "for known
+- [x] F21 (context-gap) B3 gives reported activity the overlay's reason and B4 says, "for known
   and for reported values", that the reason is `session-unknown` when session is `unknown`.
   Fix: limit B4's reasons to known values.
 
 Brief against the spec lines:
 
-- [ ] F22 (judgment-gap) B5 sets `unknown/observation-gap` for S5 from `unknown`; spec 424–427
+- [x] F22 (judgment-gap) B5 sets `unknown/observation-gap` for S5 from `unknown`; spec 424–427
   gives `unknown/sources-disagree` for "S5 without a readiness event". Fix: follow the spec, or
   list it as a deviation as B4 does.
-- [ ] F23 (judgment-gap) B6 step 4 applies an `ObservationGapBody` of any launch; spec 622
+- [x] F23 (judgment-gap) B6 step 4 applies an `ObservationGapBody` of any launch; spec 622
   makes every body of another launch `stale-launch`. Fix: list it as a deviation.
-- [ ] F24 (judgment-gap) B6 step 1 applies rule 11 for every differing instance when the state
+- [x] F24 (judgment-gap) B6 step 1 applies rule 11 for every differing instance when the state
   has one; spec 616–618 adds "and the seat expected events from the previous instance". Fix:
   list it as a deviation, or state the condition.
 - [ ] F25 (context-gap) B7 keeps `TELEMETRY` and `OTHER` out of the stale guard; spec 624–625
@@ -273,3 +273,43 @@ so it does not contradict T12).
 - The proto enum names against `Aiakos.Contracts.Node.V1`.
 - The initial state of scripts GS4, GS5, GS7, GS8 and GS9, which the brief leaves to the test.
 - Nothing was built or run except `tools/story.sh check 13-1` and `show 13-1 1|2|3`.
+
+## Author resolution: re-cut on docs/brief-13-1-fix
+
+F1–F24 are addressed in this branch and await the architect's second read; checked boxes
+record the author repair, not approval. F25 remains lead's #13 spec amendment; F26 remains
+the maintainer's approval. The brief stays draft. No production code was read or changed.
+
+- F1/F2/F6/F11: 39 axis outputs (A13 delegates), LD1–LD5 and DV1–DV5 are marked in the
+  brief and indexed. B2 gives each row a named test for all columns; T1–T3/B2a–B2c retire.
+- F3–F5/F7/F9: the eleven stories follow table 2, with a first surface/vocabulary story,
+  independent delivery story, then input concerns. B6a/b/c, B17a/b and B19w are separate
+  rules. Needs reference actual dispatch/derivation rules, not removed table wrappers.
+  Late variants are deferred explicitly to T8/S9; direct fixtures avoid dependencies on
+  future up/down/readiness inputs. Earlier tests ignore only additional resolves, not
+  unexpected opens or changed axis values.
+- F8: V1 defines exact stored vocabulary, unknown proto values and Duplicate rejection;
+  T10 needs V1. It covers only documented ToStored overloads, not wire-only lifecycle/gap.
+- F10: B21 handles session results only. Harness kinds move to B6b; inventory lifecycle
+  stays B12; DeliveryNotCompleted unknown status is B22.
+- F12: B2 makes resolves unconditional and tells row tests to ignore later extra resolves.
+  S3 notes defer B15's orphan-harness resolve; S5 notes defer B20's delivery resolve.
+- F13/F14: B8 applies rotation's A1 only while present; B7 forbids activity changes on late
+  rotation. U8 covers session variants and T8 covers late U8. The late-rotation choice is
+  recorded explicitly against the spec's internally conflicting activity/rotation text.
+- F15: B5 states that S15 LAUNCHING clears ReadinessSeen; S15's row test covers a following
+  READY result. S5 without readiness uses sources-disagree from starting or unknown.
+- F16: B6c permits one B11 application per input across epoch/gap/body; T11 pins the case.
+- F17: derived transition labels are R10/R16/R17; gaps label their changes A16/U6.
+- F18: B21 specifies rejected/unknown stop status as S4 and completed as evidence.
+- F19: B2 defines Applied/Evidence for dash/n/a cells and pipeline disposition precedence.
+- F20: B21 and B19w explicitly open launch-unconfirmed for both S10 variants.
+- F21: B4 limits the derived reason names to known values; B3 wins for overlay reasons.
+- F22: B5 follows spec: S5 without readiness uses unknown/sources-disagree.
+- F23/F24: B6a and B6c explicitly declare the existing foreign-launch ObservationGap and
+  unconditional known-epoch-loss differences from spec pipeline steps 4 and 1.
+
+The split requires no additional story or higher cap beyond table 2. GS1's original
+nine inputs had only eight listed activity results; the missing prompt -> working result
+is now written explicitly, without changing A2. Script fixtures in story notes state
+initial session/activity/launch/native-ID values so their input paths are not guessed.
