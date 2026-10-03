@@ -19,7 +19,7 @@ Reviewed at commit 0b36217. Stories: 6. Check: ok.
 - Conformance of the brief to spec 0002 beyond its rules R6 to R11 and the stream status table; the ADRs were not read.
 - That the address Aspire passes for the `grpc` endpoint in `ASPNETCORE_URLS` passes R3 (expected `http://localhost:<port>`); the dev stack was not run.
 - That the fake clock the tests need can be written without a new package (no test project references a fake `TimeProvider`, and the `.csproj` files are outside `paths`).
-- The WSL end-to-end test (`AIAKOS_E2E_WSL`): between the merge of S5 and of S6 the node on `main` cannot connect to the orchestrator on `main`; not run.
+- The WSL end-to-end test (`AIAKOS_E2E_WSL`): between the merge of the node stream story (now S6) and of production registration (now S7) the node on `main` cannot connect to the orchestrator on `main`; not run.
 - `artifacts/trials/` (acceptance tests), by role.
 
 ## Author resolution, round 1
@@ -34,4 +34,19 @@ Reviewed at commit 0b36217. Stories: 6. Check: ok.
 8. E10 distinguishes zero for first success from one for success following an earlier Connected state.
 9. R10 assigns SentAt after CreateHeartbeat and E10 checks the exact fake-clock timestamp.
 
-These ticks record author changes; architect re-review remains pending. The untested surfaces listed above remain untested.
+These ticks record author changes. The untested surfaces listed above remain untested.
+
+## Re-review, round 2
+
+Reviewed at commit ae50b22. Stories: 8. Check: ok.
+
+The nine findings of round 1 are resolved in the brief and the split: the resolutions above were
+read against R3, R7, R8, R10, R13, E7, E8, E10, E15, E16 and the eight story blocks, and the E8
+arithmetic was recomputed (ten `Unavailable` failures store 300 s, so the `Unauthenticated` draw
+at 0.5 is 150 s).
+
+New findings: None.
+
+Not checked in this round, in addition to the list above:
+
+- That `ConfigureEndpointDefaults` gives a loopback `IPEndPoint` for a `http://localhost:<port>` URL, which R3 now relies on.
