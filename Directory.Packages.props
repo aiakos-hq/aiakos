@@ -49,6 +49,8 @@
     <PackageVersion Include="Microsoft.Testing.Extensions.TrxReport" Version="2.4.1" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.15.0" />
     <PackageVersion Include="xunit.v3" Version="4.0.1" />
+    <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.1" />
+    <PackageVersion Include="xunit.v3.assert" Version="4.0.1" />
   </ItemGroup>
 
   <ItemGroup Label="Spec">

@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Aiakos.Node\Aiakos.Node.csproj" />
+    <ProjectReference Include="..\Aiakos.Node.Testing\Aiakos.Node.Testing.csproj" />
   </ItemGroup>
 
 </Project>

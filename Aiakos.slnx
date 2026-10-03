@@ -17,6 +17,7 @@
     <Project Path="tests/Aiakos.Data.Tests/Aiakos.Data.Tests.csproj" />
     <Project Path="tests/Aiakos.Hosting.Wsl.Tests/Aiakos.Hosting.Wsl.Tests.csproj" />
     <Project Path="tests/Aiakos.Node.Tests/Aiakos.Node.Tests.csproj" />
+    <Project Path="tests/Aiakos.Node.Testing/Aiakos.Node.Testing.csproj" />
     <Project Path="tests/Aiakos.Orchestrator.Tests/Aiakos.Orchestrator.Tests.csproj" />
     <Project Path="tests/Aiakos.Spec.Tests/Aiakos.Spec.Tests.csproj" />
   </Folder>
