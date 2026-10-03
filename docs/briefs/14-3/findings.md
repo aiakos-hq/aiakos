@@ -34,5 +34,23 @@ Reviewed at commit 643bb63. Stories: 4. Check: ok.
    aggregate count/length before content reads, stops enumeration at first cap exceedance,
    bounds subsequent reads against growth and tests sparse/count limits.
 
-All five findings are addressed in the brief/items/split; architect confirmation remains pending.
+All five findings are addressed in the brief/items/split.
 Author ran story.sh split, split-done and check: ok (5 stories, 43 items).
+
+## Re-review, round 2
+
+Reviewed at commit 7d6842d. Stories: 5. Check: ok.
+
+The five findings of round 1 are resolved: the resolutions were read against C1, R3, R5, R7, R8,
+the changed outputs, T5 and the five story blocks, and the four named lookalikes and the `ssh://`
+line were checked against the existing detector patterns.
+
+### Findings
+
+- [ ] S4 (context-gap): T5 has the S4 tests assert that a valid minimal/full `Load` "still" returns a null `Rig`, and S5 turns exactly that result non-null, while C2 allows the change only for the two `ValidTests`; S5 would turn an S4 test red. Fix: drop the null-`Rig` assertion for valid loads from T5 (the two `ValidTests` already hold it until C2), or name the S4 tests in C2.
+- [ ] S3 (context-gap): R7 stops enumeration at the first cap overage and keeps "already collected" diagnostics, but the enumeration order is not defined, so a skill with 150 files and one nested link (or one unsafe filename, or no `SKILL.md`) gives AIK3005 alone or AIK3005 with AIK3002/AIK4020/AIK3004, depending on the order the file system returns entries. Fix: state in R7 which scalar-level diagnostics a declaration reports when a cap is exceeded (for example AIK3005 only) and add that input to SKILL-limits.
+
+## Not checked, round 2
+
+- The sparse 3 GiB cases: whether the test file system supports sparse files was not checked.
+
