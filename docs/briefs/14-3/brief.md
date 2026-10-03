@@ -128,8 +128,8 @@ G3. Credential-like reference values/discovered relative paths must not become o
 ## Changes to earlier behavior
 
 C1. A safe local agent_ref with missing/unreadable directory or agent.yaml becomes AIK3001 at
-   the reference scalar instead of agent-file AIK1001. Unsafe paths formerly silently skipped
-   become AIK3002. Agent-file syntax/envelope/byte-limit errors retain existing AIK100x/200x
+   the reference scalar instead of agent-file AIK1001. Paths rejected by R1 that were formerly silently skipped become AIK3002. A contained
+   `..` in agent_ref is now normalized and loads the agent rather than being silently skipped. Agent-file syntax/envelope/byte-limit errors retain existing AIK100x/200x
    once path checks pass. Missing rig/env AIK1001 and all other earlier golden text are unchanged.
    Human/invalid-kind agent_ref traversal stops; their earlier applicable diagnostics remain.
 
@@ -154,7 +154,10 @@ R2. Safe missing/wrong-kind entry or inspection/access failure gives AIK3001 at 
    scheme/kind/value is skipped by reference checks and retains earlier diagnostics.
 
 R3. ReadMarkdown accepts a checked regular file (no extension/Markdown syntax check). Raw-byte
-   cap including BOM is 262144 inclusive. Exceeded: AIK3005 at file.Path 1:1, Message
+   cap including BOM is 262144 inclusive. Check file length before allocating/reading its content;
+   a length above the cap immediately produces AIK3005, even for a multi-GiB sparse file. Bound
+   the subsequent read to cap+1 bytes to detect growth without unbounded allocation; growth
+   above the cap produces the same AIK3005. A removed/unreadable file remains the R3 I/O case. Exceeded: AIK3005 at file.Path 1:1, Message
    `referenced file is larger than 256 KiB`, Hint null. Invalid UTF-8: AIK1004 there, Message
    `file is not valid UTF-8`, Hint null. Read/access failure: AIK3001 there with R2 text. Remove
    one leading UTF-8 BOM, convert CRLF and remaining CR to LF, preserve all other text including
@@ -172,7 +175,13 @@ R4. Scan decoded Markdown and valid UTF-8 skill files line by line using the fiv
 
 R5. Read recursively includes all regular files, including dotfiles, but not empty directories.
    Never follow nested links; each link error is AIK3002 at original skill scalar with R1 text,
-   skip it and continue other safe entries. Missing top-level SKILL.md is AIK3004 at skill scalar,
+   skip it and continue other safe entries. Coalesce nested path failures within each skill
+   declaration: at most one AIK3002 for any number of links/unsafe paths, one AIK3001 for any
+   number of enumeration/read failures, and one AIK4020 for unsafe discovered filenames. For
+   AIK4020, select the first offending filename in ordinal relative-path order and use its
+   first matching detector kind; it suppresses other errors at that same scalar per G3. Errors
+   for scanned file text/front matter stay on their own files and are not coalesced across files.
+   Missing top-level SKILL.md is AIK3004 at skill scalar,
    Message `skill directory has no SKILL.md`, Hint null (no additional AIK3001 for that file).
    Enumeration/read failure is AIK3001 at skill scalar with R2 text. Any error prevents result.
 
@@ -187,7 +196,13 @@ R6. SKILL.md must be valid UTF-8; optional BOM then exactly `---` on its first l
 
 R7. Skill cap is 100 regular files and 1048576 total raw bytes inclusive, counting SKILL.md and
    dotfiles. Count each regular directory entry once; no links count. Exceed either: one AIK3005
-   at skill scalar, Message `skill exceeds 100 files or 1 MiB`, Hint null, result null. Individual
+   at skill scalar, Message `skill exceeds 100 files or 1 MiB`, Hint null, result null. Enumerate
+   regular entries and inspect their lengths before reading any content; stop enumeration at
+   the 101st file or when summed lengths first exceed 1048576. Do not read large/sparse files
+   to determine size or enumerate the remaining tree after the cap is exceeded. Return null
+   immediately, retaining already collected independent diagnostics. If metadata passed,
+   bound subsequent reads by the remaining aggregate allowance+1; growth that exceeds the
+   allowance yields the same single AIK3005 and stops remaining reads. Individual
    skill files have no Markdown 256 KiB cap. Files sorted ordinal by canonical relative path;
    snapshots contain raw bytes and raw SHA-256 in R3 format. ResolvedSkill carries Directory,
    front matter Name/Description and Files. Input snapshots have no mode; projection adds 0644.
@@ -197,7 +212,11 @@ R8. Load discovers culture relative to root, guidance/skills relative to valid a
    Skip files that failed parsing or have AIK2001; skip scalar references with earlier errors;
    skip guidance/skills list as a whole if any slice-1 diagnostic falls inside it. Do not traverse
    x- annotations. Per Load canonical-path cache reads content and emits its file diagnostics
-   once; reference errors occur per distinct source scalar. Preserve repeated guidance entries
+   once; reference errors occur per distinct source scalar. Cache a failed skill's diagnostics
+   too: replay scalar-level errors (AIK3001/3002/3004 for missing SKILL.md/3005/unsafe-name AIK4020)
+   at each declaration's own scalar, preserving the per-scalar coalescing above. File-level
+   front matter, UTF-8 and text-scan diagnostics appear once per canonical file. A failed skill
+   still has no usable name, so R9 adds no duplicate-name error. Preserve repeated guidance entries
    and skill declarations in their original order; no cache survives Load.
 
 R9. Repeated skill name in one agent's declarations gives AIK4003 at second/subsequent list
@@ -248,18 +267,19 @@ Never commit credential-looking fixture values: concatenate separate fragments a
 | `PATH-unsafe` | source agents/impl/agent.yaml:7:5, owner agents/impl; empty, absolute / and //, C:/x, ~/x, backslash, NUL, ../../../outside, existing/dangling final or ancestor link | null; `agents/impl/agent.yaml:7:5: error AIK3002: invalid shared path\n  hint: use a relative / path inside the rig root without symbolic links\n` |
 | `PATH-normal` | existing ./../impl//GUIDANCE.md from agents/impl; agents/impl/./GUIDANCE.md from root; directory agents/impl/; sibling prefix escape | first two Path agents/impl/GUIDANCE.md, directory agents/impl, no diagnostic; sibling escape gets PATH-unsafe error, never read |
 | `PATH-missing` | missing file/directory or wrong kind, source rig.yaml:10:16 | null; `rig.yaml:10:16: error AIK3001: referenced file or directory not found\n` |
-| `PATH-agent` | minimal agent_ref unsafe ../../outside, missing agents/missing, linked agent.yaml, missing agent.yaml; second seat same canonical agent alias | unsafe/link AIK3002 at rig.yaml:10:16 with PATH-unsafe text; missing dir/file PATH-missing text; malformed aliased agent produces its earlier diagnostics only once |
+| `PATH-agent` | minimal agent_ref unsafe ../../outside, missing agents/missing, linked agent.yaml, missing agent.yaml; second seat same canonical alias; local:agents/x/../impl with an existing ordinary agents/x directory | unsafe/link AIK3002 at rig.yaml:10:16 with PATH-unsafe text; missing dir/file PATH-missing text; malformed aliased agent produces its earlier diagnostics only once; contained parent traversal loads agents/impl/agent.yaml with no path diagnostic |
 | `TEXT-normal` | GUIDANCE.md BOM+A CRLF B CR C LF; LF counterpart; A without final newline; empty | Content respectively UTF-8 A\nB\nC\n (Bytes 6) for first two, A (Bytes 1), empty (Bytes 0); normalized hashes equal; Path agents/impl/GUIDANCE.md; Sha256 sha256:+64 lowercase hex independently matching Content; no diagnostics |
-| `TEXT-size` | GUIDANCE.md 262144/262145 ASCII bytes, C3 28 invalid UTF-8, removed after path check | boundary accepted; over `agents/impl/GUIDANCE.md:1:1: error AIK3005: referenced file is larger than 256 KiB\n`; invalid `agents/impl/GUIDANCE.md:1:1: error AIK1004: file is not valid UTF-8\n`; removed AIK3001 at 1:1 with PATH-missing message; failures null |
-| `TEXT-secret` | each five kinds at line 2 col 1 after safe LF; two kinds same line; lookalikes | null; `agents/impl/GUIDANCE.md:2:1: error AIK4020: credential-like value (<kind>)\n  hint: never put secrets in rig files; name the secret and bind it in rig.env.yaml\n`; first kind priority only per line; lookalikes no diagnostic; no credential echoed |
+| `TEXT-size` | GUIDANCE.md 262144/262145 ASCII bytes, 3 GiB sparse file, C3 28 invalid UTF-8, removed after path check | boundary accepted; over/sparse `agents/impl/GUIDANCE.md:1:1: error AIK3005: referenced file is larger than 256 KiB\n`; invalid `agents/impl/GUIDANCE.md:1:1: error AIK1004: file is not valid UTF-8\n`; removed AIK3001 at 1:1 with PATH-missing message; failures null |
+| `TEXT-secret` | each five kinds at line 2 col 1 after safe LF; two kinds same line; lookalikes xghp_example, rotate the ghp_ token, sk-ant-, https://example.com/a@b; ssh://git@github.com/org/repo.git at line 2 col 1 | null; `agents/impl/GUIDANCE.md:2:1: error AIK4020: credential-like value (<kind>)\n  hint: never put secrets in rig files; name the secret and bind it in rig.env.yaml\n`; first kind priority only per line; the four named lookalikes have no diagnostic; ssh URL is AIK4020 (URL with user info) at 2:1 with the same hint, not exempted; no credential echoed |
 | `SKILL-valid` | build/SKILL.md `---\nname: build\ndescription: Build things\n---\nBody\n`, support binary 00 FF 01, dotfile; BOM/CRLF variant | Directory agents/impl/skills/build, Name build, Description Build things, all files raw and ordinal-path ordered, correct byte counts/raw hashes, no diagnostics |
 | `SKILL-missing` | missing SKILL.md, source agent.yaml:8:5 | null; `agents/impl/agent.yaml:8:5: error AIK3004: skill directory has no SKILL.md\n` |
 | `SKILL-front` | every R6 invalid form; name other in build directory; extra ordinary metadata | invalid `agents/impl/skills/build/SKILL.md:1:1: error AIK3004: invalid skill front matter\n`; mismatch same position/code with `skill name does not match directory name\n`; both null; extra metadata accepted |
-| `SKILL-links` | nested file/directory/dangling symlink, external target credential sentinel | null; `agents/impl/agent.yaml:8:5: error AIK3002: invalid shared path\n  hint: use a relative / path inside the rig root without symbolic links\n`; no target error/content |
-| `SKILL-limits` | 100/101 files, 1048576/1048577 total bytes; SKILL.md or support >262144 within total cap | boundaries/large individual accepted; exceeded null, exactly one `agents/impl/agent.yaml:8:5: error AIK3005: skill exceeds 100 files or 1 MiB\n` |
+| `SKILL-links` | nested file/directory/dangling symlink, external target credential sentinel; two links in one skill; two unsafe credential-like filenames; failing linked skill declared at list scalars 8:5 and 9:5 | one link or two links: null, exactly one `agents/impl/agent.yaml:8:5: error AIK3002: invalid shared path\n  hint: use a relative / path inside the rig root without symbolic links\n`; two unsafe filenames: one AIK4020 at 8:5, no path echo; same linked skill declared twice: that AIK3002 text at 8:5 then 9:5, no file content diagnostic and no duplicate skill name; no target error/content |
+| `SKILL-limits` | 100/101 files, 1048576/1048577 total bytes; SKILL.md or support >262144 within total cap; 3 GiB sparse support file; generated tree with more than 101 entries | boundaries/large individual accepted; exceeded null, exactly one `agents/impl/agent.yaml:8:5: error AIK3005: skill exceeds 100 files or 1 MiB\n` |
 | `SKILL-secret` | credential in valid UTF-8 support at 2:3; invalid UTF-8 binary; credential-like filename | text null, AIK4020 support-path:2:3 with TEXT-secret message/hint; binary preserved without text scan; unsafe name null, AIK4020 at original skill scalar without path/value echo |
 | `RES-content` | minimal + culture Team CRLF, guidance First LF then Second LF but declarations second/first, build skill; shared-agent alias seat; edit guidance between Loads; delete root after successful Load | non-null/no diagnostics, Culture Team LF, ordered guidance Second LF/First LF, one agent directory agents/impl, complete skill snapshots; next Load sees new hash; old result serializable/readable after deletion |
-| `RES-duplicate` | skill entries skills/build and ./skills/build/ at lines 8,9 col 5; shared agent on two seats; separate agents each build | shared duplicate exactly `agents/impl/agent.yaml:9:5: error AIK4003: duplicate skill name 'build'\n  hint: first defined at line 8\n`, Rig null; separate agents non-null/no duplicate |
+| `RES-duplicate` | skill entries skills/build and ./skills/build/ at lines 8,9 col 5; shared agent on two seats | duplicate exactly `agents/impl/agent.yaml:9:5: error AIK4003: duplicate skill name 'build'\n  hint: first defined at line 8\n`, Rig null |
+| `RES-distinct` | separate agents each declare their own build skill; one valid skill reused by distinct agents | Rig non-null, two Agents, skill name build on each, no duplicate skill error; reused canonical files have identical bytes/hashes without duplicated content diagnostics |
 | `RES-defaults` | existing minimal/full; override seat description/harness/model; null model; repeated selections | minimal demo/empty description/null Culture, app main, impl Implements issues/claude-code/null model/shared/[app]/app/optional/subscription/empty secrets; full ordered impl/review/pm and two parameters, pm.Agent null, review seat-worktree; overrides win; repetitions deduplicate except permission rules, settings allow order preserved |
 | `RES-binding` | full default local + review override other; absent/explicit root; unused known repo binding; external env path | placement impl:local,review:other; root ~/aiakos/seats or explicit verbatim; env repo/secret paths and order preserved; external env replaces only binding, no node path probes |
 | `RES-parameters` | full root /seats/, app branch dev; shared impl; root /; omitted api-key secret list with source bound; sandbox required | review dir /seats/demo/review, projection /seats/demo/review/projection, workdir /seats/demo/review/repos/app, branch aiakos/demo/review, base origin/dev; shared workdir/path /home/dev/app, Branch/BaseRef null; root /demo/impl; key added once with DeliverAs file, existing AIK4012 warning, Rig non-null; sandbox required retained without error |
@@ -273,15 +293,18 @@ without link privilege explicitly skips only those cases. No real credential lit
 
 T1. Path helper and agent integration cover all PATH rows, wrong kinds, directory aliases,
    sibling-prefix escape, contained parent traversal and link precedence. Assert no exception
-   or escaped target read; preserve missing rig/env AIK1001 and agent syntax/envelope errors.
+   or escaped target read; contained-parent agent_ref loads normally; preserve missing rig/env AIK1001 and agent syntax/envelope errors.
 
 T2. Markdown outputs cover exact normalized bytes, independent SHA256.HashData expectations,
-   raw-byte boundary before normalization, BOM/CRLF/CR/empty/no-final-LF, scan position after BOM
+   raw-byte boundary before normalization, sparse over-limit files without content allocation,
+   BOM/CRLF/CR/empty/no-final-LF, scan position after BOM
    and all detector kinds; serialized diagnostics contain no planted value.
 
 T3. Skill outputs cover raw hashes independently from source bytes, front matter invalid forms,
    inclusive counts/bytes, dotfiles/binary, links, unsafe filenames and scan positions. Skill
-   errors yield no result while independent safe files are checked for additional errors.
+   errors yield no result while independent safe files are checked for additional errors unless a
+   size cap has terminated that directory. Sparse over-limit files must give AIK3005, not an
+   allocation error; enumeration stops at the first count/byte overage.
 
 T4. Serialize resolved minimal/full and content fixtures after deleting inputs: snapshots remain
    complete, records contain no absolute rigRoot, parser nodes, x- keys or R13 runtime fields.
@@ -289,6 +312,15 @@ T4. Serialize resolved minimal/full and content fixtures after deleting inputs: 
    disable parallelization for the environment-changing test. Assert no local secret read even
    for an existing secret-source file containing a runtime-built sentinel. Node binding paths
    are permitted. Spec AC9/AC10 are covered; 0003-RK2 is later projection text and is not checked.
+
+T5. Load integration tests assert RES-errors and RES-duplicate while Rig is still null for
+   all calls in this story. Exercise repeated failing skills: two declarations of one linked
+   directory give one AIK3002 at each scalar; two declarations of one skill with invalid front
+   matter give only one file-level AIK3004; both cause no duplicate-name diagnostic. A valid
+   minimal/full Load has the earlier empty diagnostics (but still null Rig). Changed referenced
+   files on a second Load are re-read: safe text then a runtime credential produces AIK4020.
+   No new public assembly record is needed in this story; wire a per-call internal catalog for
+   the following assembly story to consume rather than re-reading files.
 
 ## Definition of done
 

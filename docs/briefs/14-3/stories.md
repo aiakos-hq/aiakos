@@ -22,10 +22,18 @@ outputs: SKILL-valid, SKILL-missing, SKILL-front, SKILL-links, SKILL-limits, SKI
 tests: T3
 notes: Uses S1 path checking and S2 EmbeddedFile/credential detection, but raw skill bytes bypass Markdown normalization. Tests call SharedSkillReader; duplicate skill declarations and Load wiring are S4. Do not create aggregate hashes or projection plans.
 
-## S4: Resolved rig and seat parameters
-goal: Load assembles shared snapshots, defaults, bindings and node-independent seat parameters, returning a complete rig only when there are no errors.
+## S4: Load reference integration
+goal: Load reads and caches referenced content, reports independent file failures in defined order, and rejects duplicate skill declarations.
 depends: S3
-owns: R8, R9, R10, R11, R12, R13, C2
-outputs: RES-content, RES-duplicate, RES-defaults, RES-binding, RES-parameters, RES-errors
+owns: R8, R9
+outputs: RES-duplicate, RES-errors
+tests: T5
+notes: Load still returns null, including valid calls. Consume S1-S3 helpers into a per-call internal catalog; S5 consumes that catalog without reading files again. Scalar skill failures replay at each declaration, file diagnostics are emitted once. No assembly records or placeholder successful Rig are introduced here.
+
+## S5: Resolved rig and seat parameters
+goal: Load returns complete shared snapshots, defaults, bindings and node-independent seat parameters when there are no errors.
+depends: S4
+owns: R10, R11, R12, R13, C2
+outputs: RES-content, RES-distinct, RES-defaults, RES-binding, RES-parameters
 tests: T4
-notes: Integrates the S1-S3 helpers and introduces only the assembly records. C2 changes the two earlier valid-result assertions here. One assembly concern with six rules and six outputs; all file parsing/safety/content logic is already merged. Aggregate hashes and generated projection remain later slices.
+notes: Assemble records from S4's per-call catalog and existing validated YAML; do not implement reference traversal or caching again. C2 changes the two earlier valid-result assertions here. R9's duplicate-name checks are already merged; RES-distinct verifies different agents may share a skill name. Aggregate hashes and generated projection remain later slices.
