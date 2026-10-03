@@ -48,12 +48,14 @@ pods:
         profile: default
         runtime: codex
         model: gpt-6.1-sol
+        permission_policy: builtin:yolo
         cwd: "../.."
       - id: author2
         agent_ref: "local:agents/author"
         profile: default
         runtime: codex
         model: gpt-6.1-sol
+        permission_policy: builtin:yolo
         cwd: "../.."
       - id: architect
         agent_ref: "local:agents/architect"
@@ -77,12 +79,14 @@ pods:
         profile: default
         runtime: codex
         model: gpt-6-luna
+        permission_policy: builtin:yolo
         cwd: "../.."
       - id: senior
         agent_ref: "local:agents/impl"
         profile: default
         runtime: codex
         model: gpt-6.1-sol
+        permission_policy: builtin:yolo
         cwd: "../.."
     edges: []
 
@@ -94,6 +98,7 @@ pods:
         profile: default
         runtime: codex
         model: gpt-6-luna
+        permission_policy: builtin:yolo
         cwd: "../.."
       - id: reviewer
         agent_ref: "local:agents/reviewer"
