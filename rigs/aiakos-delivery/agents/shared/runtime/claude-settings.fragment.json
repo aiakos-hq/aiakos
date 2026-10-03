@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(rig:*)",
+      "Bash(bash tools/story.sh:*)",
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(dotnet:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(gh pr merge:*)"
+    ]
+  }
+}

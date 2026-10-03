@@ -1,0 +1,4 @@
+{
+  "openrig_activity_hooks": true,
+  "note": "Selection marker for OpenRig's managed Claude activity hooks. The daemon delivers them; this file carries no content."
+}

@@ -7,12 +7,15 @@ do not reopen them without writing a new ADR that supersedes the old one.
 
 ## Current stage
 
-**Stage A (manual).** Work is done by a human with a single agent session. The solution skeleton
+**Stage A.** Work is done by a team of agents in an OpenRig rig in WSL, defined in
+[`rigs/aiakos-delivery/`](rigs/aiakos-delivery/); the maintainer approves briefs and merges
+(see [`docs/workflow.md`](docs/workflow.md)). The solution skeleton
 (#9, spec 0001) exists: `Aiakos.slnx` with the Aspire AppHost, the orchestrator, the node agent
 in WSL, Postgres with DbUp migrations, OpenTelemetry and CI. The CLI in
 [`src/Aiakos.Cli`](src/Aiakos.Cli/) is still the placeholder published on nuget.org as `Aiakos`
-0.0.1-preview.1 to reserve the ID (#6). Milestone **M1** is the self-hosting threshold; after it,
-this repository is developed by an Aiakos-managed rig defined in [`rigs/aiakos-dev/`](rigs/aiakos-dev/).
+0.0.1-preview.1 to reserve the ID (#6). Milestone **M1** is the self-hosting threshold: from it,
+Aiakos can run the rig in [`rigs/aiakos-dev/`](rigs/aiakos-dev/). The team moves from OpenRig to
+that rig when Aiakos is stable enough not to slow the work, not on a fixed date.
 
 **M0 (spikes) is done.** All five spikes are in [`docs/spikes/`](docs/spikes/): Claude Code in
 WSL tmux, session resume, Aspire launching a WSL node, the OpenCode API, and a Docker seat.
@@ -58,25 +61,29 @@ edit docs there) and `aiakos-hq/.github` (org profile, CONTRIBUTING, SECURITY, C
 - **Slices and stories** (stage A): an M1 issue is implemented as several slices. A slice is one
   **brief**, `docs/briefs/<issue>-<n>/brief.md`, written from
   [`docs/briefs/TEMPLATE.md`](docs/briefs/TEMPLATE.md): a closed description in which every rule,
-  change, expected output and test is an item with an ID (`items.tsv`). A cheap model splits the
-  brief into small **stories** (`stories.md`), a script checks the split, a reviewer writes
-  `findings.md`, and merging that analysis is its approval. A story that meets the definition of
+  change, expected output and test is an item with an ID (`items.tsv`). The `author` seat splits
+  the brief into small **stories** (`stories.md`), a script checks the split, the `architect`
+  seat writes `findings.md`, and merging that analysis is its approval. Stories are sized for a
+  Sonnet-level implementer; a story goes to a stronger model only when it cannot be split
+  further, with the reason written down. A story that meets the definition of
   ready becomes a GitHub sub-issue of the M1 issue, titled `<issue>-<n>-<m>: <title>`, with a
-  routing label `impl/opencode` or `impl/sonnet` and the label `ready`; each story is one pull
+  routing label `impl` or `impl/senior` and the label `ready`; each story is one pull
   request. Done is decided before the run: a story's acceptance tests are written first, stay
   local in `artifacts/trials/<story>/` (git-ignored), and `tools/story.sh done` runs them as a
   gate. Only a failed acceptance test, an exception, a leaked secret or an earlier test turned
   red blocks a story; anything else becomes a new item. One retry at most, and no follow-up
-  briefs. The whole flow, with the definitions of ready and done, is in
+  briefs. Nothing is checked by the vendor that wrote it: Codex writes and implements, Claude
+  checks and reviews, Pi on OpenCode Go runs the gate. The whole flow, with the seats and the
+  definitions of ready, done and partial, is in
   [`docs/workflow.md`](docs/workflow.md); the index of briefs is
-  [`docs/briefs/README.md`](docs/briefs/README.md). The relay chat
-  ([`.claude/skills/story`](.claude/skills/story/SKILL.md)) runs in a cheap model and only runs
-  the script; briefs and acceptance tests are written in a separate chat. Do not use the earlier
-  slice review loop (`tools/slice.sh`, `/slice`, follow-up briefs): it is removed.
+  [`docs/briefs/README.md`](docs/briefs/README.md). `tools/story.sh` is where the rules are
+  enforced; the seats call it, and the relay chat
+  ([`.claude/skills/story`](.claude/skills/story/SKILL.md)) can still run it by hand. Do not use
+  the earlier slice review loop (`tools/slice.sh`, `/slice`, follow-up briefs): it is removed.
 
-Labels: `type/*` (feature, bug, spike, chore, docs), `area/*`, routing labels `impl/opencode`
-and `impl/sonnet` (slices), and status labels `spec-needed`, `ready`, `in-progress`,
-`needs-review`, `blocked`.
+Labels: `type/*` (feature, bug, spike, chore, docs), `area/*`, routing labels `impl`
+and `impl/senior` (stories), and status labels `spec-needed`, `ready`, `in-progress`,
+`needs-review`, `partial`, `blocked`.
 Milestones `M0`–`M8` follow the roadmap in `docs/plan.md` §10.
 
 ## Rules
@@ -105,7 +112,8 @@ Milestones `M0`–`M8` follow the roadmap in `docs/plan.md` §10.
 ## Commands
 
 Prerequisites: .NET SDK 10.0.1xx+ (see `global.json`); Docker Desktop running; WSL2 distro
-`Ubuntu` with mirrored networking (see above). WSL needs no .NET.
+`Ubuntu` with mirrored networking (see above). The node agent in WSL needs no .NET, but the
+delivery rig builds and tests in the WSL checkout, so WSL has the same .NET SDK and `gh`.
 
 - Build (warnings are errors): `dotnet build`
 - Test (Docker required for the database tests): `dotnet test`

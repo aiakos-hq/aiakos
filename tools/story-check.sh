@@ -19,7 +19,8 @@
 #               outputs: AIK3003-git  (expected outputs this story must produce)
 #               tests: -              (other tests this story adds)
 #               notes: <what ties this story to another one, or "none">
-#               route: impl/sonnet    (optional; overrides the brief's route)
+#               route: impl/senior    (optional; overrides the brief's route)
+#               escalation: <why>     (required with route impl/senior: why it cannot be split)
 #
 #             Each key is one line. Lists are comma-separated; "-" is an empty list.
 # brief.md    optional. With it, the check also verifies that the brief is closed: every item
@@ -93,7 +94,7 @@ file_number == 2 && /^## / {
 }
 file_number == 2 && current != "" && match($0, /^[a-z_]+:/) {
   key = substr($0, 1, RLENGTH - 1)
-  if (key !~ /^(goal|depends|owns|outputs|tests|notes|route)$/) { fail(current ": unknown key \"" key ":\""); next }
+  if (key !~ /^(goal|depends|owns|outputs|tests|notes|route|escalation)$/) { fail(current ": unknown key \"" key ":\""); next }
   if ((current, key) in field) fail(current ": \"" key ":\" given twice")
   field[current, key] = trim(substr($0, RLENGTH + 1))
   next
@@ -131,6 +132,8 @@ END {
       else if (field[id, required[k]] == "") fail(id ": \"" required[k] ":\" is empty (write \"-\" for an empty list)")
     }
     if (title[id] == "") fail(id ": no title")
+    if (field[id, "route"] == "impl/senior" && field[id, "escalation"] == "") fail(id ": route impl/senior needs \"escalation:\" with the reason it cannot be split")
+    if (field[id, "escalation"] != "" && field[id, "route"] != "impl/senior") fail(id ": \"escalation:\" is only for a story with \"route: impl/senior\"")
 
     # depends: earlier stories only, which also rules out cycles
     count = split_list(field[id, "depends"], list)

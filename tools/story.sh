@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Story workflow helper (stage A). See docs/workflow.md for the flow and its definitions.
-# Run from anywhere inside the repository, with Git Bash on Windows or bash on Linux.
+# Story workflow helper. See docs/workflow.md for the flow and its definitions.
+# Run from anywhere inside the repository, with bash on Linux or Git Bash on Windows. The seats
+# of the delivery rig (rigs/aiakos-delivery/) call it; it can also be run by hand.
 #
 # Analysis (files under docs/briefs/<slice>/ on a branch; nothing goes to GitHub):
 #   tools/story.sh check <slice>          the brief is closed and the split is traceable
-#   tools/story.sh split <slice>          prepares a directory for the splitter and prints its
-#                                         run command
-#   tools/story.sh split-done <slice>     checks the splitter's stories.md and copies it in
+#   tools/story.sh split <slice>          prepares a directory for the split and says what to
+#                                         do there
+#   tools/story.sh split-done <slice>     checks the stories.md written there and copies it in
 #   tools/story.sh show <slice> <n>       prints story <n> as an implementer will get it
 #
 # Development (one GitHub sub-issue per story, created when the story is ready):
@@ -16,11 +17,14 @@
 #                                         sub-issue with the label "ready"
 #   tools/story.sh next [<route>]         the ready story to take next
 #   tools/story.sh start <issue>          worktree + branch from origin/main, story copied in,
-#                                         label ready -> in-progress, prints the run command
+#                                         label ready -> in-progress
 #   tools/story.sh done <issue>           the gate: clean tree, allowed paths, build, acceptance
 #                                         tests; label -> needs-review, or one retry, or blocked
-#   tools/story.sh pr <issue> [--maintainer-reviewed]
-#                                         pushes the branch and opens the pull request
+#   tools/story.sh pr <issue> [--maintainer-reviewed] [--partial]
+#                                         pushes the branch and opens the pull request.
+#                                         --partial: the gate did not pass because the brief
+#                                         depends on something that does not exist; needs
+#                                         artifacts/trials/<story>/partial.md, labels "partial"
 #   tools/story.sh cleanup <issue>        removes the worktree and the local branch after merge
 #
 # A slice is one brief: docs/briefs/<slice>/ with brief.md, items.tsv, stories.md and, while it
@@ -34,11 +38,14 @@
 set -euo pipefail
 
 REPO="${AIAKOS_REPO:-aiakos-hq/aiakos}"
-OPENCODE_MODEL="${AIAKOS_OPENCODE_MODEL:-opencode-go/gpt-6-luna}"
-SONNET_MODEL="${AIAKOS_SONNET_MODEL:-claude-sonnet-5-5}"
-SPLIT_MODEL="${AIAKOS_SPLIT_MODEL:-opencode-go/gpt-6-luna}"
 BRIEF_REF="${AIAKOS_BRIEF_REF:-origin/main}"
-ROUTES="impl/opencode impl/sonnet"
+# "impl" is the default implementer; "impl/senior" is the exception, for a story that cannot be
+# split further. Which model is behind each is set in rigs/aiakos-delivery/rig.yaml.
+ROUTES="impl impl/senior"
+# Routes of briefs and issues from before the rig; both mean "impl".
+LEGACY_ROUTES="impl/opencode impl/sonnet"
+
+norm_route() { case " $LEGACY_ROUTES " in *" $1 "*) printf 'impl' ;; *) printf '%s' "$1" ;; esac; }
 
 die() { echo "story: $*" >&2; exit 1; }
 
@@ -181,7 +188,7 @@ route_of() {
   local d="$1" n="$2" route
   route="$(story_field "$d" "$n" route)"
   [ -n "$route" ] || route="$(front "$d/brief.md" route)"
-  printf '%s' "$route"
+  norm_route "$route"
 }
 
 # The issue of a story, by its title prefix: prints "<number> <state>" or nothing.
@@ -212,10 +219,10 @@ load_issue() {
   [ -n "$parent" ] || die "body of #$number must contain 'Part of #<parent issue>'"
   route=""
   local candidate
-  for candidate in $ROUTES; do
-    if has_label "$candidate"; then route="$candidate"; fi
+  for candidate in $LEGACY_ROUTES $ROUTES; do
+    if has_label "$candidate"; then route="$(norm_route "$candidate")"; fi
   done
-  [ -n "$route" ] || die "#$number has no routing label (impl/opencode or impl/sonnet)"
+  [ -n "$route" ] || die "#$number has no routing label (impl or impl/senior)"
 }
 
 # Label changes on the story issue. AIAKOS_NO_WRITE=1 prints them instead (for trying a command out).
@@ -226,19 +233,13 @@ relabel() {
 
 has_label() { case " $labels " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
-print_run_command() {
-  local prompt="$1"
+# What the implementer does next. The seat that ran the command acts on it (route "impl": the
+# impl seat; "impl/senior": the senior seat).
+print_task() {
   echo
-  echo "Run this yourself (Windows terminal), then report 'done':"
-  echo
-  if [ "$route" = "impl/opencode" ]; then
-    echo "  opencode run -m $OPENCODE_MODEL --auto --thinking --dir \"$(native "$worktree")\" \"$prompt\""
-  else
-    echo "  cd \"$(native "$worktree")\""
-    echo "  claude --model $SONNET_MODEL \"$prompt\""
-  fi
-  echo
-  echo "Do not build or test in this worktree while the run is in progress."
+  echo "Next, for the $route implementer, in the worktree:"
+  echo "  $1"
+  echo "Nobody else builds or tests in this worktree while that run is in progress."
 }
 
 cmd_check() {
@@ -260,9 +261,8 @@ cmd_split() {
   echo "slice    $slice"
   echo "run dir  $(native "$run") (git-ignored)"
   echo
-  echo "Run this yourself (Windows terminal), then 'split-done $slice':"
-  echo
-  echo "  opencode run -m $SPLIT_MODEL --auto --thinking --dir \"$(native "$run")\" \"Follow PROMPT.md in this directory.\""
+  echo "Next: in that directory, follow PROMPT.md (it asks for one file, stories.md), then run"
+  echo "'tools/story.sh split-done $slice' here."
 }
 
 cmd_split_done() {
@@ -303,7 +303,7 @@ cmd_status() {
         state="$status"; [ "$status" = "approved" ] && state="analysed"
         printf '%-9s %-12s %-14s %s\n' "$slice-$n" "$state" "-" "$title"
       else
-        state="$(gh issue view "${found%% *}" --repo "$REPO" --json labels,state --jq 'if .state == "CLOSED" then "done" else ([.labels[].name] | map(select(. == "ready" or . == "in-progress" or . == "needs-review" or . == "blocked")) | join(",")) end')"
+        state="$(gh issue view "${found%% *}" --repo "$REPO" --json labels,state --jq 'if .state == "CLOSED" then "done" else ([.labels[].name] | map(select(. == "ready" or . == "in-progress" or . == "needs-review" or . == "partial" or . == "blocked")) | join(",")) end')"
         printf '%-9s %-12s %-14s %s\n' "$slice-$n" "${state:-open}" "#${found%% *}" "$title"
       fi
     done
@@ -341,7 +341,10 @@ cmd_ready() {
   if [ -f "$dir/findings.md" ] && findings="$(grep -c '^- \[ \]' "$dir/findings.md")" && [ "$findings" -gt 0 ]; then
     problem "5. docs/briefs/$slice/findings.md has $findings open finding(s)"
   fi
-  case " $ROUTES " in *" $route "*) ;; *) problem "6. no route (impl/opencode or impl/sonnet) in the brief or the story" ;; esac
+  case " $ROUTES " in *" $route "*) ;; *) problem "6. no route (impl or impl/senior) in the brief or the story" ;; esac
+  if [ "$route" = "impl/senior" ] && [ -z "$(story_field "$dir" "$n" escalation)" ]; then
+    problem "6. the route is impl/senior but the story has no 'escalation:' line with the reason it cannot be split"
+  fi
   [ "$problems" -eq 0 ] || die "$story does not meet the definition of ready ($problems problem(s))"
 
   found="$(issue_of "$story")"
@@ -367,8 +370,8 @@ cmd_ready() {
 
 cmd_next() {
   local want="${1:-}" route_label
-  for route_label in $ROUTES; do
-    [ -z "$want" ] || [ "$want" = "$route_label" ] || continue
+  for route_label in $ROUTES $LEGACY_ROUTES; do
+    [ -z "$want" ] || [ "$want" = "$(norm_route "$route_label")" ] || continue
     gh issue list --repo "$REPO" --state open --label ready --label "$route_label" --limit 100 --json number,title \
       --jq ".[] | select(.title | test(\"^[0-9]+-[0-9]+-[0-9]+: \")) | \"\(.title | split(\":\")[0])\t#\(.number)\t$route_label\t\(.title)\""
   done | sort -t- -k1,1n -k2,2n -k3,3n > "${TMPDIR:-/tmp}/story-next.$$" || true
@@ -394,7 +397,7 @@ cmd_start() {
   echo "branch   $branch"
   echo "worktree $(native "$worktree")"
   echo "label    in-progress"
-  print_run_command "Implement the story at artifacts/briefs/$story.md. Follow it exactly. Run build and tests until green."
+  print_task "Implement the story at artifacts/briefs/$story.md. Follow it exactly. Run build and tests until green. One commit."
 }
 
 # The gate. Everything it checks is decided before the run; nothing is judged here.
@@ -445,7 +448,7 @@ cmd_done() {
   if tail -n 1 "$log" | grep -q 'GATE: pass'; then
     relabel in-progress needs-review
     echo "label    needs-review"
-    echo "Inputs for the story-reviewer agent (one read of the diff):"
+    echo "Inputs for the reviewer (one read of the diff):"
     echo "  story     $story"
     echo "  worktree  $(native "$worktree")"
     echo "  brief     $(native "$worktree/artifacts/briefs/$story.md")"
@@ -453,24 +456,43 @@ cmd_done() {
   elif [ "$attempt" -eq 1 ]; then
     cp "$log" "$worktree/artifacts/briefs/$story-gate-1.txt"
     echo "One retry is allowed (stop rule). The gate output is in the worktree."
-    print_run_command "The acceptance gate failed for the story at artifacts/briefs/$story.md. Its output is in artifacts/briefs/$story-gate-1.txt. Fix the code so that the gate passes. Do not change the scope of the story. Add one new commit."
+    print_task "The acceptance gate failed for the story at artifacts/briefs/$story.md. Its output is in artifacts/briefs/$story-gate-1.txt. Fix the code so that the gate passes. Do not change the scope of the story. Add one new commit."
   else
     relabel in-progress blocked
     echo "label    blocked"
-    echo "Stop rule: the gate failed twice. Do not run it a third time: split the story or change"
-    echo "the implementer, and decide that in the analysis of slice $slice."
+    echo "Stop rule: the gate failed twice. Do not run it a third time. Tag each failure:"
+    echo "  context-gap   the brief lacked it: fix the brief or split the story (slice $slice)"
+    echo "  judgment-gap  the brief had it: set the route to impl/senior, once"
+    echo "If the brief depends on something that does not exist, the story may end partial:"
+    echo "write artifacts/trials/$story/partial.md and use 'pr $number --partial'."
   fi
 }
 
 cmd_pr() {
   load_issue "${1:-}"
   [ -d "$worktree" ] || die "no worktree for $story: $worktree"
-  local last pr_title body_file
+  local last pr_title body_file arg reviewed="" partial=""
+  for arg in "${@:2}"; do
+    case "$arg" in
+      --maintainer-reviewed) reviewed=1 ;;
+      --partial) partial=1 ;;
+      "") ;;
+      *) die "unknown option for pr: $arg" ;;
+    esac
+  done
   last="$(ls -t "$trial"/gate-*.txt 2>/dev/null | head -n 1 || true)"
-  [ -n "$last" ] && tail -n 1 "$last" | grep -q 'GATE: pass' || die "the last gate run of $story did not pass (tools/story.sh done $number)"
+  [ -n "$last" ] || die "no gate run for $story (tools/story.sh done $number)"
+  if [ -n "$partial" ]; then
+    # Partial: the gate ran and did not pass, and partial.md says which tests cannot pass and why.
+    [ -s "$trial/partial.md" ] || die "--partial needs artifacts/trials/$story/partial.md: the tests that do not pass, the missing capability with file and line, and the new item for it"
+    tail -n 1 "$last" | grep -q 'GATE: fail' || die "the last gate run of $story passed; open the pull request without --partial"
+  else
+    tail -n 1 "$last" | grep -q 'GATE: pass' || die "the last gate run of $story did not pass (tools/story.sh done $number)"
+  fi
   [ "$(git -C "$worktree" rev-parse --short HEAD)" = "$(head -n 1 "$last" | grep -oE 'commit [0-9a-f]+' | cut -d' ' -f2)" ] \
-    || die "the branch changed after the gate passed; run 'done $number' again"
-  if [ "${2:-}" != "--maintainer-reviewed" ]; then
+    || die "the branch changed after the last gate run; run 'done $number' again"
+  # A partial story is read by the maintainer at the pull request.
+  if [ -z "$reviewed" ] && [ -z "$partial" ]; then
     [ -f "$trial/review.md" ] && head -n 1 "$trial/review.md" | grep -q '^VERDICT: pass' \
       || die "no passing review in artifacts/trials/$story/review.md (or pass --maintainer-reviewed when you read the diff yourself)"
   fi
@@ -480,6 +502,14 @@ cmd_pr() {
   {
     if [ -f "$trial/pr-body.md" ]; then cat "$trial/pr-body.md"; else echo "Story $story: ${title#*: }"; fi
     echo
+    if [ -n "$partial" ]; then
+      echo "## Partial"
+      echo
+      echo "The acceptance gate does not pass. The maintainer decides whether this story ends partial."
+      echo
+      cat "$trial/partial.md"
+      echo
+    fi
     echo "## Verification"
     echo
     echo '```text'
@@ -489,6 +519,10 @@ cmd_pr() {
     printf '\nCloses #%s. Part of #%s.\n' "$number" "$parent"
   } > "$body_file"
   git -C "$worktree" push --quiet -u origin "$branch"
+  if [ -n "$partial" ]; then
+    if has_label blocked; then relabel blocked partial; else relabel in-progress partial; fi
+    echo "label    partial"
+  fi
   gh pr create --repo "$REPO" --base main --head "$branch" --title "$pr_title" --body-file "$body_file"
   rm -f "$body_file"
 }
@@ -516,7 +550,7 @@ case "${1:-}" in
   next)       cmd_next "${2:-}" ;;
   start)      cmd_start "${2:-}" ;;
   done)       cmd_done "${2:-}" ;;
-  pr)         cmd_pr "${2:-}" "${3:-}" ;;
+  pr)         cmd_pr "${2:-}" "${3:-}" "${4:-}" ;;
   cleanup)    cmd_cleanup "${2:-}" ;;
-  *)          sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *)          sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

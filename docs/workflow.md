@@ -1,17 +1,22 @@
-# How work flows (stage A)
+# How work flows
 
-This page describes how an M1 issue becomes merged code while Aiakos cannot yet run its own team.
-It replaces the earlier slice review loop, in which a reviewer looked for problems after each run
-and wrote follow-up briefs. That loop had no fixed bar and did not end
-(slice 14-2: three runs and three reviews without a pass).
+This page describes how an M1 issue becomes merged code. The work is done by a team of agents
+in an OpenRig rig (`@openrig/cli`) that runs in WSL; the maintainer approves
+briefs and merges pull requests. OpenRig is the tooling for as long as Aiakos cannot run its own
+team reliably.
 
-Two ideas carry the flow:
+Three ideas carry the flow:
 
 - **Done is decided before the run.** A story's acceptance tests exist first. When they pass, the
   story is done. Anything else that someone notices becomes a new item.
-- **Work is small.** A brief is split into stories under a size cap before anyone implements it.
+- **Work is small.** A brief is split into stories that a Sonnet-level implementer can finish.
+  A stronger model is the exception, for a story that cannot be split further.
+- **Nothing is checked by the vendor that wrote it.** Codex writes and implements, Claude checks
+  and reviews, and Pi on OpenCode Go runs the tests.
 
-From M3 the Aiakos work queue takes over the parts that are files and scripts here.
+The earlier slice review loop, in which a reviewer looked for problems after each run and wrote
+follow-up briefs, had no fixed bar and did not end (slice 14-2: three runs and three reviews
+without a pass). The rules below exist to prevent that, whatever tool runs the team.
 
 ## The units
 
@@ -19,29 +24,59 @@ From M3 the Aiakos work queue takes over the parts that are files and scripts he
 |---|---|---|
 | Issue | One M1 feature (`#14`) with its spec | GitHub |
 | Slice | One brief: a closed description of a part of the issue | `docs/briefs/<slice>/`, for example `14-3` |
-| Story | A part of a slice that one implementer run can finish | `stories.md` of the slice; ID `<slice>-<n>`, for example `14-3-2` |
+| Story | A part of a slice that one implementer run can finish | `stories.md` of the slice; ID `<slice>-<n>`, for example `14-3-2`; a GitHub sub-issue once it is ready |
 | Item | One rule, change, expected output or test of the brief, with an ID | `items.tsv` of the slice |
+
+OpenRig has its own "mission" and "slice" folders. They are not used here; `docs/briefs/` is the
+source.
+
+## The rig
+
+The rig is defined in [`rigs/aiakos-delivery/`](../rigs/aiakos-delivery/): `rig.yaml`, one folder
+per role under `agents/`, `CULTURE.md` and `SETUP.md`. It is started from the WSL checkout:
+
+```bash
+rig up rigs/aiakos-delivery/rig.yaml
+```
+
+| Seat | Runtime | Role |
+|---|---|---|
+| `lead` | Claude Code | Runs `tools/story.sh`, creates sub-issues, opens pull requests, owns closure |
+| `author` | Codex | Writes the brief, the item list and the acceptance tests; splits the brief |
+| `architect` | Claude Code (Opus) | Checks the brief and the split; attacks them before they are approved |
+| `impl` | Codex | Implements one story in its own worktree |
+| `senior` | Codex, stronger model | Implements a story that was escalated |
+| `qa` | Pi (OpenCode Go) | Runs the gate and probes the behaviour |
+| `reviewer` | Claude Code | Reads the diff once |
+
+Which model sits behind a seat is one `model:` line in `rig.yaml`. Seats hand work to each other
+through the OpenRig queue (`rig queue handoff`); every queue item names the story and its
+sub-issue. To watch the team, open the rig TUI (`rig tui`) and run `terminal rig:aiakos-delivery`,
+which opens every seat as a tile in herdr.
+
+Credentials and the OpenRig state (`~/.openrig`) stay on the machine.
+[`SETUP.md`](../rigs/aiakos-delivery/SETUP.md) lists what a new machine needs.
 
 ## The flow
 
 | Step | Who | What happens | Result |
 |---|---|---|---|
-| 1. Brief | Strong model, approved by the maintainer | Writes `brief.md` and `items.tsv` from [`briefs/TEMPLATE.md`](briefs/TEMPLATE.md) | A closed brief |
-| 2. Split | Cheap model | `tools/story.sh split <slice>`: sorts the items into stories, IDs only | `stories.md` |
+| 1. Brief | `author` | Writes `brief.md` and `items.tsv` from [`briefs/TEMPLATE.md`](briefs/TEMPLATE.md) | A brief on a branch |
+| 2. Split | `author` | `tools/story.sh split <slice>`: sorts the items into stories, IDs only | `stories.md` |
 | 3. Check | Script | `tools/story.sh check <slice>`: traceability and size | Pass or a list of errors |
-| 4. Story review | `story-checker` agent | Reads the brief and the split once for ties the script cannot see | `findings.md` |
-| 5. Approval | Maintainer | Findings are resolved by commits; the branch is merged | The analysis is on `main` |
-| 6. Acceptance | Strong model | Writes the story's acceptance tests and `gate.sh`, and runs them on `main` to see them fail | `artifacts/trials/<story>/` (local) |
-| 7. Ready | Maintainer | `tools/story.sh ready <slice> <n>`: checks the definition of ready and creates the sub-issue | A GitHub issue labelled `ready` |
-| 8. Run | Implementer | `tools/story.sh start <issue>`, then the printed command | One commit on a branch |
-| 9. Gate | Script | `tools/story.sh done <issue>`: paths, build, acceptance tests | `needs-review`, one retry, or `blocked` |
-| 10. Diff read | `story-reviewer` agent or the maintainer | Reads the diff once | Pass, or one of the four blocking kinds |
-| 11. Pull request | Maintainer | `tools/story.sh pr <issue>`, merge, `cleanup` | Done |
+| 4. Story review | `architect` | Reads the brief and the split once; looks for ties the script cannot see and for a story that is too large | `findings.md` |
+| 5. Approval | Maintainer | Findings are resolved by commits; `lead` opens the pull request; the maintainer merges it | The analysis is on `main` |
+| 6. Acceptance | `author` | Writes the story's acceptance tests and `gate.sh`, and runs them on `main` to see them fail | `artifacts/trials/<story>/` (local) |
+| 7. Ready | `lead` | `tools/story.sh ready <slice> <n>`: checks the definition of ready and creates the sub-issue | A GitHub issue labelled `ready` |
+| 8. Run | `impl` (or `senior`) | `tools/story.sh start <issue>`, then implements in the worktree | One commit on a local branch |
+| 9. Gate | `qa` | `tools/story.sh done <issue>`: paths, build, acceptance tests | `needs-review`, one retry, `partial` or `blocked` |
+| 10. Diff read | `reviewer` | Reads the diff once | Pass, or one of the four blocking kinds |
+| 11. Pull request | `lead`, then the maintainer | `tools/story.sh pr <issue>`; the maintainer merges; `cleanup` | Done |
+
+The maintainer acts at steps 5 and 11. `main` is protected, so no seat can merge.
 
 Steps 1 to 5 happen in files on a branch. The back and forth between the analysis and its review
-is the commit history of that branch, and `findings.md` is where the reviewer writes. Nothing
-goes to GitHub before step 7. When M3 brings messages between seats, `findings.md` gives way to
-comments.
+is the commit history of that branch, and `findings.md` is where the architect writes.
 
 ## Definitions
 
@@ -62,12 +97,19 @@ The script checks the first two. Nothing downstream may add a rule.
 - One file or one concern.
 - Every story owns at least one rule or change.
 
-The two numbers are a first guess. Record how many runs each story needs and adjust them.
-A brief may set its own caps in its header (`max_rules`, `max_outputs`). That is meant for a
-brief whose expected outputs are one-line test cases and not fixtures: slice 10-2 has 13 cases
-for one rule. A slice that fits the caps as a whole is one story.
+The caps are the same for every story and are set for a Sonnet-level implementer. They are a
+first guess: record how many runs each story needs and adjust them. A brief may set its own caps
+in its header (`max_rules`, `max_outputs`). That is meant for a brief whose expected outputs are
+one-line test cases and not fixtures: slice 10-2 has 13 cases for one rule. A slice that fits the
+caps as a whole is one story.
 
-### 3. Ready
+### 3. Escalation
+
+A story goes to the `senior` seat only when it cannot be split further. The architect writes the
+reason in the story's block in `stories.md` (`route: impl/senior` and `escalation: <reason>`);
+a story with that route and no reason fails the check. Most stories never need it.
+
+### 4. Ready
 
 A story gets its GitHub issue and the label `ready` when:
 
@@ -76,16 +118,32 @@ A story gets its GitHub issue and the label `ready` when:
 3. its acceptance tests exist and fail on `main` for the right reason;
 4. every story it depends on is done;
 5. the review findings are resolved or filed as their own items;
-6. its route (which implementer) is set.
+6. its route is set (`impl`, or `impl/senior` with a reason).
 
-### 4. Done, for a story
+### 5. Done, for a story
 
 - Its acceptance tests pass and all earlier tests stay green.
 - The build has 0 warnings and only the brief's paths are touched.
-- The diff has been read once, by the `story-reviewer` agent or by the maintainer.
+- The gate output and the reviewer's verdict name the commit they judged.
+- The diff has been read once, by the `reviewer` seat or by the maintainer.
 - The pull request is merged and the sub-issue is closed.
 
-### 5. What blocks, and the stop rule
+### 6. Partial
+
+A story is partial when the brief depends on something that does not exist, so that some
+acceptance tests cannot pass without building it. The implementer does not build the missing
+part inside the story. The story then:
+
+- merges what works, with the passing acceptance tests;
+- lists the tests that do not pass and the missing capability, with the file and line that
+  shows it is missing;
+- gets a new item for the missing capability.
+
+`tools/story.sh pr <issue> --partial` opens the pull request from
+`artifacts/trials/<story>/partial.md`. Partial is decided by the maintainer at that pull
+request. It is not a way to pass a story whose code is wrong.
+
+### 7. What blocks, and the stop rule
 
 Only four things block a story:
 
@@ -97,12 +155,18 @@ Only four things block a story:
 A reviewer may claim one of these only for something it ran. Everything else becomes a new
 backlog item and does not hold the story.
 
-**Stop rule:** one retry at most. When the gate fails a second time, the story was groomed
-wrong: split it or change the implementer. There are no follow-up briefs.
+Every finding carries one tag that says why it happened:
 
-### 6. Done, for the issue
+- `context-gap`: the brief or the story lacked what was needed. The fix belongs in the brief.
+- `judgment-gap`: the brief had it and the implementer got it wrong.
 
-- All its stories are done.
+**Stop rule:** one retry at most. When the gate fails a second time, the tag decides:
+a `context-gap` sends the story back to the analysis, where the brief is fixed or the story is
+split; a `judgment-gap` escalates it to the `senior` seat. There are no follow-up briefs.
+
+### 8. Done, for the issue
+
+- All its stories are done or partial.
 - The spec amendment and the docs are merged (see `CLAUDE.md`, "Definition of done").
 - The pull request states which risks from [`risks.md`](risks.md) it checks or closes.
 - Backlog items raised along the way are done or have their own issue.
@@ -125,20 +189,20 @@ rules of the stories it depends on stay in, marked as context, so that a referen
 rule can be read.
 
 Acceptance tests are not in the repository. They stay in `artifacts/trials/<story>/` of the main
-checkout, so that an implementer cannot read them. `gate.sh` there copies them into the worktree,
-runs them and removes them again.
+checkout. `gate.sh` there copies them into the worktree, runs them and removes them again. The
+implementer works in its own worktree and is told not to read that folder; all seats share one
+file system, so this is a convention and not a barrier.
 
-## Who does what
+Each story has its own worktree. No seat builds or commits in the main checkout.
 
-| Role | Model | Reads | Writes |
-|---|---|---|---|
-| Brief author | strong | spec, code | `brief.md`, `items.tsv`, acceptance tests |
-| Splitter | cheap (`AIAKOS_SPLIT_MODEL`) | the brief and the item list only | `stories.md` |
-| Story checker | strong | brief, split | findings (returned as text; the caller saves the file) |
-| Implementer | by route: `impl/opencode` or `impl/sonnet` | its story | code, one commit |
-| Story reviewer | strong | story, diff, gate output | a verdict (returned as text) |
-| Relay ([`/story`](../.claude/skills/story/SKILL.md)) | cheap | script output | nothing; it runs `tools/story.sh` |
-| Maintainer | — | all of it | approvals, merges |
+## Who may do what on GitHub
+
+| Action | Who |
+|---|---|
+| Create a sub-issue, set labels | `lead` |
+| Push a story branch | `lead`, through `tools/story.sh pr` |
+| Open a pull request | `lead` |
+| Merge | Maintainer only |
 
 ## Commands
 
@@ -157,3 +221,14 @@ bash tools/story.sh cleanup <issue>
 ```
 
 `AIAKOS_NO_WRITE=1` makes a command print its label changes instead of applying them.
+The script is the one place where the definitions above are enforced; the seats call it and do
+not replace it. It can still be run by hand.
+
+Useful OpenRig commands:
+
+```bash
+rig ps --nodes --rig aiakos-delivery   # seats and what they are doing
+rig parked                             # seats that stopped while they owe work
+rig queue list                         # work items and their owners
+rig tui                                # the board; "terminal rig:aiakos-delivery" opens herdr
+```

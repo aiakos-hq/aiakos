@@ -1,11 +1,12 @@
 ---
 name: story
-description: Relay for the story workflow - show the board, pick the next ready story, prepare its worktree, hand the maintainer the run command, run the gate, start the diff read, open the pull request. Use for "/story status", "/story next", "/story done", "/story pr", "/story cleanup", "/story ready", "/story check", "/story split".
+description: Manual relay for the story workflow, for when the delivery rig is not running - show the board, pick the next ready story, prepare its worktree, show the implementer task, run the gate, start the diff read, open the pull request. Use for "/story status", "/story next", "/story done", "/story pr", "/story cleanup", "/story ready", "/story check", "/story split".
 ---
 
 # Story relay
 
-You are a relay in the story workflow (`docs/workflow.md`). The maintainer runs the implementer
+You are a relay in the story workflow (`docs/workflow.md`), for when the delivery rig
+(`rigs/aiakos-delivery/`) is not running. The maintainer runs the implementer
 and the splitter by hand; you run `tools/story.sh`, show its output, and start an agent when a
 step asks for one. You run in a cheap model on purpose: do the steps below and nothing more.
 
@@ -32,9 +33,9 @@ Run the helper with the Bash tool from the repository root: `bash tools/story.sh
 |---|---|
 | `/story status` | `status`. Show the output. |
 | `/story check <slice>` | `check <slice>`. Show the output. |
-| `/story split <slice>` | `split <slice>`. Show the run command in a code block. When the maintainer reports it done: `split-done <slice>`, then start the story check (below). |
+| `/story split <slice>` | `split <slice>`. Show what it printed. When the maintainer reports the split done: `split-done <slice>`, then start the story check (below). |
 | `/story ready <slice> <n>` | `ready <slice> <n> --dry-run`. Show the output. If it is ready, ask "create the issue?" and wait for yes, then run it without `--dry-run`. |
-| `/story next` | `next`. If a story is ready, `start <issue>` for the first one. Show the output, with the run command in a code block. |
+| `/story next` | `next`. If a story is ready, `start <issue>` for the first one. Show the output, with the implementer task it printed. |
 | `/story next <issue>` | `start <issue>`. Same output. |
 | "done" or `/story done <issue>` | `done <issue>`. Show the output. Then follow "After the gate". If more than one story is `in-progress` and no issue was named, ask which. |
 | `/story pr <issue>` | Only after a `VERDICT: pass`, or when the maintainer says they read the diff themselves (then add `--maintainer-reviewed`). Ask "push the branch and open the pull request?" and wait for yes. Then `pr <issue>`. Show the link. |
@@ -59,8 +60,8 @@ Run the helper with the Bash tool from the repository root: `bash tools/story.sh
   the main checkout, show it, and add one line:
   - `VERDICT: pass` → "Next: `/story pr <issue>`. Backlog items above are yours to file."
   - `VERDICT: block` → "Next: this counts as the failed attempt. One retry is allowed; a second
-    failure means split the story or change the implementer."
-- **`GATE: fail`, first attempt**: show the retry command it printed, in a code block.
+    failure stops the story (see the stop rule in `docs/workflow.md`)."
+- **`GATE: fail`, first attempt**: show the retry task it printed.
 - **`GATE: fail`, second attempt**: the story is `blocked`. Say so and stop. Do not offer a third run.
 
 ## The story check

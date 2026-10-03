@@ -3,7 +3,7 @@ id: <issue>-<n>
 title: "#<issue> slice <n> — <short title>"
 issue: <issue>
 status: draft            # draft | approved | implemented | superseded
-route: impl/opencode     # or impl/sonnet; a story can override it in stories.md
+route: impl              # impl/senior only per story in stories.md, with an "escalation:" reason
 paths: [src/<project>/, tests/<project>.Tests/]   # the gate rejects changes outside these
 date: <yyyy-mm-dd>
 ---

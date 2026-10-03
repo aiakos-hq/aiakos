@@ -1,0 +1,21 @@
+name: shared
+version: "1.0"
+description: Resources shared by every seat of the aiakos-delivery rig
+
+resources:
+  plugins:
+    - id: openrig-core
+      source:
+        kind: local
+        path: ~/.openrig/plugins/openrig-core
+  runtime_resources:
+    - id: claude-settings
+      path: runtime/claude-settings.fragment.json
+      runtime: claude-code
+      type: claude_settings_fragment
+    - id: claude-activity-hooks
+      path: runtime/claude-activity-hooks.json
+      runtime: claude-code
+      type: claude_activity_hooks
+
+profiles: {}
