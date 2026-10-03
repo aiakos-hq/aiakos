@@ -3,6 +3,8 @@
 Reviewed at commit 4ff7f3d (`main`), brief `status: draft`. Stories: 6. Check: ok.
 Second read at commit 0e6bddd (`docs/brief-13-1-fix`). Stories: 11. Check: ok (94 items). Open:
 F25, F26 and F27–F34 (section "Second read" at the end).
+Third read at commit 22c1565. Check: ok (11 stories, 94 items). Open: F26, F35, F36 (section
+"Third read" at the end).
 
 Read for this review: the brief, `items.tsv`, `stories.md`, and spec 0006 lines 379–638 and
 707–726. R8–R20, R28, R38 and R39 of the spec (lines 170–212, 247–249, 290–294) were read where
@@ -380,3 +382,29 @@ needs one by one; anything built or run except `tools/story.sh check 13-1` and `
 
 These boxes record author repair, pending review. F26 remains maintainer approval;
 the brief is draft. Lead's spec amendment and F25 closure commits are preserved.
+
+## Third read: repairs at 22c1565, spec amendment at 4f7a784
+
+F27–F34 are repaired as the ledger above says. Verified: `show 13-1 3`, `5` and `9` no longer
+print B19's second sentence and `show 13-1 11` does (F27); the cells of the 39 axis rows are
+identical to spec 0006 at 4ff7f3d, and LD1–LD5 and DV1–DV5 are unchanged since the second read
+(compared by script). The input column of rows S2 and A14 now also names the test variant of
+F32; no cell changed. The closed-brief rules hold: check ok, every new sentence sits inside an
+existing item, no item was added.
+
+The spec amendment matches the brief: pipeline step 1 is B6c step 1, step 4 is the
+`ObservationGapBody` sentence (now in B11, moved there from B6a by F29), step 5 is B7's
+exemption, and the activity note with the "Changes after acceptance" entry is B4 with B3's
+overlay reasons. Two things it leaves behind:
+
+- [ ] F35 (judgment-gap) The amendment adds six lines inside the range the brief points at, so
+  brief lines 17–18 ("lines 379–638 … and 707–726 (findings)") are stale: the pipeline now ends
+  at line 644 and the findings table is lines 713–732. Fix: `author` changes the numbers to
+  379–644 and 713–732.
+- [ ] F36 (context-gap) B7 and B8 say a late U8 never applies A1 and call that a resolution of
+  the spec's own tension; spec lines 575–577 still say "activity follows A1" and "rotation is
+  applied even when the event is late", and the amendment does not record the choice. Fix:
+  `lead` adds one bullet to the 2026-10-04 entry.
+
+Not checked in the third read: `show` for stories other than 3, 5, 9 and 11; the spec outside
+the amended passages; nothing was built.
