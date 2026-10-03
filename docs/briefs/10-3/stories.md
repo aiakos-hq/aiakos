@@ -1,47 +1,63 @@
 ## S1: Node credentials and loopback endpoint policy
-goal: Node credentials resolve to registered identity without retaining plaintext, and a pure policy rejects unsafe link listeners.
+goal: Node credentials resolve to registered identity without retaining plaintext, and pure endpoint policy rejects unsafe listeners.
 depends: -
 owns: R1, R2, R3
 outputs: E1, E2, E3
 tests: -
-notes: R3 defines the startup check but its invocation in Program is wired by R12 in S6. Test policy Validate directly here; production registration belongs to S6. G1 applies to credentials and diagnostics.
+notes: S1 creates NodeIdentity. R3 defines policy methods and startup algorithm; R12 in S7 invokes it in production. Test IsAllowed and Validate directly here; E15 checks production activation later. G1 applies to credentials and diagnostics.
 
 ## S2: Link extension interfaces and empty defaults
 goal: Both link consumers have replaceable sources and application callbacks, and the node requires its bootstrap token.
-depends: -
+depends: S1
 owns: R11, C2
 outputs: E11, E14
 tests: -
-notes: Create the public extension interfaces and NodeLinkOptions here. R11 registrations in NodeProgram and Program are completed with R12 in S6; test defaults and token validation directly here. No callback persists or executes anything.
+notes: Create INodeLinkApplication and INodeLinkSource plus NodeLinkOptions here; the application interface uses NodeIdentity from S1. R11 registrations are finalized by R12 in S7. C2 updates earlier token validation tests in this story.
 
-## S3: Authenticated server handshake and link ownership
-goal: The server authenticates Connect, sends Welcome, replaces old streams and tracks liveness in a link-only node proxy.
+## S3: Authenticated server handshake
+goal: The gRPC service authenticates the first node message and returns a negotiated Welcome with registered identity.
 depends: S1, S2
-owns: R4, R5, R6, R7
-outputs: E4, E5, E6, E7
+owns: R4, R5
+outputs: E4, E5
 tests: -
-notes: One server-link concern sharing its stream lifetime, cancellation and registry. R4 uses R2 identity; R5 uses R11 replay callback; R6 replacement and R7 old cleanup share generation ownership. Use a slim loopback host with explicit test registrations; production registration is S6. Inbound application callbacks are awaited, but timer/replacement messages must remain processable so a blocked callback cannot stall supersession or liveness.
+notes: R4 uses R2 authentication and R5 uses the R11 replay callback. Use a slim loopback host with explicit registrations here; production wiring belongs to S7. S4 extends this service with ownership and post-Welcome processing; do not implement those items now.
 
-## S4: Full-jitter reconnect delay
-goal: Failed link attempts use deterministic-testable exponential full jitter and the status-specific caps.
+## S4: Server link ownership and liveness
+goal: Valid streams are owned by one link-only proxy per node, supersede older streams and track liveness without blocking behind application callbacks.
+depends: S3
+owns: R6, R7
+outputs: E6, E7
+tests: -
+notes: R6 and R7 share the established stream lifetime and generation ownership. R7 defines callback concurrency and cancellation in the brief; implement its blocked-callback cases exactly. Preserve R4/R5 handshake behavior.
+
+## S5: Full-jitter reconnect delay
+goal: Failed link attempts use exponential full jitter, bounded stored ceiling and status-specific caps.
 depends: -
 owns: R8
 outputs: E8
 tests: -
-notes: This is a new helper; keep Backoff and its earlier tests unchanged. R9 and R10 consume the helper in S5.
+notes: New helper only; keep Backoff and its earlier tests unchanged. S6 consumes the helper.
 
-## S5: Node Connect stream and heartbeat loop
+## S6: Node Connect stream and heartbeat loop
 goal: The node authenticates and handshakes on Connect, heartbeats, shuts down and reconnects without exiting on link failure.
-depends: S2, S4
-owns: R9, R10
-outputs: E9, E10
+depends: S2, S5
+owns: R9, R10, C1
+outputs: E9, E10, E13
 tests: -
-notes: R9 uses R11 message-source defaults and R8 delay. R9 and R10 share one call lifetime and writer; preserve connection metrics/state. Adjust the existing connection tests for the changed constructor and fake Connect server now so this story builds and earlier tests stay green; S6 checks the final regression behavior under C1. NodeProgram can retain prior Backoff registration until S6; add the minimum new dependencies required to construct the hosted connection in this story, with final wiring in S6.
+notes: R9 uses R11 source and R8 delay. R9/R10 share one call lifetime/writer; C1 owns the existing health-test replacement here. Add the minimum NodeProgram dependencies needed to construct the hosted connection now; S7 completes production wiring. E10 explicitly distinguishes first connection from reconnect and checks the connection-assigned heartbeat timestamp.
 
-## S6: Production registration, transport tracing and regressions
-goal: The production hosts serve and use the node link with loopback enforcement, limits, keepalive and per-message trace parents.
-depends: S1, S2, S3, S4, S5
-owns: R12, C1
-outputs: E12, E13
+## S7: Production registration and transport settings
+goal: The production hosts serve and use the node link with loopback enforcement, message limits and keepalive.
+depends: S1, S2, S3, S4, S5, S6
+owns: R12
+outputs: E12, E15
 tests: -
-notes: R12 activates R3 startup policy and service mapping, R11 replaceable defaults, and R9/R10 hosted client. C1 finalizes the existing test replacements begun for compilation in S5. Existing database fixture tests verify production registration; other conformance tests use slim hosts. All earlier results except explicitly listed C1 replacements stay unchanged.
+notes: R12 activates R3 startup address enforcement, R11 replaceable defaults and R9/R10 client registrations. E15 verifies configured non-loopback Kestrel rejection before bind and TestServer exemption. Existing database fixture verifies production registration; slim hosts cover remaining protocol cases.
+
+## S8: Per-message trace context
+goal: Both link directions propagate ambient W3C context and start named per-envelope receive activities.
+depends: S4, S6, S7
+owns: R13
+outputs: E16
+tests: -
+notes: R13 modifies both established stream loops and all outgoing envelope writes. Use exact source and activity names, explicit parent contexts and the invalid-parent root cases in E16. G1 forbids payload or credential trace content.
