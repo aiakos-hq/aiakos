@@ -3,7 +3,7 @@
 Reviewed at commit 4ff7f3d (`main`), brief `status: draft`. Stories: 6. Check: ok.
 Second read at commit 0e6bddd (`docs/brief-13-1-fix`). Stories: 11. Check: ok (94 items). Open:
 F25, F26 and F27–F34 (section "Second read" at the end).
-Third read at commit 22c1565. Check: ok (11 stories, 94 items). Open: F26, F35, F36 (section
+Third read at commit 22c1565. Check: ok (11 stories, 94 items). Open: none (F26 approved) (section
 "Third read" at the end).
 
 Read for this review: the brief, `items.tsv`, `stories.md`, and spec 0006 lines 379–638 and
@@ -111,7 +111,7 @@ Brief against the spec lines:
 
 Approval:
 
-- [ ] F26 Brief: `status` is `draft`. Fix: the maintainer approves it after the re-cut.
+- [x] F26 Brief: `status` is `draft`. Fix: the maintainer approves it after the re-cut.
 
 ## Table 1: rows, driving rules, stories
 

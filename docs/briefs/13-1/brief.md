@@ -2,7 +2,7 @@
 id: 13-1
 title: "#13 slice 1 — pure seat state machine and harness state profile"
 issue: 13
-status: draft
+status: approved
 route: impl/sonnet
 paths: [src/Aiakos.Orchestrator/Seats/, tests/Aiakos.Orchestrator.Tests/, Directory.Packages.props]
 max_outputs: 9
