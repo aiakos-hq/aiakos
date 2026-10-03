@@ -156,7 +156,9 @@ public sealed class FakeSessionHost : ISessionHost
                 $"${id}", $"%{id}", 1000 + id, (ulong)id, false);
             var ignoresGracefulStop = IgnoresGracefulStop ||
                                       _launchOptions.TryGetValue(spec, out var options) && options.IgnoreStop;
-            var session = new FakeSession(handle, ignoresGracefulStop);
+            var labels = new SessionLabels(1, "fake", spec.SeatId, spec.SeatAddress,
+                spec.LaunchId, spec.Harness);
+            var session = new FakeSession(handle, labels, ignoresGracefulStop);
             _sessionsBySeat.Add(spec.SeatId, session);
             _sessionsById.Add(handle.SessionId, session);
             return Task.FromResult(handle);
@@ -219,7 +221,24 @@ public sealed class FakeSessionHost : ISessionHost
     {
         EnsureAvailable();
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult<IReadOnlyList<SessionListing>>(Array.Empty<SessionListing>());
+        lock (_sync)
+        {
+            IReadOnlyList<SessionListing> listings = _sessionsById.Values
+                .Where(static session => session.State != FakeSessionState.Missing)
+                .Select(static session => new SessionListing(
+                    session.Handle.SessionName,
+                    session.Handle.SessionId,
+                    session.Handle.PaneId,
+                    session.Handle.PanePid,
+                    session.State == FakeSessionState.Exited,
+                    session.ExitCode,
+                    session.Signal,
+                    session.Labels,
+                    ListingClass.Managed,
+                    null))
+                .ToArray();
+            return Task.FromResult(listings);
+        }
     }
 
     public Task<DeliveryReport> DeliverAsync(SessionHandle session, DeliveryRequest request, CancellationToken ct)
@@ -243,13 +262,27 @@ public sealed class FakeSessionHost : ISessionHost
     public Task<SessionHandle> AdoptAsync(SessionListing listing, CancellationToken ct)
     {
         EnsureAvailable();
-        throw new NotSupportedException("Adoption is not part of this fake lifecycle story.");
+        ct.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(listing);
+        lock (_sync)
+        {
+            if (!_sessionsById.TryGetValue(listing.SessionId, out var session) ||
+                session.State == FakeSessionState.Missing)
+            {
+                throw NotFound();
+            }
+
+            return Task.FromResult(session.Handle);
+        }
     }
 
     public IReadOnlyList<string> GetAttachCommand(SessionHandle session, bool readOnlyMode = true)
     {
         EnsureAvailable();
-        throw new NotSupportedException("Attach commands are not part of this fake lifecycle story.");
+        ArgumentNullException.ThrowIfNull(session);
+        return readOnlyMode
+            ? ["fake-attach", "-r", $"={session.SessionName}"]
+            : ["fake-attach", $"={session.SessionName}"];
     }
 
     public async IAsyncEnumerable<SessionHostEvent> WatchAsync(
@@ -332,9 +365,10 @@ public sealed class FakeSessionHost : ISessionHost
 
     private sealed record LaunchOptions(bool IgnoreStop);
 
-    private sealed class FakeSession(SessionHandle handle, bool ignoreGracefulStop)
+    private sealed class FakeSession(SessionHandle handle, SessionLabels labels, bool ignoreGracefulStop)
     {
         public SessionHandle Handle { get; } = handle;
+        public SessionLabels Labels { get; } = labels;
         public bool IgnoreGracefulStop { get; } = ignoreGracefulStop;
         public FakeSessionState State { get; set; } = FakeSessionState.Alive;
         public List<byte> ReceivedBytes { get; } = [];
