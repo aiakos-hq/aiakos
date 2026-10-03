@@ -1,6 +1,8 @@
 # Story review: slice 13-1
 
 Reviewed at commit 4ff7f3d (`main`), brief `status: draft`. Stories: 6. Check: ok.
+Second read at commit 0e6bddd (`docs/brief-13-1-fix`). Stories: 11. Check: ok (94 items). Open:
+F25, F26 and F27–F34 (section "Second read" at the end).
 
 Read for this review: the brief, `items.tsv`, `stories.md`, and spec 0006 lines 379–638 and
 707–726. R8–R20, R28, R38 and R39 of the spec (lines 170–212, 247–249, 290–294) were read where
@@ -313,3 +315,43 @@ The split requires no additional story or higher cap beyond table 2. GS1's origi
 nine inputs had only eight listed activity results; the missing prompt -> working result
 is now written explicitly, without changing A2. Script fixtures in story notes state
 initial session/activity/launch/native-ID values so their input paths are not guessed.
+
+## Second read: re-cut at 0e6bddd
+
+F1–F24 are repaired as the author's ledger says, with two repairs that leave a gap (F15 → F30,
+F19 → F31). The 39 axis rows, LD1–LD5 and DV1–DV5 are identical to the spec rows (compared by
+script). The split is table 2; needs are complete for order, and over-declared in places
+(B8 → B17a, B19 → B20, A8 and A9 → B10), which is harmless.
+
+- [ ] F27 (judgment-gap) Brief line 322: the second sentence of B19 (`UnknownProlongedFired`
+  …) starts in column 0, so `story.sh show` prints it in every story from 3 on (seen in
+  `show 13-1 3`, `5` and `9`). Fix: indent the line.
+- [ ] F28 (context-gap) An input whose rule belongs to a later story has no stated result:
+  story 3 creates `Apply` and receives `UpRequested`, `HarnessBody`, `NodeAttached` and the
+  timers with no rule for them, and an exception on any input blocks a story. Fix: say in B2
+  what `Apply` returns for an input or body whose rule is not owned yet.
+- [ ] F29 (judgment-gap) B6a (story 3) holds the sentence that an `ObservationGapBody` applies
+  B11, and B11 is in story 8; story 3 cannot build it and B6a cannot need it. Fix: move the
+  sentence, with its deviation note, to B11 or B6c.
+- [ ] F30 (context-gap) B5 says S5 into `present` with `ReadinessSeen` true preserves known
+  activity; from `unknown` that is `unknown/session-unknown`, and from `starting` after a U8
+  (which sets `ReadinessSeen` and leaves the session) it is `unknown/not-ready`, both under a
+  `present` session. Fix: name the value and reason for that case.
+- [ ] F31 (context-gap) B2 gives `Applied` for `—` and `Evidence` for `n/a`, and no answer when
+  one axis has `n/a` and another `—` (S5 in `absent` with U3 in `resumable`), or when no row is
+  selected (a current-launch `PROMPT_SUBMITTED` while known session is `exited`). Fix: one
+  sentence for each.
+- [ ] F32 (context-gap) Three clauses have no output that asserts them, because the row they
+  act on is tested in an earlier story that ignores extra resolves: B15 `orphan-harness` on
+  S3, B20 `delivery-unconfirmed` on A2, B6b `activity-stale` and `LastEventAt`. Fix: name them
+  in an output of the owning story (the S2 row test with a following `StopResult`, the prompt
+  step of GS4, the A14 row test).
+- [ ] F33 (context-gap) B21 gives `COMPLETED` in `StopNotCompletedBody` and not in
+  `StartNotCompletedBody`. Fix: add it.
+- [ ] F34 (context-gap) "Definition of done" gives all eleven stories the same commit subject
+  and the same sentence "Risks: checks 0006-RK4 …", so a commit claims checks its story does
+  not make (RK4 is story 9 only). Fix: say that a story's commit names the risks of its own
+  items, and which story has which.
+
+Not checked in the second read: `show` for stories other than 3, 5 and 9; the over-declared
+needs one by one; anything built or run except `tools/story.sh check 13-1` and `show`.
