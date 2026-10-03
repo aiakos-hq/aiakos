@@ -45,5 +45,6 @@ Reviewed at commit <sha>. Stories: <n>. Check: ok.
 - <what you did not verify>
 ```
 
-Write `None.` under a heading that has nothing. Hand the slice back to `analysis-author` while
+Write `None.` under a heading that has nothing. Hand the slice back to the author seat that
+handed it to you while
 findings are open, and to `lead-lead` when none are.

@@ -9,6 +9,8 @@ the seats work together.
 - Work arrives as an OpenRig queue item. Run `rig whoami --json`, then
   `rig queue list --owned`. Claim an item before you work on it.
 - Every item names a slice (`10-2`) or a story (`10-2-1`) and, for a story, its GitHub issue.
+- A slice has one author, from its brief to its last acceptance test. There are two author
+  seats; work on a slice goes back to the author that owns it, never to the other one.
 - Hand work on with `rig queue handoff`. State the story, the branch, the commit and what you
   ran. A chat message is not a handoff.
 - When you must stop and wait, park the item with `rig queue block` and say what resumes it.
