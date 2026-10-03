@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading.Channels;
 using Aiakos.Core;
 using Aiakos.Node.Sessions;
@@ -207,6 +208,7 @@ public sealed class FakeSessionHost : ISessionHost
 
             state.State = FakeSessionState.Missing;
             state.StopRequested = true;
+            state.DeliveryCancellation?.Cancel();
             RemoveFromSeatIndex(state);
             var outcome = IgnoresGracefulStop || state.IgnoreGracefulStop
                 ? StopOutcome.Killed
@@ -222,10 +224,131 @@ public sealed class FakeSessionHost : ISessionHost
         return Task.FromResult<IReadOnlyList<SessionListing>>(Array.Empty<SessionListing>());
     }
 
-    public Task<DeliveryReport> DeliverAsync(SessionHandle session, DeliveryRequest request, CancellationToken ct)
+    public async Task<DeliveryReport> DeliverAsync(SessionHandle session, DeliveryRequest request, CancellationToken ct)
     {
         EnsureAvailable();
-        throw new NotSupportedException("Delivery is not part of this fake lifecycle story.");
+        ArgumentNullException.ThrowIfNull(request);
+
+        var lead = InputValidator.CheckLead(request.Lead);
+        var body = InputValidator.CheckBody(request.Body);
+        if (lead.Problem != InputProblem.None)
+        {
+            throw InputRejected(lead.Reason ?? "Lead is not allowed.");
+        }
+
+        if (body.Problem == InputProblem.NotAllowed)
+        {
+            throw InputRejected(body.Reason ?? "Body is not allowed.");
+        }
+
+        if (body.Problem == InputProblem.TooLarge)
+        {
+            throw new SessionHostException(new SessionHostError(SessionHostErrorCode.PayloadTooLarge,
+                body.Reason ?? "Body exceeds the allowed size.", false));
+        }
+
+        if (request.Lead.Length == 0 && body.Normalized.Length == 0)
+        {
+            throw InputRejected("Lead and body cannot both be empty.");
+        }
+
+        FakeSession state;
+        lock (_sync)
+        {
+            state = Find(session) ?? throw NotFound();
+            if (state.State != FakeSessionState.Alive)
+            {
+                throw NotFound();
+            }
+
+            if (!state.DeliveryGate.Wait(0, ct))
+            {
+                throw new SessionHostException(new SessionHostError(SessionHostErrorCode.Busy,
+                    "A delivery is already in progress for this session.", true));
+            }
+
+            state.DeliveryCancellation?.Dispose();
+            state.DeliveryCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        }
+
+        var deliveryToken = state.DeliveryCancellation.Token;
+        var deliveryId = Guid.NewGuid().ToString("N");
+        var submittedAt = _time.GetUtcNow();
+        var stage = DeliveryStage.BufferLoaded;
+        var confirmation = new Confirmation(ConfirmationOutcome.Unconfirmed, null);
+        try
+        {
+            if (IsCancelled(state, deliveryToken))
+            {
+                return Report();
+            }
+
+            Append(state, Encoding.UTF8.GetBytes(request.Lead));
+            stage = DeliveryStage.LeadTyped;
+            if (IsCancelled(state, deliveryToken))
+            {
+                return Report();
+            }
+
+            if (body.Normalized.Length > 0)
+            {
+                Append(state, [0x1b, (byte)'[', (byte)'2', (byte)'0', (byte)'0', (byte)'~']);
+                Append(state, Encoding.UTF8.GetBytes(body.Normalized));
+                Append(state, [0x1b, (byte)'[', (byte)'2', (byte)'0', (byte)'1', (byte)'~']);
+                stage = DeliveryStage.BodyPasted;
+            }
+
+            if (IsCancelled(state, deliveryToken))
+            {
+                return Report();
+            }
+
+            if (request.SubmitDelay > TimeSpan.Zero)
+            {
+                try
+                {
+                    await Task.Delay(request.SubmitDelay, _time, deliveryToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (deliveryToken.IsCancellationRequested)
+                {
+                    return Report();
+                }
+            }
+
+            if (IsCancelled(state, deliveryToken))
+            {
+                return Report();
+            }
+
+            if (request.Submit == SubmitKey.CtrlM)
+            {
+                Append(state, [0x0d]);
+                stage = DeliveryStage.Submitted;
+            }
+
+            if (IsCancelled(state, deliveryToken))
+            {
+                return Report();
+            }
+
+            confirmation = request.Confirmer is null
+                ? new Confirmation(ConfirmationOutcome.NotRequested, null)
+                : await request.Confirmer.ConfirmAsync(
+                    new FakeDeliveryContext(deliveryId, submittedAt), deliveryToken).ConfigureAwait(false);
+            return Report();
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                state.DeliveryCancellation?.Dispose();
+                state.DeliveryCancellation = null;
+                state.DeliveryGate.Release();
+            }
+        }
+
+        DeliveryReport Report() => new(deliveryId, stage, confirmation, 0, body.Bytes,
+            body.LineEndingsNormalized, null);
     }
 
     public Task SendKeysAsync(SessionHandle session, IReadOnlyList<NamedKey> keys, CancellationToken ct)
@@ -330,6 +453,40 @@ public sealed class FakeSessionHost : ISessionHost
     private static SessionHostException NotFound() =>
         new(new SessionHostError(SessionHostErrorCode.NotFound, "Session was not found.", false));
 
+    private static SessionHostException InputRejected(string message) =>
+        new(new SessionHostError(SessionHostErrorCode.InputNotAllowed, message, false));
+
+    private bool IsCancelled(FakeSession state, CancellationToken token)
+    {
+        lock (_sync)
+        {
+            return token.IsCancellationRequested || state.State != FakeSessionState.Alive;
+        }
+    }
+
+    private void Append(FakeSession state, byte[] bytes)
+    {
+        lock (_sync)
+        {
+            if (state.State == FakeSessionState.Alive)
+            {
+                state.ReceivedBytes.AddRange(bytes);
+            }
+        }
+    }
+
+    private sealed class FakeDeliveryContext(string deliveryId, DateTimeOffset submittedAt) : DeliveryContext
+    {
+        public override string DeliveryId { get; } = deliveryId;
+        public override DateTimeOffset SubmittedAt { get; } = submittedAt;
+
+        public override Task<PaneSnapshot> CaptureAsync(CaptureRequest request, CancellationToken ct) =>
+            throw new NotSupportedException("Capture is not part of this delivery story.");
+
+        public override Task ResubmitAsync(string reason, CancellationToken ct) =>
+            throw new NotSupportedException("Resubmit is not part of this delivery story.");
+    }
+
     private sealed record LaunchOptions(bool IgnoreStop);
 
     private sealed class FakeSession(SessionHandle handle, bool ignoreGracefulStop)
@@ -344,6 +501,8 @@ public sealed class FakeSessionHost : ISessionHost
         public bool ExitPublished { get; set; }
         public bool VanishPublished { get; set; }
         public bool StopRequested { get; set; }
+        public SemaphoreSlim DeliveryGate { get; } = new(1, 1);
+        public CancellationTokenSource? DeliveryCancellation { get; set; }
     }
 
     private enum FakeSessionState { Alive, Exited, Missing }
