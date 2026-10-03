@@ -28,3 +28,6 @@ E12	output	once	R12
 E13	output	once	C1
 C2	change	once	R11
 E14	output	once	C2,R11
+R13	rule	once	-
+E15	output	once	R3,R12
+E16	output	once	R13
