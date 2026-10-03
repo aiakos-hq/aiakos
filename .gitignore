@@ -483,3 +483,13 @@ $RECYCLE.BIN/
 
 # Claude Code worktrees (agent sessions)
 .claude/worktrees/
+
+# OpenRig projections into the working directory (rigs/aiakos-delivery/SETUP.md)
+CLAUDE.local.md
+AGENTS.md
+.agents/
+.codex/
+.openrig/
+.claude/plugins/
+.claude/skills/*
+!.claude/skills/story/

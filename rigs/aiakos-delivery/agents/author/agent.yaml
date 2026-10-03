@@ -1,0 +1,27 @@
+name: aiakos-author
+version: "1.0"
+description: Writes briefs, item lists and acceptance tests, and splits briefs into stories
+
+imports:
+  - ref: local:../shared
+
+profiles:
+  default:
+    uses:
+      skills: []
+      guidance: []
+      subagents: []
+      plugins: [shared:openrig-core]
+      runtime_resources: [shared:claude-settings, shared:claude-activity-hooks]
+
+resources:
+  guidance:
+    - id: role
+      path: guidance/role.md
+
+startup:
+  files:
+    - path: guidance/role.md
+      delivery_hint: send_text
+      required: true
+  actions: []
