@@ -102,9 +102,10 @@ Brief against the spec lines:
 - [x] F24 (judgment-gap) B6 step 1 applies rule 11 for every differing instance when the state
   has one; spec 616–618 adds "and the seat expected events from the previous instance". Fix:
   list it as a deviation, or state the condition.
-- [ ] F25 (context-gap) B7 keeps `TELEMETRY` and `OTHER` out of the stale guard; spec 624–625
+- [x] F25 (context-gap) B7 keeps `TELEMETRY` and `OTHER` out of the stale guard; spec 624–625
   has no exemption. The brief gives the reason, and the spec is not amended. Fix: `lead` adds
-  it to the spec amendment of #13, with F22–F24 as far as they stay.
+  it to the spec amendment of #13, with F22–F24 as far as they stay. Done: spec 0006 amended on 2026-10-04 (pipeline steps 1, 4 and 5, and the
+  starting/unknown activity rule), in this pull request.
 
 Approval:
 
