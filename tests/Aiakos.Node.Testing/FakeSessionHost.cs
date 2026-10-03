@@ -208,7 +208,9 @@ public sealed class FakeSessionHost : ISessionHost
             state.State = FakeSessionState.Missing;
             state.StopRequested = true;
             RemoveFromSeatIndex(state);
-            var outcome = state.IgnoreGracefulStop ? StopOutcome.Killed : StopOutcome.Stopped;
+            var outcome = IgnoresGracefulStop || state.IgnoreGracefulStop
+                ? StopOutcome.Killed
+                : StopOutcome.Stopped;
             return Task.FromResult(new StopReport(outcome, null, null, 0, Array.Empty<int>(), null));
         }
     }
