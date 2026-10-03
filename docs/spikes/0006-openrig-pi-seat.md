@@ -120,7 +120,10 @@ unchanged and the seat started without an error.
 
 ## Decision / follow-ups
 
-- Use Pi on OpenCode Go for the `qa` seat of the delivery rig.
+- Use Pi on OpenCode Go for the `qa` seat of the delivery rig. **Changed on 2026-10-04:** `qa`
+  moved to Codex. The Pi seat worked, but OpenRig shows only a one-line summary per tool call
+  for a Pi seat, which made it hard to follow. How to bring a Pi seat back is in the rig's
+  `SETUP.md`.
 - `SETUP.md` of the rig describes the key file, and a setup script writes the `auth.json`
   pointer for every Pi seat.
 - Pin `@openrig/cli` and `@earendil-works/pi-coding-agent` versions in `SETUP.md`.

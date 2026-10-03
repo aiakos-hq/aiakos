@@ -8,7 +8,9 @@ RIG=aiakos-delivery
 OPENRIG_VERSION=0.6.4
 PI_VERSION=1.0.1
 KEY_FILE="$HOME/.config/opencode-go/key"
-PI_SEATS="verify-qa"
+# Seats that run on Pi (pod-member, for example "verify-qa"). None at the moment: Pi and the
+# OpenCode Go key are only checked when this list is not empty (see docs/spikes/0006).
+PI_SEATS=""
 
 problems=0
 ok()      { printf 'ok       %s\n' "$1"; }
@@ -27,7 +29,7 @@ need docker "Docker Desktop with WSL integration for this distro"
 need rig    "npm install -g @openrig/cli@$OPENRIG_VERSION"
 need claude "Claude Code, then log in"
 need codex  "npm install -g @openai/codex, then 'codex login'"
-need pi     "npm install -g @earendil-works/pi-coding-agent@$PI_VERSION"
+[ -z "$PI_SEATS" ] || need pi "npm install -g @earendil-works/pi-coding-agent@$PI_VERSION"
 need herdr  "optional: only for 'terminal rig:$RIG' in the rig TUI"
 
 version_is() { # command, expected, actual
@@ -37,13 +39,15 @@ version_is() { # command, expected, actual
   esac
 }
 command -v rig >/dev/null 2>&1 && version_is rig "$OPENRIG_VERSION" "$(rig --version 2>/dev/null)"
-command -v pi  >/dev/null 2>&1 && version_is pi "$PI_VERSION" "$(pi --version 2>/dev/null)"
+[ -z "$PI_SEATS" ] || { command -v pi >/dev/null 2>&1 && version_is pi "$PI_VERSION" "$(pi --version 2>/dev/null)"; }
 
 if command -v gh >/dev/null 2>&1; then
   if gh auth status >/dev/null 2>&1; then ok "gh is logged in"; else problem "gh is not logged in: gh auth login"; fi
 fi
 
-if [ -s "$KEY_FILE" ]; then
+if [ -z "$PI_SEATS" ]; then
+  :
+elif [ -s "$KEY_FILE" ]; then
   ok "OpenCode Go key file"
   mode="$(stat -c %a "$KEY_FILE")"
   [ "$mode" = "600" ] || note "$KEY_FILE has mode $mode; run: chmod 600 $KEY_FILE"

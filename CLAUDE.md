@@ -72,8 +72,8 @@ edit docs there) and `aiakos-hq/.github` (org profile, CONTRIBUTING, SECURITY, C
   local in `artifacts/trials/<story>/` (git-ignored), and `tools/story.sh done` runs them as a
   gate. Only a failed acceptance test, an exception, a leaked secret or an earlier test turned
   red blocks a story; anything else becomes a new item. One retry at most, and no follow-up
-  briefs. Nothing is checked by the vendor that wrote it: Codex writes and implements, Claude
-  checks and reviews, Pi on OpenCode Go runs the gate. The whole flow, with the seats and the
+  briefs. Judgment is checked by another vendor: Codex writes and implements, Claude
+  checks the analysis and reads the diff; the gate is a script that a Codex seat runs. The whole flow, with the seats and the
   definitions of ready, done and partial, is in
   [`docs/workflow.md`](docs/workflow.md); the index of briefs is
   [`docs/briefs/README.md`](docs/briefs/README.md). `tools/story.sh` is where the rules are
