@@ -65,4 +65,15 @@ line were checked against the existing detector patterns.
    150-file mixed cases with links, unsafe filenames and missing SKILL.md, created in opposite
    orders, all requiring exactly AIK3005 and no other skill diagnostic.
 
-Both round-2 findings addressed; architect confirmation pending. No unresolved disagreement.
+Both round-2 findings addressed. No unresolved disagreement.
+
+## Re-review, round 3
+
+Reviewed at commit 28b784a. Stories: 5. Check: ok.
+
+Both findings of round 2 are resolved: T5 no longer asserts a null `Rig` for valid loads, and R7
+makes AIK3005 the only diagnostic of an over-limit skill read, with the mixed 150-file cases in
+SKILL-limits. The change was read against R5, R7, R8 and G3.
+
+New findings: None.
+
