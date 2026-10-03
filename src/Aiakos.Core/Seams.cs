@@ -6,9 +6,6 @@ namespace Aiakos.Core;
 
 #pragma warning disable CA1040 // Empty interfaces are intentional placeholders until their specs land.
 
-/// <summary>Terminal session host (tmux first). Designed by issue #11 (spec 0004).</summary>
-public interface ISessionHost;
-
 /// <summary>Sandbox around a seat (none, Docker, brig). Designed in M6.</summary>
 public interface ISandbox;
 
