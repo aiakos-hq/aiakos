@@ -8,13 +8,13 @@
 #   architect  claude-opus-5-5         checks the analysis
 #   impl       gpt-6-luna              the default implementer (Sonnet level)
 #   senior     gpt-6.1-sol             escalated stories only
-#   qa         opencode-go/gpt-6-luna  third vendor; runs the gate
+#   qa         gpt-6-luna              runs the gate (a script decides; the seat only runs it)
 #   reviewer   claude-opus-5-5         reads the diff once
 version: "0.2"
 name: aiakos-delivery
 summary: >
   Delivery team for Aiakos. Codex writes briefs and implements, Claude checks and reviews,
-  Pi on OpenCode Go runs the acceptance gate. The maintainer approves briefs and merges.
+  and a Codex seat runs the acceptance gate. The maintainer approves briefs and merges.
 
 culture_file: CULTURE.md
 
@@ -48,12 +48,14 @@ pods:
         profile: default
         runtime: codex
         model: gpt-6.1-sol
+        permission_policy: builtin:yolo
         cwd: "../.."
       - id: author2
         agent_ref: "local:agents/author"
         profile: default
         runtime: codex
         model: gpt-6.1-sol
+        permission_policy: builtin:yolo
         cwd: "../.."
       - id: architect
         agent_ref: "local:agents/architect"
@@ -77,12 +79,14 @@ pods:
         profile: default
         runtime: codex
         model: gpt-6-luna
+        permission_policy: builtin:yolo
         cwd: "../.."
       - id: senior
         agent_ref: "local:agents/impl"
         profile: default
         runtime: codex
         model: gpt-6.1-sol
+        permission_policy: builtin:yolo
         cwd: "../.."
     edges: []
 
@@ -92,8 +96,9 @@ pods:
       - id: qa
         agent_ref: "local:agents/qa"
         profile: default
-        runtime: pi
-        model: opencode-go/gpt-6-luna
+        runtime: codex
+        model: gpt-6-luna
+        permission_policy: builtin:yolo
         cwd: "../.."
       - id: reviewer
         agent_ref: "local:agents/reviewer"

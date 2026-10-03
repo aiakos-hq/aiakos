@@ -11,8 +11,9 @@ Three ideas carry the flow:
   story is done. Anything else that someone notices becomes a new item.
 - **Work is small.** A brief is split into stories that a Sonnet-level implementer can finish.
   A stronger model is the exception, for a story that cannot be split further.
-- **Nothing is checked by the vendor that wrote it.** Codex writes and implements, Claude checks
-  and reviews, and Pi on OpenCode Go runs the tests.
+- **Judgment is checked by another vendor.** Codex writes and implements; Claude checks the
+  analysis and reads the diff. The gate is a script, so the seat that runs it (`qa`, Codex) decides
+  nothing.
 
 The earlier slice review loop, in which a reviewer looked for problems after each run and wrote
 follow-up briefs, had no fixed bar and did not end (slice 14-2: three runs and three reviews
@@ -46,7 +47,7 @@ rig up rigs/aiakos-delivery/rig.yaml
 | `architect` | Claude Code (Opus) | Checks the brief and the split; attacks them before they are approved |
 | `impl` | Codex | Implements one story in its own worktree |
 | `senior` | Codex, stronger model | Implements a story that was escalated |
-| `qa` | Pi (OpenCode Go) | Runs the gate and probes the behaviour |
+| `qa` | Codex | Runs the gate and probes the behaviour |
 | `reviewer` | Claude Code | Reads the diff once |
 
 Which model sits behind a seat is one `model:` line in `rig.yaml`. Seats hand work to each other
