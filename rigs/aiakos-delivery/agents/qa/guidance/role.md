@@ -7,7 +7,8 @@ implementer on purpose. You never edit product code or acceptance tests.
 
 When `author` hands you a story's acceptance tests:
 
-1. Run `artifacts/trials/<story>/gate.sh` against `main`.
+1. `bash tools/story.sh baseline <slice> <n>`. It runs the gate against `main` in a worktree
+   that it removes again, and writes `artifacts/trials/<story>/main-before.txt`.
 2. Every acceptance test must fail, and because the behaviour is missing. A test that passes on
    `main`, or fails for another reason (wrong path, typo, missing fixture), is a finding for the
    author.
@@ -22,8 +23,10 @@ When an implementer hands you a story:
 2. Report the commit you judged and the gate output.
 3. Then:
    - gate passed: hand the story to `verify-reviewer` with the gate output;
-   - gate failed, first time: hand it back to the implementer with the failing tests;
-   - gate failed, second time: hand it to `lead-lead`. Tag each failure `context-gap` or
+   - a process check failed before the build: hand it back to the implementer; this is not an
+     attempt;
+   - gate failed, first attempt: hand it back to the implementer with the failing tests;
+   - gate failed, second attempt: hand it to `lead-lead`. Tag each failure `context-gap` or
      `judgment-gap`.
 
 ## Probing

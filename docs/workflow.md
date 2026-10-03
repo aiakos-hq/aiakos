@@ -61,12 +61,12 @@ Credentials and the OpenRig state (`~/.openrig`) stay on the machine.
 
 | Step | Who | What happens | Result |
 |---|---|---|---|
-| 1. Brief | `author` | Writes `brief.md` and `items.tsv` from [`briefs/TEMPLATE.md`](briefs/TEMPLATE.md) | A brief on a branch |
+| 1. Brief | `author` | `tools/story.sh analysis <slice>` for a worktree, then writes `brief.md` and `items.tsv` from [`briefs/TEMPLATE.md`](briefs/TEMPLATE.md) | A brief on a branch |
 | 2. Split | `author` | `tools/story.sh split <slice>`: sorts the items into stories, IDs only | `stories.md` |
 | 3. Check | Script | `tools/story.sh check <slice>`: traceability and size | Pass or a list of errors |
 | 4. Story review | `architect` | Reads the brief and the split once; looks for ties the script cannot see and for a story that is too large | `findings.md` |
 | 5. Approval | Maintainer | Findings are resolved by commits; `lead` opens the pull request; the maintainer merges it | The analysis is on `main` |
-| 6. Acceptance | `author` | Writes the story's acceptance tests and `gate.sh`, and runs them on `main` to see them fail | `artifacts/trials/<story>/` (local) |
+| 6. Acceptance | `author`, then `qa` | `author` writes the story's acceptance tests and `gate.sh`; `qa` runs `tools/story.sh baseline <slice> <n>` and reads why they fail on `main` | `artifacts/trials/<story>/` (local), with `main-before.txt` |
 | 7. Ready | `lead` | `tools/story.sh ready <slice> <n>`: checks the definition of ready and creates the sub-issue | A GitHub issue labelled `ready` |
 | 8. Run | `impl` (or `senior`) | `tools/story.sh start <issue>`, then implements in the worktree | One commit on a local branch |
 | 9. Gate | `qa` | `tools/story.sh done <issue>`: paths, build, acceptance tests | `needs-review`, one retry, `partial` or `blocked` |
@@ -115,7 +115,8 @@ A story gets its GitHub issue and the label `ready` when:
 
 1. the brief is approved;
 2. the story lists its items and is under the size cap;
-3. its acceptance tests exist and fail on `main` for the right reason;
+3. its acceptance tests exist and fail on `main` for the right reason (`baseline` records the
+   failure; `qa` reads the reason);
 4. every story it depends on is done;
 5. the review findings are resolved or filed as their own items;
 6. its route is set (`impl`, or `impl/senior` with a reason).
@@ -160,7 +161,15 @@ Every finding carries one tag that says why it happened:
 - `context-gap`: the brief or the story lacked what was needed. The fix belongs in the brief.
 - `judgment-gap`: the brief had it and the implementer got it wrong.
 
-**Stop rule:** one retry at most. When the gate fails a second time, the tag decides:
+**What counts as an attempt:** a gate run that reached the build and failed, or a review that
+blocked. A run that stops at a process check before the build (uncommitted changes, a file
+outside the brief's paths) is not an attempt; the implementer fixes it and runs the gate again.
+
+**Sending a story back:** `tools/story.sh start <issue> --retry` is the only way. It keeps the
+worktree and branch, merges `main` in, writes the story text again from the brief on `main`
+(and updates the issue body), and sets `in-progress`.
+
+**Stop rule:** one retry at most. After the second failed attempt, the tag decides:
 a `context-gap` sends the story back to the analysis, where the brief is fixed or the story is
 split; a `judgment-gap` escalates it to the `senior` seat. There are no follow-up briefs.
 
@@ -193,7 +202,9 @@ checkout. `gate.sh` there copies them into the worktree, runs them and removes t
 implementer works in its own worktree and is told not to read that folder; all seats share one
 file system, so this is a convention and not a barrier.
 
-Each story has its own worktree. No seat builds or commits in the main checkout.
+Each story has its own worktree, and so has the analysis of each slice
+(`tools/story.sh analysis <slice>`). `baseline` uses a worktree that it removes again. No seat
+builds or commits in the main checkout, and no seat creates a worktree by hand.
 
 ## Who may do what on GitHub
 
@@ -211,10 +222,12 @@ bash tools/story.sh check <slice>
 bash tools/story.sh split <slice>
 bash tools/story.sh split-done <slice>
 bash tools/story.sh show <slice> <n>
+bash tools/story.sh analysis <slice> [--remove]
 bash tools/story.sh status
+bash tools/story.sh baseline <slice> <n>
 bash tools/story.sh ready <slice> <n> [--dry-run]
 bash tools/story.sh next [<route>]
-bash tools/story.sh start <issue>
+bash tools/story.sh start <issue> [--retry]
 bash tools/story.sh done <issue>
 bash tools/story.sh pr <issue> [--maintainer-reviewed]
 bash tools/story.sh cleanup <issue>

@@ -9,17 +9,26 @@
 #                                         do there
 #   tools/story.sh split-done <slice>     checks the stories.md written there and copies it in
 #   tools/story.sh show <slice> <n>       prints story <n> as an implementer will get it
+#   tools/story.sh analysis <slice> [--remove]
+#                                         a worktree and branch for the analysis of one slice
 #
 # Development (one GitHub sub-issue per story, created when the story is ready):
 #   tools/story.sh status                 briefs, their stories and the state of each
 #   tools/story.sh ready <slice> <n> [--dry-run]
 #                                         checks the definition of ready, then creates the
 #                                         sub-issue with the label "ready"
+#   tools/story.sh baseline <slice> <n>   runs the story's gate against main in a temporary
+#                                         worktree; it must fail there before "ready"
 #   tools/story.sh next [<route>]         the ready story to take next
 #   tools/story.sh start <issue>          worktree + branch from origin/main, story copied in,
 #                                         label ready -> in-progress
+#   tools/story.sh start <issue> --retry  sends a story back to its implementer: same worktree,
+#                                         main merged in, story text and issue body written
+#                                         again from the brief, label -> in-progress
 #   tools/story.sh done <issue>           the gate: clean tree, allowed paths, build, acceptance
-#                                         tests; label -> needs-review, or one retry, or blocked
+#                                         tests; label -> needs-review, or one retry, or blocked.
+#                                         A run that stops at a process check before the build
+#                                         is not an attempt
 #   tools/story.sh pr <issue> [--maintainer-reviewed] [--partial]
 #                                         pushes the branch and opens the pull request.
 #                                         --partial: the gate did not pass because the brief
@@ -310,7 +319,7 @@ cmd_status() {
   done
   echo
   echo "Story worktrees:"
-  git worktree list | grep -E '/(story|slice)-[0-9]+-[0-9]+' || echo "  none"
+  git worktree list | grep -E '/(story|slice|analysis|baseline)-[0-9]+-[0-9]+' || echo "  none"
 }
 
 cmd_ready() {
@@ -331,6 +340,10 @@ cmd_ready() {
   [ "$status" = "approved" ] || problem "1. the brief's status is '$status', not 'approved'"
   run_check "$dir" > /dev/null 2>&1 || problem "2. the story check fails (tools/story.sh check $slice)"
   [ -f "$main_root/artifacts/trials/$story/gate.sh" ] || problem "3. no acceptance gate: artifacts/trials/$story/gate.sh (it must fail on main before the run)"
+  if [ -f "$main_root/artifacts/trials/$story/gate.sh" ]; then
+    tail -n 1 "$main_root/artifacts/trials/$story/main-before.txt" 2>/dev/null | grep -q '^BASELINE: fail' \
+      || problem "3. the gate was not seen to fail on main: run 'tools/story.sh baseline $slice $n'"
+  fi
   depends="$(story_field "$dir" "$n" depends)"
   if [ "$depends" != "-" ]; then
     for dep in $(printf '%s' "$depends" | tr ',' ' '); do
@@ -382,10 +395,37 @@ cmd_next() {
   rm -f "${TMPDIR:-/tmp}/story-next.$$"
 }
 
+# Removes every state label the issue has and sets one.
+set_state() {
+  local old args=()
+  for old in ready in-progress needs-review blocked partial; do
+    if [ "$old" != "$1" ] && has_label "$old"; then args+=(--remove-label "$old"); fi
+  done
+  if [ "${AIAKOS_NO_WRITE:-}" = "1" ]; then echo "would set #$number to $1"; return; fi
+  gh issue edit "$number" --repo "$REPO" "${args[@]}" --add-label "$1" >/dev/null
+}
+
+# Failed attempts so far: gate runs that reached the build and failed, and reviews that blocked.
+# A run that stopped at a process check (uncommitted changes, a file outside the paths) is not one.
+failed_attempts() {
+  local count=0 file
+  for file in "$trial"/gate-*.txt; do
+    [ -f "$file" ] || continue
+    if grep -q '^== dotnet build' "$file" && tail -n 1 "$file" | grep -q 'GATE: fail'; then count=$((count + 1)); fi
+  done
+  for file in "$trial"/review-block-*.md; do [ -f "$file" ] && count=$((count + 1)); done
+  printf '%s' "$count"
+}
+
 cmd_start() {
   load_issue "${1:-}"
+  case "${2:-}" in
+    "") ;;
+    --retry) start_retry; return ;;
+    *) die "unknown option for start: $2" ;;
+  esac
   has_label ready || die "#$number is not labelled 'ready' (labels: $labels)"
-  [ ! -e "$worktree" ] || die "worktree already exists: $worktree"
+  [ ! -e "$worktree" ] || die "worktree already exists: $worktree (to send the story back to its implementer: start $number --retry)"
   if git show-ref --verify --quiet "refs/heads/$branch"; then die "branch already exists: $branch"; fi
   [ -f "$trial/gate.sh" ] || die "no acceptance gate: $trial/gate.sh"
   git fetch --quiet origin main
@@ -400,16 +440,71 @@ cmd_start() {
   print_task "Implement the story at artifacts/briefs/$story.md. Follow it exactly. Run build and tests until green. One commit."
 }
 
+# Sends a story back to its implementer after a blocking review, a changed brief or a failed
+# gate: same worktree and branch, main merged in, the story text written again from the brief.
+start_retry() {
+  local last count reason="" text
+  [ -d "$worktree" ] || die "no worktree for $story: nothing to retry (use 'start $number')"
+  git show-ref --verify --quiet "refs/heads/$branch" || die "no branch $branch: nothing to retry"
+  [ -z "$(git -C "$worktree" status --porcelain)" ] || die "the worktree has uncommitted changes: $worktree"
+  last="$(ls -t "$trial"/gate-*.txt 2>/dev/null | head -n 1 || true)"
+  if [ -n "$last" ]; then
+    [ "$(git -C "$worktree" rev-parse --short HEAD)" = "$(head -n 1 "$last" | grep -oE 'commit [0-9a-f]+' | cut -d' ' -f2)" ] \
+      || die "the branch has commits the gate has not seen; run 'done $number' first"
+  fi
+  git fetch --quiet origin main
+  if ! git -C "$worktree" merge --quiet --no-edit origin/main >/dev/null 2>&1; then
+    git -C "$worktree" merge --abort 2>/dev/null || true
+    die "origin/main does not merge cleanly into $branch; merge it by hand in $worktree, then run this again"
+  fi
+  mkdir -p "$worktree/artifacts/briefs"
+  text="$worktree/artifacts/briefs/$story.md"
+  if [ -n "$n" ] && git cat-file -e "$BRIEF_REF:docs/briefs/$slice/stories.md" 2>/dev/null; then
+    slice_dir "$slice" ref
+    assemble "$dir" "$slice" "$n" > "$text"
+    if [ "${AIAKOS_NO_WRITE:-}" = "1" ]; then echo "would update the body of #$number"
+    else gh issue edit "$number" --repo "$REPO" --body-file "$text" >/dev/null; fi
+    echo "story    text written again from the brief on $BRIEF_REF; issue body updated"
+  else
+    printf '%s\n' "$body" > "$text"
+  fi
+  if [ -f "$trial/review.md" ]; then
+    if head -n 1 "$trial/review.md" | grep -q '^VERDICT: block'; then
+      count=$(( $(find "$trial" -maxdepth 1 -name 'review-block-*.md' | wc -l) + 1 ))
+      cp "$trial/review.md" "$worktree/artifacts/briefs/$story-review.md"
+      mv "$trial/review.md" "$trial/review-block-$count.md"
+      reason="The review that sent it back is in artifacts/briefs/$story-review.md. "
+    else
+      count=$(( $(find "$trial" -maxdepth 1 -name 'review-superseded-*.md' | wc -l) + 1 ))
+      mv "$trial/review.md" "$trial/review-superseded-$count.md"
+    fi
+  fi
+  if [ -n "$last" ] && tail -n 1 "$last" | grep -q 'GATE: fail'; then
+    cp "$last" "$worktree/artifacts/briefs/$story-$(basename "$last")"
+    reason="${reason}The last gate output is in artifacts/briefs/$story-$(basename "$last"). "
+  fi
+  set_state in-progress
+  echo "story    $story (#$number, part of #$parent, $route), retry"
+  echo "branch   $branch (origin/main merged in)"
+  echo "worktree $(native "$worktree")"
+  echo "label    in-progress"
+  echo "attempts $(failed_attempts) failed so far"
+  print_task "The story at artifacts/briefs/$story.md was sent back. Read it again: its text may have changed. ${reason}Fix what is named there and nothing else. Add one new commit."
+}
+
 # The gate. Everything it checks is decided before the run; nothing is judged here.
 cmd_done() {
   load_issue "${1:-}"
   [ -d "$worktree" ] || die "no worktree for $story: $worktree"
   [ -f "$trial/gate.sh" ] || die "no acceptance gate: $trial/gate.sh"
-  local attempt log paths path file bad="" ok=1
-  attempt=$(( $(find "$trial" -maxdepth 1 -name 'gate-*.txt' | wc -l) + 1 ))
-  log="$trial/gate-$attempt.txt"
+  local run failed attempt log paths path file bad="" ok=1
+  # The file number counts every run; the attempt counts only runs that can use up the retry.
+  run=$(( $(find "$trial" -maxdepth 1 -name 'gate-*.txt' | wc -l) + 1 ))
+  failed="$(failed_attempts)"
+  attempt=$((failed + 1))
+  log="$trial/gate-$run.txt"
   {
-    echo "Gate for story $story, attempt $attempt, commit $(git -C "$worktree" rev-parse --short HEAD)."
+    echo "Gate for story $story, run $run, attempt $attempt, commit $(git -C "$worktree" rev-parse --short HEAD)."
     echo
     if [ -n "$(git -C "$worktree" status --porcelain)" ]; then echo "FAIL: the worktree has uncommitted changes"; ok=0; fi
     if [ -z "$(git -C "$worktree" log --oneline origin/main..HEAD)" ]; then echo "FAIL: no commit on the branch"; ok=0; fi
@@ -446,21 +541,26 @@ cmd_done() {
   cat "$log"
   echo
   if tail -n 1 "$log" | grep -q 'GATE: pass'; then
-    relabel in-progress needs-review
+    set_state needs-review
     echo "label    needs-review"
     echo "Inputs for the reviewer (one read of the diff):"
     echo "  story     $story"
     echo "  worktree  $(native "$worktree")"
     echo "  brief     $(native "$worktree/artifacts/briefs/$story.md")"
     echo "  gate      $(native "$log")"
-  elif [ "$attempt" -eq 1 ]; then
-    cp "$log" "$worktree/artifacts/briefs/$story-gate-1.txt"
+  elif ! grep -q '^== dotnet build' "$log"; then
+    echo "A process check failed before the build. This run is not an attempt: fix what the"
+    echo "FAIL lines name and run 'done $number' again."
+  elif [ "$failed" -eq 0 ]; then
+    mkdir -p "$worktree/artifacts/briefs"
+    cp "$log" "$worktree/artifacts/briefs/$story-gate-$run.txt"
     echo "One retry is allowed (stop rule). The gate output is in the worktree."
-    print_task "The acceptance gate failed for the story at artifacts/briefs/$story.md. Its output is in artifacts/briefs/$story-gate-1.txt. Fix the code so that the gate passes. Do not change the scope of the story. Add one new commit."
+    print_task "The acceptance gate failed for the story at artifacts/briefs/$story.md. Its output is in artifacts/briefs/$story-gate-$run.txt. Fix the code so that the gate passes. Do not change the scope of the story. Add one new commit."
   else
-    relabel in-progress blocked
+    set_state blocked
     echo "label    blocked"
-    echo "Stop rule: the gate failed twice. Do not run it a third time. Tag each failure:"
+    echo "Stop rule: this is failed attempt $attempt (failed gates and blocking reviews count). Do not"
+    echo "run it again as it is. Tag each failure:"
     echo "  context-gap   the brief lacked it: fix the brief or split the story (slice $slice)"
     echo "  judgment-gap  the brief had it: set the route to impl/senior, once"
     echo "If the brief depends on something that does not exist, the story may end partial:"
@@ -520,11 +620,73 @@ cmd_pr() {
   } > "$body_file"
   git -C "$worktree" push --quiet -u origin "$branch"
   if [ -n "$partial" ]; then
-    if has_label blocked; then relabel blocked partial; else relabel in-progress partial; fi
+    set_state partial
     echo "label    partial"
   fi
   gh pr create --repo "$REPO" --base main --head "$branch" --title "$pr_title" --body-file "$body_file"
   rm -f "$body_file"
+}
+
+# A worktree for the analysis of one slice (brief, items, stories, findings), so that two
+# slices can be analysed at the same time and nobody works in the main checkout.
+cmd_analysis() {
+  local slice="${1:-}" wt branch_name
+  is_slice "$slice" || die "give a slice id such as 14-3, found '$slice'"
+  wt="$main_root/.claude/worktrees/analysis-$slice"
+  branch_name="docs/brief-$slice"
+  if [ "${2:-}" = "--remove" ]; then
+    if [ -d "$wt" ]; then
+      git worktree remove "$wt" || die "worktree not removed (uncommitted changes?): $wt"
+      echo "removed worktree $(native "$wt")"
+    fi
+    if git show-ref --verify --quiet "refs/heads/$branch_name"; then
+      git branch -d "$branch_name" >/dev/null 2>&1 && echo "deleted branch $branch_name" \
+        || echo "branch $branch_name kept: git does not see it as merged (squash merge?). Delete it yourself with: git branch -D $branch_name"
+    fi
+    return
+  fi
+  [ -z "${2:-}" ] || die "unknown option for analysis: $2"
+  if [ ! -d "$wt" ]; then
+    git fetch --quiet origin
+    if git show-ref --verify --quiet "refs/heads/$branch_name"; then
+      git worktree add --quiet "$wt" "$branch_name"
+    elif git show-ref --verify --quiet "refs/remotes/origin/$branch_name"; then
+      git worktree add --quiet -b "$branch_name" "$wt" "origin/$branch_name"
+    else
+      git worktree add --quiet -b "$branch_name" "$wt" origin/main
+    fi
+  fi
+  echo "slice    $slice"
+  echo "branch   $branch_name"
+  echo "worktree $(native "$wt")"
+  echo "Work on docs/briefs/$slice/ there. After the merge: tools/story.sh analysis $slice --remove"
+}
+
+# Runs a story's acceptance gate against main, in a worktree that is removed again. The gate
+# must fail there; "ready" asks for that. Whether it fails for the right reason is for QA to read.
+cmd_baseline() {
+  local slice="${1:-}" n="${2:-}" story trial wt out commit rc=0
+  is_slice "$slice" && [[ "$n" =~ ^[0-9]+$ ]] || die "usage: baseline <slice> <n>"
+  story="$slice-$n"
+  trial="$main_root/artifacts/trials/$story"
+  [ -f "$trial/gate.sh" ] || die "no acceptance gate: $trial/gate.sh"
+  wt="$main_root/.claude/worktrees/baseline-$story"
+  git fetch --quiet origin main
+  [ ! -d "$wt" ] || git worktree remove --force "$wt"
+  git worktree add --quiet --detach "$wt" origin/main
+  commit="$(git -C "$wt" rev-parse --short HEAD)"
+  out="$trial/main-before.txt"
+  {
+    echo "Baseline for story $story on main, commit $commit."
+    echo
+    (cd "$wt" && STORY="$story" TRIAL="$trial" bash "$trial/gate.sh" 2>&1) || rc=$?
+    echo
+    if [ "$rc" -ne 0 ]; then echo "BASELINE: fail (as it must; QA reads why)"
+    else echo "BASELINE: pass (the acceptance tests do not fail on main: the story is not ready)"; fi
+  } > "$out" 2>&1
+  git worktree remove --force "$wt"
+  cat "$out"
+  [ "$rc" -ne 0 ] || return 1
 }
 
 # Runs after the merge, when the issue is closed.
@@ -548,9 +710,11 @@ case "${1:-}" in
   status)     cmd_status ;;
   ready)      cmd_ready "${2:-}" "${3:-}" "${4:-}" ;;
   next)       cmd_next "${2:-}" ;;
-  start)      cmd_start "${2:-}" ;;
+  start)      cmd_start "${2:-}" "${3:-}" ;;
+  analysis)   cmd_analysis "${2:-}" "${3:-}" ;;
+  baseline)   cmd_baseline "${2:-}" "${3:-}" ;;
   done)       cmd_done "${2:-}" ;;
   pr)         cmd_pr "${2:-}" "${3:-}" "${4:-}" ;;
   cleanup)    cmd_cleanup "${2:-}" ;;
-  *)          sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *)          sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

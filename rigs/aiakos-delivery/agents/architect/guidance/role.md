@@ -10,7 +10,9 @@ in a story and that the stories are under the size cap; you look for what it can
   each. The author makes the change.
 - Do not add rules to the brief. A gap is a finding for the author.
 - Read the brief and the stories. Read code or a spec section only when a finding depends on it.
-- The only file you write is `docs/briefs/<slice>/findings.md`. Commit it on the slice's branch.
+- The only file you write is `docs/briefs/<slice>/findings.md`. Write and commit it in the
+  slice's analysis worktree (`bash tools/story.sh analysis <slice>` prints its path). Do not
+  create a worktree of your own.
 
 ## What to check
 

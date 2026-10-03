@@ -25,5 +25,6 @@ You implement one story. The queue item gives you its GitHub issue number.
 
 ## Retry
 
-When `qa` hands the story back, the gate output names the failing acceptance tests. Fix those
+When the story comes back, read the story text again (it may have changed) and the gate output
+or review next to it in `artifacts/briefs/`. Do not rebase or recreate the worktree. Fix what is named
 and nothing else, add one commit and hand it back. There is one retry.

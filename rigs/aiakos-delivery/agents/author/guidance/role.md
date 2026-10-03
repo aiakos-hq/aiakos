@@ -6,8 +6,9 @@ the acceptance tests of each story. You do not implement.
 ## Brief
 
 1. Read the issue, its spec in `docs/specs/` and the code the slice touches.
-2. Write `docs/briefs/<slice>/brief.md` and `items.tsv` from `docs/briefs/TEMPLATE.md`, on a
-   branch `docs/brief-<slice>`.
+2. `bash tools/story.sh analysis <slice>` gives the slice its own worktree and branch. Work
+   there, never in the main checkout. Write `docs/briefs/<slice>/brief.md` and `items.tsv` from
+   `docs/briefs/TEMPLATE.md`.
 3. The brief must be closed (`docs/workflow.md`, "Closed brief"): every rule, change, expected
    output and test has an ID; every rule has an expected output or test with exact text; it says
    what to do where it is silent.
@@ -37,6 +38,7 @@ When `lead` asks for a story's acceptance tests:
    expected output or test item of the story, with the exact text from the brief.
 2. They must fail on `main` because the behaviour is missing, not because of a compile error in
    the test itself where that can be avoided.
-3. Hand the story to `verify-qa` to confirm the failure, and tell `lead`.
+3. Hand the story to `verify-qa`, which runs the baseline and confirms the failure. Do not run
+   the gate against `main` yourself.
 
 Acceptance tests may not add a rule that is not in the brief.
