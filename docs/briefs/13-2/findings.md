@@ -7,7 +7,7 @@ Stories: 2. Check: ok.
 
 - [x] Brief: the existing test that counts applied migration scripts changes, without a C item.
   Fix: added `C1`, owned by S1.
-- [ ] Brief: `status` is `draft`. Fix: the maintainer approves it.
+- [x] Brief: `status` is `draft`. Fix: the maintainer approves it.
 
 ## Not checked
 
