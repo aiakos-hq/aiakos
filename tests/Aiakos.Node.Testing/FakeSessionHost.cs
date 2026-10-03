@@ -10,6 +10,7 @@ public sealed class FakeSessionHost : ISessionHost
 {
     private static readonly IReadOnlyList<string> Capabilities =
         Array.AsReadOnly(new[] { "session-host.tmux" });
+    private static readonly TimeSpan MaxSubmitDelay = TimeSpan.FromMilliseconds(uint.MaxValue - 1d);
     private readonly object _sync = new();
     private readonly TimeProvider _time;
     private readonly Dictionary<string, FakeSession> _sessionsById = new(StringComparer.Ordinal);
@@ -252,6 +253,12 @@ public sealed class FakeSessionHost : ISessionHost
             throw InputRejected("Lead and body cannot both be empty.");
         }
 
+        if (request.SubmitDelay > MaxSubmitDelay)
+        {
+            throw new SessionHostException(new SessionHostError(SessionHostErrorCode.InvalidArgument,
+                "SubmitDelay exceeds the supported delay range.", false));
+        }
+
         FakeSession state;
         lock (_sync)
         {
@@ -261,7 +268,7 @@ public sealed class FakeSessionHost : ISessionHost
                 throw NotFound();
             }
 
-            if (!state.DeliveryGate.Wait(0, ct))
+            if (!state.DeliveryGate.Wait(0, CancellationToken.None))
             {
                 throw new SessionHostException(new SessionHostError(SessionHostErrorCode.Busy,
                     "A delivery is already in progress for this session.", true));

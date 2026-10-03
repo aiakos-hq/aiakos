@@ -259,6 +259,33 @@ public abstract class SessionHostContractTests
         await first;
     }
 
+    [Fact]
+    public async Task ReportsTheBufferLoadedStageForAnAlreadyCancelledRequest()
+    {
+        await using var rig = await CreateRigAsync();
+        var session = await rig.Host.StartAsync(rig.NewSpec(), CancellationToken.None);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var report = await rig.Host.DeliverAsync(session, new DeliveryRequest("l", "b"), cancellation.Token);
+
+        Assert.Equal(DeliveryStage.BufferLoaded, report.Stage);
+        Assert.Empty(await rig.ReceivedAsync(session));
+    }
+
+    [Fact]
+    public async Task RejectsAnUnsupportedSubmitDelayBeforeSendingInput()
+    {
+        await using var rig = await CreateRigAsync();
+        var session = await rig.Host.StartAsync(rig.NewSpec(), CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<SessionHostException>(() => rig.Host.DeliverAsync(session,
+            new DeliveryRequest("l", "b", SubmitDelay: TimeSpan.MaxValue), CancellationToken.None));
+
+        Assert.Equal(SessionHostErrorCode.InvalidArgument, exception.Code);
+        Assert.Empty(await rig.ReceivedAsync(session));
+    }
+
     private sealed class FixedConfirmer(Confirmation confirmation) : IDeliveryConfirmer
     {
         public Task<Confirmation> ConfirmAsync(DeliveryContext context, CancellationToken ct) =>
