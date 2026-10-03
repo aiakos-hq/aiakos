@@ -6,7 +6,7 @@ status: approved
 route: impl/sonnet
 paths: [src/Aiakos.Data/, tests/Aiakos.Data.Tests/, tests/Aiakos.Orchestrator.Tests/]
 max_outputs: 9
-date: 2026-10-01
+date: 2026-10-03
 ---
 
 # Brief: #13 slice 2 — seat model migration and `SeatQueries`
@@ -88,6 +88,12 @@ public sealed record SeatFindingRow(
 - C1. An existing test that counts or names the applied migration scripts: only that expectation
   changes.
 
+- C2. R9 replaces R3's direct integer cast: invalid context percentages give null in
+  list and detail reads. Earlier valid-value results and all other fields stay unchanged.
+- C3. R10 defines string input handling: malformed strings give no match, and a null
+  address gives null rather than selecting another seat or throwing. Earlier valid-string
+  results stay unchanged.
+
 ## Rules
 
 R1. **Migration verbatim.** The file is the spec block unchanged: same tables, columns, checks,
@@ -104,11 +110,12 @@ R3. **`ListAsync`** is one SQL statement and one round trip. One row per seat wi
      `LaunchDecision` from `seat_launch`.
    - `SpecDrift` = the seat has a current launch, `seat_state.session` is `starting`, `present`
      or `unknown`, and the launch's `spec_hash` or `binding_hash` differs from the seat's.
-     Otherwise false, never null.
+     Otherwise false, never null, including when `current_launch_id` is null even if
+     `seat_state.session` is `starting`, `present` or `unknown`.
    - `PendingOp` = `kind` of the oldest `seat_command` of the seat with status `pending` or
      `sent` (by `created_at`); null when none.
    - `LastDeliveryOutcome` = `outcome` of the newest command of kind `deliver`.
-   - `ContextUsedPercent` = `(usage ->> 'context_used_percent')::int`, `Model` =
+   - `ContextUsedPercent` follows R9; do not use an unchecked SQL integer cast. `Model` =
      `usage ->> 'model_id'`. A missing key or a null `usage` gives null, never 0.
    - `OpenFindings` = number of `seat_finding` rows of the seat with status `open` (0 when
      none). `WorstSeverity` = `error`, else `warning`, else `info` among them; null when none.
@@ -124,6 +131,24 @@ R7. **Conventions.** As in `TenantRepository`: raw string SQL constants, Dapper 
    `CommandDefinition` and the cancellation token, `ConfigureAwait(false)`, XML summary on public
    types. Timestamps are `DateTime` in UTC.
 R8. **Read only.** No `INSERT`, `UPDATE` or `DELETE` anywhere under `src/` in this slice.
+
+R9. **Context percentage parsing.** In both `ListAsync` and the `Seat` of `GetDetailAsync`,
+   obtain `usage ->> 'context_used_percent'` and interpret it as a signed base-10 32-bit integer
+   using the semantics of `Int32.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture)`.
+   Return the parsed integer, including 0 and the Int32 endpoints; do not clamp to 0–100.
+   Return null for a missing key, null `usage`, JSON null, non-integer text (including `42.5`
+   and `42.0`), non-numeric text, objects, arrays, booleans and values outside Int32 range.
+   Numeric strings such as `"42"` remain accepted. Invalid values do not throw, exclude the seat,
+   or alter other returned fields; one invalid seat cannot fail the tenant's list.
+R10. **String input, no exceptions.** No string value supplied as `rigName` or `address` may
+   throw because of its contents. `ListAsync(tenantId, null, ct)` still means all rigs.
+   `GetDetailAsync(tenantId, null!, ct)` rejects the missing address by returning null, never
+   a seat and never an exception. A string containing NUL or an unpaired UTF-16 surrogate
+   cannot match a database value: return an empty list for `rigName`, or null for `address`.
+   All other strings are literal, parameterized exact matches (no wildcard interpretation);
+   empty, nonexistent, SQL-looking and Unicode strings return empty/null when not found.
+   Do not trim or normalize inputs. This rule concerns input contents, not cancellation or
+   infrastructure failures.
 
 ## Expected outputs: seed and exact results
 
@@ -174,6 +199,23 @@ Same fixture pattern as `TenantRepositoryTests` (`IClassFixture<DatabaseFixture>
 - T2. A test that serialises every returned record of the `impl@demo` detail with
   `System.Text.Json` and asserts the text does not contain the seeded delivery body
   `SENTINEL-BODY` nor the seeded token hash bytes.
+
+- T3. `SeatQueriesTests`: in the seeded scenario, replace only `impl@demo`'s
+  `usage.context_used_percent` in turn with JSON values `42.5`, `42.0`, `"n/a"`,
+  `99999999999`, `-2147483649`, `true`, `[]`, `{}`, and `null`, then with a missing key and
+  null `usage`. For each case, `ListAsync(T, null)` returns all 6 rows and the impl row's
+  `ContextUsedPercent` is null; `GetDetailAsync(T, "impl@demo").Seat.ContextUsedPercent`
+  is null. No call throws. Also test `0`, `-2147483648`, `2147483647`, and `"42"`:
+  list and detail return exactly 0, -2147483648, 2147483647, and 42 respectively.
+- T4. `SeatQueriesTests`: for each input `"a\0b"`, `""`, `"nope"`, `"'; SELECT 1; --"`,
+  `"😀%_"`, and a string consisting of the unpaired surrogate `\uD800`,
+  `ListAsync(T, input)` returns an empty list and `GetDetailAsync(T, input)` returns null,
+  without throwing. `GetDetailAsync(T, null!)` and `GetDetailAsync(U, null!)` both return
+  null without throwing; `ListAsync(T, null)` still returns 6 rows.
+- T5. `SeatQueriesTests`: set `review@demo`'s state in turn to `starting`, `present`, and
+  `unknown` (reason `acceptance-unknown` for the last), with activity `idle`, and keep
+  `current_launch_id` null. For each state, its list row and detail's `Seat` have
+  `LaunchId` null and `SpecDrift` false (never null); detail's `Launch` is null.
 
 ## Definition of done
 
