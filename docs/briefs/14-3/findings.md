@@ -47,10 +47,22 @@ line were checked against the existing detector patterns.
 
 ### Findings
 
-- [ ] S4 (context-gap): T5 has the S4 tests assert that a valid minimal/full `Load` "still" returns a null `Rig`, and S5 turns exactly that result non-null, while C2 allows the change only for the two `ValidTests`; S5 would turn an S4 test red. Fix: drop the null-`Rig` assertion for valid loads from T5 (the two `ValidTests` already hold it until C2), or name the S4 tests in C2.
-- [ ] S3 (context-gap): R7 stops enumeration at the first cap overage and keeps "already collected" diagnostics, but the enumeration order is not defined, so a skill with 150 files and one nested link (or one unsafe filename, or no `SKILL.md`) gives AIK3005 alone or AIK3005 with AIK3002/AIK4020/AIK3004, depending on the order the file system returns entries. Fix: state in R7 which scalar-level diagnostics a declaration reports when a cap is exceeded (for example AIK3005 only) and add that input to SKILL-limits.
+- [x] S4 (context-gap): T5 has the S4 tests assert that a valid minimal/full `Load` "still" returns a null `Rig`, and S5 turns exactly that result non-null, while C2 allows the change only for the two `ValidTests`; S5 would turn an S4 test red. Fix: drop the null-`Rig` assertion for valid loads from T5 (the two `ValidTests` already hold it until C2), or name the S4 tests in C2.
+- [x] S3 (context-gap): R7 stops enumeration at the first cap overage and keeps "already collected" diagnostics, but the enumeration order is not defined, so a skill with 150 files and one nested link (or one unsafe filename, or no `SKILL.md`) gives AIK3005 alone or AIK3005 with AIK3002/AIK4020/AIK3004, depending on the order the file system returns entries. Fix: state in R7 which scalar-level diagnostics a declaration reports when a cap is exceeded (for example AIK3005 only) and add that input to SKILL-limits.
 
 ## Not checked, round 2
 
 - The sparse 3 GiB cases: whether the test file system supports sparse files was not checked.
 
+
+## Author resolutions, round 2
+
+1. T5 now asserts null Rig only for invalid calls and asserts only diagnostics for valid
+   minimal/full calls; the two existing ValidTests retain the temporary null assertions until C2.
+2. R7 now gives cap failure precedence over every diagnostic collected inside that skill read,
+   emitting only AIK3005 at its declaration scalar while retaining unrelated diagnostics. R5
+   defers returning on metadata-stage errors until the cap pass completes. SKILL-limits includes
+   150-file mixed cases with links, unsafe filenames and missing SKILL.md, created in opposite
+   orders, all requiring exactly AIK3005 and no other skill diagnostic.
+
+Both round-2 findings addressed; architect confirmation pending. No unresolved disagreement.

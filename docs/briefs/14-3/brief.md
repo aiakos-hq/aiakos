@@ -184,6 +184,8 @@ R5. Read recursively includes all regular files, including dotfiles, but not emp
    Missing top-level SKILL.md is AIK3004 at skill scalar,
    Message `skill directory has no SKILL.md`, Hint null (no additional AIK3001 for that file).
    Enumeration/read failure is AIK3001 at skill scalar with R2 text. Any error prevents result.
+   Do not return early for missing SKILL.md or another collected error until the metadata cap
+   pass finishes or exceeds a cap: R7 determines the sole diagnostic in the over-limit case.
 
 R6. SKILL.md must be valid UTF-8; optional BOM then exactly `---` on its first line and a later
    exact `---` closing fence (CRLF accepted). Front matter is one mapping with nonempty scalar
@@ -200,7 +202,14 @@ R7. Skill cap is 100 regular files and 1048576 total raw bytes inclusive, counti
    regular entries and inspect their lengths before reading any content; stop enumeration at
    the 101st file or when summed lengths first exceed 1048576. Do not read large/sparse files
    to determine size or enumerate the remaining tree after the cap is exceeded. Return null
-   immediately, retaining already collected independent diagnostics. If metadata passed,
+   immediately. When this skill read exceeds either cap (metadata or bounded content read),
+   discard every diagnostic collected by that skill read and emit only its one AIK3005 at the
+   declaration scalar. This includes missing SKILL.md, nested-link/unsafe-filename, I/O,
+   front matter and text-scan failures inside that skill; unrelated earlier diagnostics are
+   retained. This cap precedence overrides R5/G3 for entries discovered inside the skill;
+   a credential-like top-level skill reference is still skipped by G3 before Read is called.
+   Therefore an over-limit declaration's result is independent of enumeration order.
+   If metadata passed,
    bound subsequent reads by the remaining aggregate allowance+1; growth that exceeds the
    allowance yields the same single AIK3005 and stops remaining reads. Individual
    skill files have no Markdown 256 KiB cap. Files sorted ordinal by canonical relative path;
@@ -275,7 +284,7 @@ Never commit credential-looking fixture values: concatenate separate fragments a
 | `SKILL-missing` | missing SKILL.md, source agent.yaml:8:5 | null; `agents/impl/agent.yaml:8:5: error AIK3004: skill directory has no SKILL.md\n` |
 | `SKILL-front` | every R6 invalid form; name other in build directory; extra ordinary metadata | invalid `agents/impl/skills/build/SKILL.md:1:1: error AIK3004: invalid skill front matter\n`; mismatch same position/code with `skill name does not match directory name\n`; both null; extra metadata accepted |
 | `SKILL-links` | nested file/directory/dangling symlink, external target credential sentinel; two links in one skill; two unsafe credential-like filenames; failing linked skill declared at list scalars 8:5 and 9:5 | one link or two links: null, exactly one `agents/impl/agent.yaml:8:5: error AIK3002: invalid shared path\n  hint: use a relative / path inside the rig root without symbolic links\n`; two unsafe filenames: one AIK4020 at 8:5, no path echo; same linked skill declared twice: that AIK3002 text at 8:5 then 9:5, no file content diagnostic and no duplicate skill name; no target error/content |
-| `SKILL-limits` | 100/101 files, 1048576/1048577 total bytes; SKILL.md or support >262144 within total cap; 3 GiB sparse support file; generated tree with more than 101 entries | boundaries/large individual accepted; exceeded null, exactly one `agents/impl/agent.yaml:8:5: error AIK3005: skill exceeds 100 files or 1 MiB\n` |
+| `SKILL-limits` | 100/101 files, 1048576/1048577 total bytes; SKILL.md or support >262144 within total cap; 3 GiB sparse support file; generated tree with more than 101 entries; 150 regular files plus a nested link, plus an unsafe filename, or with SKILL.md absent (separate cases, entries created in opposite orders) | boundaries/large individual accepted; exceeded null, exactly one `agents/impl/agent.yaml:8:5: error AIK3005: skill exceeds 100 files or 1 MiB\n` and no other skill diagnostic in every mixed/error/order case |
 | `SKILL-secret` | credential in valid UTF-8 support at 2:3; invalid UTF-8 binary; credential-like filename | text null, AIK4020 support-path:2:3 with TEXT-secret message/hint; binary preserved without text scan; unsafe name null, AIK4020 at original skill scalar without path/value echo |
 | `RES-content` | minimal + culture Team CRLF, guidance First LF then Second LF but declarations second/first, build skill; shared-agent alias seat; edit guidance between Loads; delete root after successful Load | non-null/no diagnostics, Culture Team LF, ordered guidance Second LF/First LF, one agent directory agents/impl, complete skill snapshots; next Load sees new hash; old result serializable/readable after deletion |
 | `RES-duplicate` | skill entries skills/build and ./skills/build/ at lines 8,9 col 5; shared agent on two seats | duplicate exactly `agents/impl/agent.yaml:9:5: error AIK4003: duplicate skill name 'build'\n  hint: first defined at line 8\n`, Rig null |
@@ -313,11 +322,12 @@ T4. Serialize resolved minimal/full and content fixtures after deleting inputs: 
    for an existing secret-source file containing a runtime-built sentinel. Node binding paths
    are permitted. Spec AC9/AC10 are covered; 0003-RK2 is later projection text and is not checked.
 
-T5. Load integration tests assert RES-errors and RES-duplicate while Rig is still null for
-   all calls in this story. Exercise repeated failing skills: two declarations of one linked
+T5. Load integration tests assert RES-errors and RES-duplicate, including null Rig for those
+   invalid calls only. For valid calls assert diagnostics, not Rig (the existing ValidTests
+   retain null assertions until C2 changes them at assembly). Exercise repeated failing skills: two declarations of one linked
    directory give one AIK3002 at each scalar; two declarations of one skill with invalid front
    matter give only one file-level AIK3004; both cause no duplicate-name diagnostic. A valid
-   minimal/full Load has the earlier empty diagnostics (but still null Rig). Changed referenced
+   minimal/full Load has the earlier empty diagnostics; do not assert its temporary null Rig. Changed referenced
    files on a second Load are re-read: safe text then a runtime credential produces AIK4020.
    No new public assembly record is needed in this story; wire a per-call internal catalog for
    the following assembly story to consume rather than re-reading files.
