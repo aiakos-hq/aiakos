@@ -401,10 +401,10 @@ overlay reasons. Two things it leaves behind:
   brief lines 17–18 ("lines 379–638 … and 707–726 (findings)") are stale: the pipeline now ends
   at line 644 and the findings table is lines 713–732. Fix: `author` changes the numbers to
   379–644 and 713–732.
-- [ ] F36 (context-gap) B7 and B8 say a late U8 never applies A1 and call that a resolution of
+- [x] F36 (context-gap) B7 and B8 say a late U8 never applies A1 and call that a resolution of
   the spec's own tension; spec lines 575–577 still say "activity follows A1" and "rotation is
   applied even when the event is late", and the amendment does not record the choice. Fix:
-  `lead` adds one bullet to the 2026-10-04 entry.
+  `lead` adds one bullet to the 2026-10-04 entry. Done: bullet "Rotation and a late event" added to the entry.
 
 Not checked in the third read: `show` for stories other than 3, 5, 9 and 11; the spec outside
 the amended passages; nothing was built.

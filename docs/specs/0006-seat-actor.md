@@ -1340,6 +1340,11 @@ Stable IDs; a central register links to them.
     every other body of another launch is `stale-launch`.
   - **Pipeline step 5 (order).** `TELEMETRY`, `OTHER` and unspecified harness kinds are exempt
     from the stale guard. *Rationale:* statusLine ticks are unordered against hooks (RK4).
+  - **Rotation and a late event (U8, R13).** A late `SESSION_STARTED` with `source: clear` still
+    rotates the native session ID, updates resumability and emits the adoption (the spec's
+    "applied even when the event is late"), but it never applies A1 and never changes activity:
+    a late event carries no evidence about the present moment. The sentence "activity follows A1
+    (`idle`)" holds for an event that is not late.
   - **Session and activity (R10).** While the known session is `starting` or `unknown`, activity
     rows A2–A12 change nothing; only readiness leaves that state. This replaces "evaluated while
     the last-known session is `starting`, `present` or `unknown`" for those two states. The
