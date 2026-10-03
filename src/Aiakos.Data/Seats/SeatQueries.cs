@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using Dapper;
 
 using Npgsql;
@@ -31,7 +33,8 @@ public sealed class SeatQueries(NpgsqlDataSource dataSource)
                seat_launch.outcome AS launch_outcome,
                seat_launch.decision AS launch_decision,
                COALESCE(
-                   seat_state.session IN ('starting', 'present', 'unknown')
+                   seat_launch.launch_id IS NOT NULL
+                   AND seat_state.session IN ('starting', 'present', 'unknown')
                    AND (seat_launch.spec_hash IS DISTINCT FROM seat.spec_hash
                         OR seat_launch.binding_hash IS DISTINCT FROM seat.binding_hash),
                    false) AS spec_drift,
@@ -49,7 +52,7 @@ public sealed class SeatQueries(NpgsqlDataSource dataSource)
                   AND seat_command.kind = 'deliver'
                 ORDER BY seat_command.created_at DESC, seat_command.command_id DESC
                 LIMIT 1) AS last_delivery_outcome,
-               (seat_state.usage ->> 'context_used_percent')::int AS context_used_percent,
+               seat_state.usage ->> 'context_used_percent' AS context_used_percent_text,
                seat_state.usage ->> 'model_id' AS model,
                seat_state.last_event_at,
                findings.open_findings,
@@ -172,31 +175,45 @@ public sealed class SeatQueries(NpgsqlDataSource dataSource)
         string? rigName,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (rigName is not null && HasUnbindableText(rigName))
+        {
+            return Array.Empty<SeatStatusRow>();
+        }
+
         var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using (connection.ConfigureAwait(false))
         {
-            var rows = await connection.QueryAsync<SeatStatusRow>(new CommandDefinition(
+            var rows = await connection.QueryAsync<SeatStatusProjection>(new CommandDefinition(
                 StatusSql,
                 new { tenantId, rigName, address = (string?)null },
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
-            return rows.AsList();
+            return rows.Select(static row => row.ToReadModel()).ToList();
         }
     }
 
     /// <summary>Returns a non-retired seat and its current related records, or null when absent.</summary>
     public async Task<SeatDetail?> GetDetailAsync(Guid tenantId, string address, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (address is null || HasUnbindableText(address))
+        {
+            return null;
+        }
+
         var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using (connection.ConfigureAwait(false))
         {
-            var seat = await connection.QuerySingleOrDefaultAsync<SeatStatusRow>(new CommandDefinition(
+            var projection = await connection.QuerySingleOrDefaultAsync<SeatStatusProjection>(new CommandDefinition(
                 StatusSql,
                 new { tenantId, rigName = (string?)null, address },
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
-            if (seat is null)
+            if (projection is null)
             {
                 return null;
             }
+
+            var seat = projection.ToReadModel();
 
             var launch = seat.LaunchId is { } launchId
                 ? await QueryLaunchAsync(connection, tenantId, launchId, cancellationToken).ConfigureAwait(false)
@@ -245,4 +262,86 @@ public sealed class SeatQueries(NpgsqlDataSource dataSource)
             LaunchSql,
             new { tenantId, launchId },
             cancellationToken: cancellationToken));
+
+    private static bool HasUnbindableText(string value)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
+            if (character == '\0')
+            {
+                return true;
+            }
+
+            if (char.IsHighSurrogate(character))
+            {
+                if (index + 1 >= value.Length || !char.IsLowSurrogate(value[index + 1]))
+                {
+                    return true;
+                }
+
+                index++;
+            }
+            else if (char.IsLowSurrogate(character))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private sealed class SeatStatusProjection
+    {
+        public Guid SeatId { get; set; }
+        public string Address { get; set; } = string.Empty;
+        public string Rig { get; set; } = string.Empty;
+        public string Member { get; set; } = string.Empty;
+        public string Kind { get; set; } = string.Empty;
+        public string? Harness { get; set; }
+        public string? Node { get; set; }
+        public string Desired { get; set; } = string.Empty;
+        public string? Session { get; set; }
+        public string? SessionReason { get; set; }
+        public DateTime? SessionSince { get; set; }
+        public string? Activity { get; set; }
+        public string? ActivityDetail { get; set; }
+        public string? ActivityReason { get; set; }
+        public DateTime? ActivitySince { get; set; }
+        public string? Resumability { get; set; }
+        public string? ResumabilityReason { get; set; }
+        public DateTime? ResumabilitySince { get; set; }
+        public string? NativeSessionId { get; set; }
+        public Guid? LaunchId { get; set; }
+        public string? LaunchOutcome { get; set; }
+        public string? LaunchDecision { get; set; }
+        public bool SpecDrift { get; set; }
+        public string? PendingOp { get; set; }
+        public string? LastDeliveryOutcome { get; set; }
+        public string? ContextUsedPercentText { get; set; }
+        public string? Model { get; set; }
+        public DateTime? LastEventAt { get; set; }
+        public long OpenFindings { get; set; }
+        public string? WorstSeverity { get; set; }
+
+        public SeatStatusRow ToReadModel()
+        {
+            int? contextUsedPercent = int.TryParse(
+                ContextUsedPercentText,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var parsedContextUsedPercent)
+                ? parsedContextUsedPercent
+                : null;
+
+            return new SeatStatusRow(
+                SeatId, Address, Rig, Member, Kind, Harness, Node, Desired,
+                Session, SessionReason, SessionSince,
+                Activity, ActivityDetail, ActivityReason, ActivitySince,
+                Resumability, ResumabilityReason, ResumabilitySince,
+                NativeSessionId, LaunchId, LaunchOutcome, LaunchDecision,
+                SpecDrift, PendingOp, LastDeliveryOutcome,
+                contextUsedPercent, Model, LastEventAt, OpenFindings, WorstSeverity);
+        }
+    }
 }

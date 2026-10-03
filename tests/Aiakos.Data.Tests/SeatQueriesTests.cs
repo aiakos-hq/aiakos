@@ -166,6 +166,107 @@ public sealed class SeatQueriesTests(DatabaseFixture db) : IClassFixture<Databas
         Assert.DoesNotContain(Convert.ToBase64String(Encoding.UTF8.GetBytes(SeatSeed.TokenHash)), json, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ContextUsedPercentInvalidJsonValuesReturnNullWithoutAffectingRows()
+    {
+        await using var seeded = await CreateSeededAsync();
+        var queries = new SeatQueries(seeded.DataSource);
+        string[] invalidValues = ["42.5", "42.0", "\"n/a\"", "99999999999", "-2147483649", "true", "[]", "{}", "null"];
+
+        foreach (var contextValue in invalidValues)
+        {
+            await SetImplUsageAsync(seeded, $"{{\"context_used_percent\":{contextValue},\"model_id\":\"opus\"}}");
+            var rows = await queries.ListAsync(TenantIds.Default, null, Ct);
+            var implRow = Assert.Single(rows, static row => row.Address == "impl@demo");
+            var detail = await queries.GetDetailAsync(TenantIds.Default, "impl@demo", Ct);
+
+            Assert.Equal(6, rows.Count);
+            Assert.Null(implRow.ContextUsedPercent);
+            Assert.Equal("present", implRow.Session);
+            Assert.Equal("opus", implRow.Model);
+            Assert.NotNull(detail);
+            Assert.Null(detail.Seat.ContextUsedPercent);
+            Assert.Equal("present", detail.Seat.Session);
+        }
+
+        foreach (var usage in new string?[] { "{\"model_id\":\"opus\"}", null })
+        {
+            await SetImplUsageAsync(seeded, usage);
+            var rows = await queries.ListAsync(TenantIds.Default, null, Ct);
+            var detail = await queries.GetDetailAsync(TenantIds.Default, "impl@demo", Ct);
+
+            Assert.Equal(6, rows.Count);
+            Assert.Null(Assert.Single(rows, static row => row.Address == "impl@demo").ContextUsedPercent);
+            Assert.NotNull(detail);
+            Assert.Null(detail.Seat.ContextUsedPercent);
+        }
+    }
+
+    [Fact]
+    public async Task ContextUsedPercentAcceptsInt32ValuesAndIntegerStrings()
+    {
+        await using var seeded = await CreateSeededAsync();
+        var queries = new SeatQueries(seeded.DataSource);
+        (string Json, int Expected)[] validValues = [("0", 0), ("-2147483648", int.MinValue),
+            ("2147483647", int.MaxValue), ("\"42\"", 42)];
+
+        foreach (var (usageValue, expected) in validValues)
+        {
+            await SetImplUsageAsync(seeded, $"{{\"context_used_percent\":{usageValue},\"model_id\":\"opus\"}}");
+            var rows = await queries.ListAsync(TenantIds.Default, null, Ct);
+            var implRow = Assert.Single(rows, static row => row.Address == "impl@demo");
+            var detail = await queries.GetDetailAsync(TenantIds.Default, "impl@demo", Ct);
+
+            Assert.Equal(6, rows.Count);
+            Assert.Equal(expected, implRow.ContextUsedPercent);
+            Assert.NotNull(detail);
+            Assert.Equal(expected, detail.Seat.ContextUsedPercent);
+        }
+    }
+
+    [Fact]
+    public async Task RigAndAddressInputsWithMalformedStringsReturnNoMatchWithoutThrowing()
+    {
+        await using var seeded = await CreateSeededAsync();
+        var queries = new SeatQueries(seeded.DataSource);
+        string[] malformedOrMissing = ["a\0b", "", "nope", "'; SELECT 1; --", "😀%_", "\uD800"];
+
+        foreach (var input in malformedOrMissing)
+        {
+            Assert.Empty(await queries.ListAsync(TenantIds.Default, input, Ct));
+            Assert.Null(await queries.GetDetailAsync(TenantIds.Default, input, Ct));
+        }
+
+        Assert.Null(await queries.GetDetailAsync(TenantIds.Default, null!, Ct));
+        Assert.Null(await queries.GetDetailAsync(seeded.Scenario.OtherTenantId, null!, Ct));
+        Assert.Equal(6, (await queries.ListAsync(TenantIds.Default, null, Ct)).Count);
+    }
+
+    [Fact]
+    public async Task SpecDriftIsFalseWithoutCurrentLaunchForActiveSessions()
+    {
+        await using var seeded = await CreateSeededAsync();
+        var queries = new SeatQueries(seeded.DataSource);
+
+        (string Session, string? Reason)[] sessions =
+            [("starting", null), ("present", null), ("unknown", "acceptance-unknown")];
+        foreach (var (session, reason) in sessions)
+        {
+            await SetReviewStateAsync(seeded, session, reason);
+            var listRow = Assert.Single(
+                await queries.ListAsync(TenantIds.Default, "demo", Ct),
+                static row => row.Address == "review@demo");
+            var detail = await queries.GetDetailAsync(TenantIds.Default, "review@demo", Ct);
+
+            Assert.Null(listRow.LaunchId);
+            Assert.False(listRow.SpecDrift);
+            Assert.NotNull(detail);
+            Assert.Null(detail.Seat.LaunchId);
+            Assert.False(detail.Seat.SpecDrift);
+            Assert.Null(detail.Launch);
+        }
+    }
+
     private async Task<SeededDatabase> CreateSeededAsync()
     {
         var connectionString = await db.Postgres.CreateDatabaseAsync(Ct);
@@ -173,6 +274,40 @@ public sealed class SeatQueriesTests(DatabaseFixture db) : IClassFixture<Databas
         await Migrations.CreateMigrator(dataSource).MigrateAsync(Ct);
         var scenario = await SeatSeed.InsertAsync(dataSource, Ct);
         return new SeededDatabase(dataSource, scenario);
+    }
+
+    private static async Task SetImplUsageAsync(SeededDatabase seeded, string? usage)
+    {
+        var sql = usage is null
+            ? "UPDATE aiakos.seat_state SET usage = NULL WHERE tenant_id = @tenantId AND seat_id = @seatId"
+            : "UPDATE aiakos.seat_state SET usage = @usage::jsonb WHERE tenant_id = @tenantId AND seat_id = @seatId";
+        await using var command = seeded.DataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("tenantId", TenantIds.Default);
+        command.Parameters.AddWithValue("seatId", seeded.Scenario.ImplSeatId);
+        if (usage is not null)
+        {
+            command.Parameters.AddWithValue("usage", usage);
+        }
+
+        await command.ExecuteNonQueryAsync(Ct);
+    }
+
+    private static async Task SetReviewStateAsync(SeededDatabase seeded, string session, string? reason)
+    {
+        await using var command = seeded.DataSource.CreateCommand("""
+            UPDATE aiakos.seat_state
+            SET session = @session,
+                session_reason = @reason,
+                activity = 'idle',
+                activity_detail = NULL,
+                current_launch_id = NULL
+            WHERE tenant_id = @tenantId AND seat_id = @seatId
+            """);
+        command.Parameters.AddWithValue("session", session);
+        command.Parameters.AddWithValue("reason", NpgsqlTypes.NpgsqlDbType.Text, (object?)reason ?? DBNull.Value);
+        command.Parameters.AddWithValue("tenantId", TenantIds.Default);
+        command.Parameters.AddWithValue("seatId", seeded.Scenario.ReviewSeatId);
+        await command.ExecuteNonQueryAsync(Ct);
     }
 
     private sealed class SeededDatabase(NpgsqlDataSource dataSource, SeatSeed.Scenario scenario) : IAsyncDisposable
