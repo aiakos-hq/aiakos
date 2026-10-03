@@ -2,7 +2,7 @@
 id: 13-2
 title: "#13 slice 2 — seat model migration and `SeatQueries`"
 issue: 13
-status: draft
+status: approved
 route: impl/sonnet
 paths: [src/Aiakos.Data/, tests/Aiakos.Data.Tests/, tests/Aiakos.Orchestrator.Tests/]
 max_outputs: 9
