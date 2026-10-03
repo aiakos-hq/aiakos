@@ -2,10 +2,10 @@
 id: 11-1
 title: "#11 slice 1 — session host interface, validators and the fake"
 issue: 11
-status: draft
+status: approved
 route: impl/sonnet
 paths: [src/Aiakos.Node/Sessions/, src/Aiakos.Core/, tests/Aiakos.Node.Testing/, tests/Aiakos.Node.Tests/, Aiakos.slnx, Directory.Packages.props]
-date: 2026-10-01
+date: 2026-10-03
 ---
 
 # Brief: #11 slice 1 — session host interface, validators and the fake
@@ -221,6 +221,10 @@ R19. **The fake never sends input on its own.** Bytes reach `Received` only thro
 | `K20` | `StopReportsStopped`, `StopReportsKilledWhenGracefulStopIsIgnored`, `StopOfADeadPaneReportsNotRunning` | the outcome; status `Missing` afterwards; no event published |
 | `K21` | `StopCancelsADeliveryInFlight` | the delivery returns with stage `Submitted`; the stop still completes |
 | `K22` | `AStaleHandleIsNotFound` | after stop and a new start, the old handle throws `NotFound` on deliver, keys, capture and stop |
+
+| `K23` | `ListsStartedSessionAsManaged` | after starting `NewSpec()` for `impl@demo`, exactly one listing; `Class` `Managed`, `SessionName` `demo_impl`, `SessionId`, `PaneId` and `PanePid` equal the start handle; `Labels` non-null with `SeatId`, `SeatAddress`, `LaunchId`, `Harness` equal the spec; `Registry` null |
+| `K24` | `AdoptsManagedListingIdempotently` | after starting `NewSpec()` and listing it, two successive `AdoptAsync` calls with that listing both return a handle equal to the start handle (all fields), including `ReadOnly` false; `ListAsync` still has exactly one listing; nothing received |
+| `K25` | `ReturnsExactAttachCommand` | for the started handle named `demo_impl`: default and explicit `readOnly: true` return exactly `["fake-attach", "-r", "=demo_impl"]`; `readOnly: false` returns exactly `["fake-attach", "=demo_impl"]`; nothing received |
 
 ## Tests (`tests/Aiakos.Node.Tests/Sessions/`)
 

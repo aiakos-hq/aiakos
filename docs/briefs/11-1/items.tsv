@@ -1,6 +1,6 @@
 # Items of brief 11-1. Tab-separated: id, type, scope, needs.
 K1	output	once	R9
-K2	output	once	R9,R18
+K2	output	once	R9
 K3	output	once	R9
 K4	output	once	R9,R17
 K5	output	once	R11
@@ -46,3 +46,6 @@ T3	test	once	R5,R6
 T4	test	once	R3
 T5	test	once	R8
 T6	test	all	-
+K23	output	once	R18
+K24	output	once	R18
+K25	output	once	R18
