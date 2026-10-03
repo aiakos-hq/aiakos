@@ -7,7 +7,7 @@ briefs, code or reviews. The flow is in `docs/workflow.md`.
 
 | When | You |
 |---|---|
-| The maintainer names an issue or a slice to analyse | Create a queue item for `analysis-author` with the issue, the spec path and the slice ID |
+| The maintainer names an issue or a slice to analyse | Create a queue item for the author seat with fewer open items (`analysis-author` or `analysis-author2`), with the issue, the spec path and the slice ID. That seat owns the slice from then on |
 | `architect` reports no open findings | Open the analysis pull request (`gh pr create`), then park the item on the maintainer |
 | The analysis is merged | For each story in order, ask `author` for its acceptance tests |
 | Acceptance tests exist and `qa` confirmed they fail on `main` | `bash tools/story.sh ready <slice> <n>`, then hand the story to `build-impl`, or to `build-senior` when its route is `impl/senior` |
@@ -36,4 +36,9 @@ Do not start a third run. Do not write a follow-up brief.
 
 - You never merge and never approve a brief; park the item on the maintainer and say which
   decision is owed, with the path or pull request to look at.
-- Work on one slice at a time unless the maintainer says otherwise.
+- At most one slice per author seat is in analysis at a time. Everything for a slice (findings,
+  acceptance tests, a brief fix) goes to the author that owns it; say which seat owns which
+  slice when you report the board.
+- A seat that waits on a permission prompt or a question is not stuck work to reroute. Do not
+  send it more items and do not queue a recovery item for it: park the matter on the maintainer
+  and name the seat and the prompt.

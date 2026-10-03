@@ -4,6 +4,7 @@
 # Models, in one place. Change a seat's model on its `model:` line below.
 #   lead       claude-sonnet-5-5       runs scripts; needs no strong model
 #   author     gpt-6.1-sol             briefs and acceptance tests
+#   author2    gpt-6.1-sol             a second author, so two slices can be analysed at once
 #   architect  claude-opus-5-5         checks the analysis
 #   impl       gpt-6-luna              the default implementer (Sonnet level)
 #   senior     gpt-6.1-sol             escalated stories only
@@ -48,6 +49,12 @@ pods:
         runtime: codex
         model: gpt-6.1-sol
         cwd: "../.."
+      - id: author2
+        agent_ref: "local:agents/author"
+        profile: default
+        runtime: codex
+        model: gpt-6.1-sol
+        cwd: "../.."
       - id: architect
         agent_ref: "local:agents/architect"
         profile: default
@@ -57,6 +64,9 @@ pods:
     edges:
       - kind: delegates_to
         from: author
+        to: architect
+      - kind: delegates_to
+        from: author2
         to: architect
 
   - id: build
@@ -100,6 +110,9 @@ edges:
   - kind: delegates_to
     from: lead.lead
     to: analysis.author
+  - kind: delegates_to
+    from: lead.lead
+    to: analysis.author2
   - kind: delegates_to
     from: lead.lead
     to: build.impl
