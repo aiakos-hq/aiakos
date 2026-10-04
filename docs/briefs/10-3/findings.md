@@ -105,3 +105,22 @@ Not checked in this round: what `Uri.TryCreate` returns for each E18 address; no
 ## S3 host dependency amendment (review pending)
 
 Lead queue qitem-20261004113038-5f124168 reports context-gap: the acceptance host omitted NodeLinkRegistry/ActorSystem, so implemented S3 could not be constructed. C5/E19 specify the slim-host application dependency set, public registry constructor, host-owned Akka lifetime and explicit generated-service qualification. S3 owns the minimum handshake support; S4 retains its ownership/liveness scope. This is an amendment pending architect and maintainer approval; no third story attempt is authorized by it. Acceptance rewrite/baseline follows approval.
+
+## Review of the S3 host dependency amendment, round 5
+
+Reviewed at commit aa84578. Stories: 10. Check: ok.
+
+Read: C5, E19, the changed public surface, the S3 and S4 blocks and `show 10-3 4`. C5 and E19
+close the gap for S3: the registration set is complete for R4 and R5, the registry constructor
+is fixed, and the host owns the `ActorSystem`.
+
+### Findings
+
+- [ ] S4 (context-gap): C5 fixes the registration set and the two-parameter `NodeLinkRegistry` constructor for the S3 host only, while S4 adds host-shutdown `Goodbye` (R6) and the liveness timer (R7) and its E6/E7 also run on a slim host; nothing says that this same set must be enough for S4, so an S4 implementation that needs one more registration (for example a hosted service that sends `Goodbye` on stop) fails to construct in the acceptance host exactly as S3 did. Fix: state in R6/R7 or in C5 that the C5 registration set and constructor are also the complete host for E6 and E7 (shutdown observed through the host-provided `IHostApplicationLifetime`, time and options reaching the proxy through `NodeLinkService`), or list what the S4 host adds, and say so in the S4 note.
+
+## Not checked, round 5
+
+- The two failed attempts of story 10-3-3 and their gate output; the cause was taken from the author's note.
+- That `AddAkka("aiakos-link-acceptance", _ => { })` on a slim host starts and stops an `ActorSystem` as C5 assumes; nothing was run.
+- `artifacts/trials/` (acceptance tests), by role.
+
