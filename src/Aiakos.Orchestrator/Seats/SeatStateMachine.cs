@@ -72,6 +72,10 @@ public static class SeatStateMachine
         var findings = result.Findings;
         if (input.Body is HarnessBody)
             findings = [.. findings, new FindingChange(SeatVocabulary.FindingActivityStale, false)];
+        if (input.Body is HarnessBody { Kind: HarnessEventKind.PromptSubmitted })
+            findings = [.. findings, new FindingChange(SeatVocabulary.FindingDeliveryUnconfirmed, false)];
+        if (input.Body is HarnessBody { Kind: HarnessEventKind.TurnEnded })
+            findings = [.. findings, new FindingChange(SeatVocabulary.FindingTurnFailed, false)];
 
         return result with
         {
@@ -105,7 +109,9 @@ public static class SeatStateMachine
         }
 
         if (kind is HarnessEventKind.PromptSubmitted or HarnessEventKind.Active or HarnessEventKind.ToolStarted or
-            HarnessEventKind.ToolFinished or HarnessEventKind.InputRequested or HarnessEventKind.InputResolved)
+            HarnessEventKind.ToolFinished or HarnessEventKind.InputRequested or HarnessEventKind.InputResolved or
+            HarnessEventKind.CompactionStarted or HarnessEventKind.Compacted or HarnessEventKind.TurnEnded or
+            HarnessEventKind.TurnFailed or HarnessEventKind.Retrying)
         {
             if (state.KnownSession is SessionValue.Starting or SessionValue.Unknown)
                 return EmptyEvent(state, EventDisposition.Applied);
@@ -374,6 +380,34 @@ public static class SeatStateMachine
         var pending = state.PendingInputRequest;
         switch (kind)
         {
+            case HarnessEventKind.CompactionStarted:
+                if (activity == ActivityValue.NeedsInput)
+                    return SetActivity(state, activity, detail, state.KnownActivityReason, pending, now, "A8");
+                var beforeCompaction = activity;
+                var compacting = SetActivity(state, ActivityValue.Working, SeatVocabulary.ActivityDetailCompacting,
+                    null, pending, now, "A8");
+                return compacting with { State = compacting.State with { PreCompactionActivity = beforeCompaction } };
+            case HarnessEventKind.Compacted:
+                if (activity != ActivityValue.Working || detail != SeatVocabulary.ActivityDetailCompacting ||
+                    state.PreCompactionActivity is not { } preCompactionActivity)
+                    return EmptyEvent(state);
+                var restoredReason = preCompactionActivity == ActivityValue.Unknown
+                    ? SeatVocabulary.ActivityReasonObservationGap
+                    : null;
+                var restored = SetActivity(state, preCompactionActivity, null, restoredReason, pending, now, "A9");
+                return restored with { State = restored.State with { PreCompactionActivity = null } };
+            case HarnessEventKind.TurnEnded:
+                if (activity is ActivityValue.Working or ActivityValue.NeedsInput or ActivityValue.Unknown)
+                    return SetActivity(state, ActivityValue.Idle, null, null, null, now, "A10");
+                return SetActivity(state, activity, detail, state.KnownActivityReason, null, now, "A10");
+            case HarnessEventKind.TurnFailed:
+                var turnFailed = SetActivity(state, ActivityValue.Idle, null, null, null, now, "A11");
+                return WithFindings(turnFailed, Open(SeatVocabulary.FindingTurnFailed));
+            case HarnessEventKind.Retrying:
+                if (activity == ActivityValue.NeedsInput)
+                    return SetActivity(state, activity, detail, state.KnownActivityReason, pending, now, "A12");
+                return SetActivity(state, ActivityValue.Working, SeatVocabulary.ActivityDetailRetrying,
+                    null, pending, now, "A12");
             case HarnessEventKind.PromptSubmitted:
                 activity = ActivityValue.Working;
                 detail = null;
