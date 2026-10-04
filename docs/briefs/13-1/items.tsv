@@ -93,3 +93,8 @@ T9	test	once	B19,B19w
 T10	test	once	V1
 T11	test	once	B6a,B6b,B6c,B7,B9,B10,B11,B12
 T12	test	once	B6a,B6b,B7,B10,B20
+B23	rule	once	B10
+A7-recovery	output	once	B23
+A2-detail	output	once	B23
+T13	test	once	B23
+C1	change	once	B23

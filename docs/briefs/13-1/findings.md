@@ -409,3 +409,61 @@ overlay reasons. Two things it leaves behind:
 
 Not checked in the third read: `show` for stories other than 3, 5, 9 and 11; the spec outside
 the amended passages; nothing was built.
+
+## Review of the A7/A2 amendment (2026-10-05)
+
+Reviewed at commit d435886. Stories: 12. Check: ok.
+
+Read: the amendment commit (B10, B23, rows A2 and A7, A7-recovery, A2-detail, T13, the S12
+block), spec 0006 lines 500–530 (activity table and the pending-request note), issue #125 and
+pull request #129 with `SeatStateMachine.cs` and `ActivityTableTests.cs` on its branch. B23
+agrees with the spec: A7 from `unknown` is `working` without a guard, and the A2 dash from
+`working` changes nothing. On the branch of #129, A7 from `unknown` changes only on a match and
+A2 clears the detail, so both corrections are real.
+
+- [x] F37 (context-gap) S12: B23 changes a result that a committed test of S5 asserts
+  (`ActivityTableTests.A7InputResolvedChangesNeedsInputOnlyWhenItMatchesAndMovesUnknownToWorking`
+  in #129 expects `unknown` to stay `unknown` when the pending request does not match), but B23
+  is typed `rule` and names no existing test; T13 covers only the local acceptance test, so the
+  S12 implementer turns an earlier test red with no item that allows the edit. Fix: `author`
+  adds a `change` item to S12 that names that test and its new expectation, and any committed
+  A2 assertion on the detail.
+- [x] F38 (context-gap) S12: the amendment calls the S5 behaviour "merged", but story 13-1-5 is
+  issue #125 in `needs-review` with pull request #129 open, and the amendment also edits S5's
+  own outputs in place (rows A2 and A7, and B10), so the S5 story text no longer matches what
+  its gate accepted and, until #129 merges, S12 has nothing to correct. Fix: `author` states
+  the order in the S12 note (S12 becomes ready only after #129 merges as accepted, and the
+  edited cells are implemented by S12, not by a retry of S5), or moves the correction into S5
+  before it merges and drops S12; which of the two is `lead`'s decision.
+
+Not checked in this review: the local acceptance tests of 13-1-5 and their corrected A7
+expectation (`artifacts/trials/`, by role); whether outputs of S6 to S11 (GS scripts, the
+properties of S9) depend on the old A7 or A2 behaviour; the maintainer's authorization of the
+amendment; nothing was built or run.
+
+
+## Author resolutions, A7/A2 amendment
+
+F37: Added C1 change item owned by story S12; it names the committed A7 test and its
+unconditional unknown-to-working expectation, and authorizes changing only conflicting
+A2 detail assertions while retaining all other cells.
+F38: Verified with gh pr view 129 --json state,mergedAt that #129 is MERGED at
+2026-10-04T21:03:23Z. B23 and the S12 note explicitly require that accepted merge plus
+amendment approval, and place amended B10/A2/A7 behavior in S12 rather than a retry of S5.
+This preserves lead's separate amendment/follow-up path and does not reopen accepted S5.
+
+## Re-review of the A7/A2 amendment
+
+Reviewed at commit c6dfd9e. Stories: 12. Check: ok.
+
+F37 and F38 are resolved: C1 is a `change` item owned by S12 that names the committed A7 test
+and its new expectation and allows only the conflicting A2 detail assertions to change; B23 and
+the S12 note place the corrected cells in S12 and make it ready only after #129 is merged and
+the amendment approved. Checked with `gh pr view 129`: state MERGED, merged at
+2026-10-04T21:03:23Z.
+
+New findings: None.
+
+Not checked in this re-review: the list of the review above still applies; nothing was built
+or run.
+
