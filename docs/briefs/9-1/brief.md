@@ -2,7 +2,7 @@
 id: 9-1
 title: "#9 slice 1 — deterministic orchestrator host disposal"
 issue: 9
-status: draft
+status: approved
 route: impl/senior
 paths: [tests/Aiakos.Orchestrator.Tests/, src/Aiakos.Orchestrator/Program.cs, src/Aiakos.Orchestrator/OrchestratorTelemetry.cs, src/Aiakos.ServiceDefaults/TelemetryShutdownService.cs]
 date: 2026-10-04
@@ -37,7 +37,7 @@ This is historical evidence, not a claimed local reproduction or a known root ca
 | tests/Aiakos.Orchestrator.Tests/Infrastructure/ | Repair test-host lifetime if the diagnosed cause is there |
 | tests/Aiakos.Orchestrator.Tests/*.cs | Focused regression/synchronization fixture if the diagnosed cause needs it |
 | src/Aiakos.Orchestrator/Program.cs, OrchestratorTelemetry.cs | Host-local fix only if diagnosis shows it is necessary |
-| src/Aiakos.ServiceDefaults/TelemetryShutdownService.cs | Maintainer-authorized shutdown-task ownership fix for 9-1-1 only (C2) |
+| src/Aiakos.ServiceDefaults/TelemetryShutdownService.cs | Maintainer-authorized shutdown-task behavior-neutral test-control seam in 9-1-1 (C3), then ownership fix in 9-1-2 (C2) |
 
 Do not change packages, project files, other ServiceDefaults files, CI or other projects.
 The wider tests directory in paths permits test fixture support, not unrelated test edits.
@@ -55,7 +55,7 @@ R1. Diagnose the failing lifetime before changing behavior. Identify the concurr
    in our code. The historical stack alone is not a cause. Record a deterministic test command
    and what observation distinguishes before and after; do not require a local probabilistic
    reproduction as a prerequisite. Write the cause and why the fix removes the race in the commit body under literal headings `Cause:` and `Evidence:`.
-   Keep the deterministic failed-before log and successful-after log local in artifacts/trials/9-1-1/;
+   Keep the deterministic failed-before log and successful-after log local in artifacts/trials/9-1-2/;
    QA owns these gate runs, and lead uses the commit body in the PR. An unproved hypothesis
    must be called unknown; it is not a diagnosed cause. If the needed production change is
    outside allowed paths, stop and route the missing scope to lead, without modifying it.
@@ -120,8 +120,8 @@ C2. Implement the diagnosed shutdown ownership correction in TelemetryShutdownSe
    orchestrator tests directory (exercise tracer, meter and logger success/timeout/fault paths).
    The after gate runs the full tests/Aiakos.Orchestrator.Tests and tests/Aiakos.Node.Tests
    projects in Release; no node source/test file scope is added. This authority is limited
-   to story 9-1-1 and this service file, not a telemetry redesign.
-   Use R4(b) at the diagnosed real host StoppedAsync-to-provider-disposal boundary: hold
+   to the two stories of slice 9-1 and this service file, not a telemetry redesign.
+   After C3 is merged, use R4(b) at the diagnosed real host StoppedAsync-to-provider-disposal boundary: hold
    shutdown with a barrier/double and advance the lifecycle timeout deterministically. Before
    must observe disposal overlapping pending shutdown; after must observe no overlap on
    success, timeout/cancellation and error paths. Independently hold a worker before provider
@@ -130,6 +130,29 @@ C2. Implement the diagnosed shutdown ownership correction in TelemetryShutdownSe
    completion and disposal; it never fabricates a provider exception. Preserve C1 and the
    configured time bounds. Any testability helper required inside the authorized file must
    preserve production defaults and provider ownership; no new package or other file scope.
+
+C3. Before the ownership fix, make only a behavior-neutral control seam inside the authorized
+   TelemetryShutdownService.cs. Keep the existing public two-parameter constructor
+   TelemetryShutdownService(IServiceProvider services, IOptions<TelemetryShutdownOptions> options)
+   used by DI; it delegates to an internal four-parameter constructor with those same first
+   parameters followed by TimeProvider timeProvider and TaskScheduler taskScheduler, passing
+   exactly TimeProvider.System and TaskScheduler.Default. The four-parameter constructor is
+   not public, so DI does not select it; it uses the supplied provider for the existing
+   timeoutMs+500 WaitAsync and the supplied scheduler for launching the existing shutdown
+   actions. Use Task.Factory.StartNew with CancellationToken.None and
+   TaskCreationOptions.DenyChildAttach on that scheduler for the Task.Run-equivalent launch;
+   retain the existing action/result and continuation semantics. Do not change the existing
+   timeout calculation, empty continuation, detached-worker behavior, provider lookup/ownership,
+   order or concurrency in this story. No admission gate, worker join, exception policy or
+   ownership fix yet. Production still uses the real clock/default scheduler; injected clock
+   and scheduler only control scheduling/time in acceptance. This seam is approved by lead's
+   2026-10-04 21:34Z instruction and does not expand file/package scope. Acceptance for S1
+   reflects the constructor (no compile reference to a missing internal member), checks the
+   production default delegation and observes the controlled timer/worker scheduling. Run
+   the unchanged full orchestrator and node Release suites. Preserve the existing C1 actor
+   assertions without editing them in S1. The seam acceptance baseline fails for the absent
+   constructor; it does not claim that the race was reproduced. The neutral seam must merge
+   on main before author/QA run the ownership-regression baseline there.
 
 R3. The supporting stress command, separate from gate.sh, runs the entire orchestrator test
    project 200 consecutive times in Release against real Postgres, with the project's normal xUnit class parallelism
@@ -201,7 +224,8 @@ R4. Replace reproduce-first acceptance with a deterministic regression selected 
    Evidence: commit text is written later in the fix commit from the validated diagnosis.
    Lead routes the record to author to write the deterministic acceptance test before behavior
    changes; QA runs baseline on main via tools/story.sh and checks the right boundary as above.
-   Only then does lead authorize ready/start under the existing attempt policy. Diagnosis
+   S1 seam readiness is decided from C3/E9/E10/T2 first. After S1 merges, only then does lead
+   authorize S2 ready/start from the diagnosed-boundary baseline under the existing attempt policy. Diagnosis
    neither authorizes another attempt nor waives the retry count.
    The deterministic gate classifies a demonstrable Docker/container/Postgres failure before
    host startup as infrastructure: print exactly "REGRESSION: infrastructure failure", exit 2,
@@ -229,9 +253,12 @@ R4. Replace reproduce-first acceptance with a deterministic regression selected 
 
 | `E8` | real StoppedAsync/provider-disposal boundary; worker held before provider entry through the deadline; worker held inside Shutdown beyond the deadline; success, cancellation and fault paths | pre-entry work is atomically barred from later provider access at timeoutMs+500; already-entered work completes before lifecycle completion/DI disposal even beyond that deadline; zero disposal/shutdown overlap on every path; service does not dispose DI-owned providers; each provider gets the clamped configured timeout (default 2000 ms), concurrent admission/observation deadline timeoutMs+500 (default 2500 ms); no hard final-return bound for an entered call that never returns; shared-service focused tests and full orchestrator/node Release test projects pass; no fabricated exception or instrumentation removal |
 
+| `E9` | construct TelemetryShutdownService through existing two-parameter DI constructor and inspect test constructor | existing public IServiceProvider/IOptions constructor retained; internal IServiceProvider/IOptions/TimeProvider/TaskScheduler constructor exists; production delegation uses TimeProvider.System and TaskScheduler.Default; no ownership/default-behavior change |
+| `E10` | invoke real registered service through four-parameter seam with controlled clock and scheduler; unchanged production suites | queued shutdown actions run only on supplied scheduler; existing timeout is scheduled on supplied TimeProvider at timeoutMs+500 and passes timeoutMs to providers; pre-fix continuation behavior is retained in S1; unchanged full orchestrator and node Release suites pass; S2 deliberately replaces unsafe detached-worker behavior under C2/E8 |
+
 ## Tests
 
-T1. Local acceptance gate under artifacts/trials/9-1-1/gate.sh implements R4/E4 and
+T1. Local ownership acceptance gate under artifacts/trials/9-1-2/gate.sh implements R4/E4 and
    records the baseline commit in main-before.txt through tools/story.sh baseline. Author
    writes it after source diagnosis and before behavior changes; the after gate runs both full
    orchestrator and node Release test projects plus focused shared-service lifecycle tests. QA confirms a compiled
@@ -239,13 +266,21 @@ T1. Local acceptance gate under artifacts/trials/9-1-1/gate.sh implements R4/E4 
    entry point and output log. No gate may manufacture the library exception or require its
    probabilistic reproduction under route (b).
 
+T2. Local seam acceptance at artifacts/trials/9-1-1/gate.sh checks C3/E9/E10 and runs both
+   unchanged Release test projects. Runtime constructor lookup makes baseline fail by the
+   absent seam assertion rather than test compilation. It is a seam baseline, not ownership
+   proof. QA runs it before S1 ready. After S1 merges, T1's compiled baseline must exercise
+   the actual service and fail at the diagnosed boundary; no missing-seam baseline qualifies.
+
 ## Definition of done
 
-- Identical deterministic baseline/after gate with E4 evidence and R1 source diagnosis, all earlier tests green, build zero warnings/errors.
-- One local commit: `fix(orchestrator): make host disposal deterministic (#9)`.
-- Commit body includes R1 evidence and `Risks: #9 has no open risk assigned; this fixes #103's host-disposal regression.`
+- S1: C3/E9/E10/T2 seam acceptance passes after an absent-constructor baseline; unchanged orchestrator/node suites pass, build zero warnings/errors. No E4 ownership evidence or R1 fix diagnosis is required for this neutral story.
+- S2: identical deterministic baseline/after gate with E4 evidence and R1 source diagnosis, all earlier tests green, build zero warnings/errors.
+- S1 local commit: `refactor(telemetry): expose shutdown test controls (#9)`; S2 local commit: `fix(orchestrator): make host disposal deterministic (#9)`.
+- S1 commit body records neutral constructor/clock/scheduler changes and `Risks: #9 has no open risk assigned; behavior-neutral controls only, #103 remains for 9-1-2.` Do not claim the disposal race is fixed.
+- S2 commit body includes R1 evidence and `Risks: #9 has no open risk assigned; this fixes #103's host-disposal regression.`
 - LF, UTF-8 without BOM, final newline. No push/PR. Use tools/story.sh and its one-retry limit.
-- Lead creates the ready sub-issue as 9-1-1 under #9 and closes #103 as superseded.
+- Lead routes 9-1-1 (neutral seam) then 9-1-2 (ownership fix) as sub-issues of #9 and handles the superseded #103 record. Each story follows its own ready/baseline and attempt accounting; no counter is reset by this amendment.
 
 ## Out of scope
 

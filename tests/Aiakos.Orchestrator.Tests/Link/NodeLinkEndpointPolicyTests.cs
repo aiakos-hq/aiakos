@@ -1,4 +1,5 @@
 using Aiakos.Orchestrator.Link;
+using System.Net;
 
 namespace Aiakos.Orchestrator.Tests.Link;
 
@@ -91,5 +92,24 @@ public sealed class NodeLinkEndpointPolicyTests
 
         Assert.Equal("NodeLink requires an explicit loopback HTTP endpoint.", nonLoopback.Message);
         Assert.Equal("NodeLink requires an explicit loopback HTTP endpoint.", empty.Message);
+    }
+
+    [Fact]
+    public void ConfiguredAndResolvedEndpointChecksHonorGrpcPortAndRejectIndeterminateEndpoints()
+    {
+        NodeLinkEndpointPolicy.ValidateConfigured(
+            ["http://0.0.0.0:5180", "http://127.0.0.1:5181"], grpcPort: 5181);
+        NodeLinkEndpointPolicy.ValidateResolved(new IPEndPoint(IPAddress.Any, 5180), grpcPort: 5181);
+
+        var noEligibleEndpoint = Assert.Throws<InvalidOperationException>(() =>
+            NodeLinkEndpointPolicy.ValidateConfigured(["http://127.0.0.1:5180"], grpcPort: 5181));
+        var nonLoopback = Assert.Throws<InvalidOperationException>(() =>
+            NodeLinkEndpointPolicy.ValidateResolved(new IPEndPoint(IPAddress.Any, 5181), grpcPort: 5181));
+        var indeterminate = Assert.Throws<InvalidOperationException>(() =>
+            NodeLinkEndpointPolicy.ValidateResolved(null, grpcPort: 5181));
+
+        Assert.Equal("NodeLink requires an explicit loopback HTTP endpoint.", noEligibleEndpoint.Message);
+        Assert.Equal("NodeLink requires an explicit loopback HTTP endpoint.", nonLoopback.Message);
+        Assert.Equal("NodeLink requires an explicit loopback HTTP endpoint.", indeterminate.Message);
     }
 }

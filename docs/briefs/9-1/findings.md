@@ -169,3 +169,55 @@ part of the amendment pull request.
 
 Not checked in this round: the lists of rounds 5 and 6 still apply; nothing was built or run.
 
+
+## Two-story seam sequencing amendment (review pending)
+
+Lead instruction dated 2026-10-04 21:34Z confirms the TimeProvider/TaskScheduler constructor seam and requires it to merge first so the ownership baseline can compile and fail for the real boundary. Based on approved #137 main text: C3/E9/E10/T2 are S1 neutral seam; existing R1-R4/C1/C2/E1-E8/T1 are S2 ownership fix depending on S1. Exact public two-parameter and internal four-parameter constructor signatures, production System/Default delegation, controlled scheduling and provider-backed wait are specified. S1 retains unsafe continuation/worker behavior deliberately; S2 corrects it under prior maintainer decisions. Existing diagnosis filename is preserved; ownership trial moves to 9-1-2. No new authorization or scope, no resets. Pending architect review; neither gate is handed to QA before amendment approval.
+
+## Review of the two-story seam amendment, round 8
+
+Reviewed at commit a601996. Stories: 2. Check: ok.
+
+Read: the amendment commit (C3, E9, E10, T2, the changed C2, R1, R4, T1 and definition of done,
+both story blocks), `show 9-1 1` and `TelemetryShutdownService.cs`. The split is sound: S1 owns
+only C3 and changes no behaviour, S2 depends on S1 and keeps every earlier item, and S2's
+baseline runs on `main` with the seam. C3 is exact: the public two-parameter and the internal
+four-parameter constructor, `TimeProvider.System` and `TaskScheduler.Default` in production, a
+`Task.Factory.StartNew` launch that equals `Task.Run` on the default scheduler, and
+`WaitAsync` on the supplied provider. The class and the new constructor are internal and
+`Aiakos.ServiceDefaults` has no `InternalsVisibleTo`; C3 and T2 answer that with reflection.
+
+### Findings
+
+- [x] S1 (context-gap): `show 9-1 1` gives the S1 implementer the definition of done of S2: "Identical deterministic baseline/after gate with E4 evidence and R1 source diagnosis" and "Commit body includes R1 evidence and `Risks: … this fixes #103's host-disposal regression`", while S1 owns neither R1 nor E4 and fixes nothing, so the implementer must decide what its commit body says and the stated text would be false for S1. Fix: `author` writes those two lines per story (for S1: the T2 gate, and a `Risks:` line that says the seam changes no behaviour and does not fix #103).
+
+Noted, not a finding: S1 is routed `impl/senior`, and its `escalation` line gives lead's routing
+as the reason. C3 fixes the signatures and the calls exactly, so the story looks sized for
+`impl`; `docs/workflow.md` keeps the senior route for a story that cannot be split further.
+This is `lead`'s and the maintainer's call at approval.
+
+## Not checked, round 8
+
+- Lead's instruction of 21:34Z that authorizes the split; taken from the author's text.
+- That reflection reaches the internal constructor from the orchestrator test project as T2 assumes; nothing was built or run.
+- `artifacts/diagnoses/9-1-1.md` and `artifacts/trials/`, as before.
+
+
+## Per-story completion resolution
+
+Definition of done now separates S1's absent-constructor baseline, neutral controls, unchanged suites and neutral risk text from S2's diagnosed-boundary E4/R1 proof and fix claim. Author tick records the change.
+
+## Re-review of the two-story seam amendment, round 9
+
+Reviewed at commit f1364c2. Stories: 2. Check: ok.
+
+The finding of round 8 is resolved: the definition of done has separate lines for S1 (the T2
+seam gate, unchanged suites, a `Risks:` line that leaves #103 to 9-1-2) and for S2 (E4
+evidence, R1 diagnosis, the fix claim); `show 9-1 1` prints them.
+
+New findings: None.
+
+Still noted for `lead` and the maintainer: the `impl/senior` route of S1 (round 8).
+
+Not checked in this round: the list of round 8 still applies; nothing was built or run.
+

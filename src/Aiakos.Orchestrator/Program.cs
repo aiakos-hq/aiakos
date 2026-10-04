@@ -8,6 +8,7 @@ using Aiakos.ServiceDefaults;
 using Akka.Hosting;
 
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -36,6 +37,10 @@ var aiakosSection = builder.Configuration.GetSection(AiakosOptions.Section);
 builder.Services.Configure<AiakosOptions>(aiakosSection);
 builder.Services.Configure<NodeLinkOptions>(static _ => { });
 builder.Services.TryAddSingleton<INodeLinkApplication, EmptyNodeLinkApplication>();
+builder.Services.AddSingleton(static _ => TimeProvider.System);
+builder.Services.AddSingleton<NodeTokenRegistry>(services =>
+    new NodeTokenRegistry(services.GetRequiredService<Microsoft.Extensions.Options.IOptions<AiakosOptions>>().Value.Nodes));
+builder.Services.AddSingleton<NodeLinkRegistry>();
 var grpcPort = ReadGrpcPort(builder.Configuration);
 
 // Per-endpoint protocols (R13, R14): the endpoint on the gRPC port is HTTP/2 only (h2c); all other
@@ -43,13 +48,25 @@ var grpcPort = ReadGrpcPort(builder.Configuration);
 // defaults callback runs for every endpoint Kestrel binds, including those from ASPNETCORE_URLS,
 // which is how Aspire passes a project's endpoints. Protocols are deliberately not set through
 // Kestrel__EndpointDefaults__Protocols, which would apply to both endpoints.
-builder.WebHost.ConfigureKestrel(kestrel => kestrel.ConfigureEndpointDefaults(listen =>
+builder.WebHost.ConfigureKestrel((context, kestrel) =>
 {
-    if (grpcPort is { } port && listen.IPEndPoint?.Port == port)
+    var configuredAddresses = context.Configuration.GetSection("Kestrel:Endpoints").GetChildren()
+        .Select(static endpoint => endpoint["Url"])
+        .Where(static url => !string.IsNullOrWhiteSpace(url))
+        .Cast<string>()
+        .ToList();
+    var serverUrls = context.Configuration[WebHostDefaults.ServerUrlsKey];
+    if (!string.IsNullOrWhiteSpace(serverUrls))
+        configuredAddresses.AddRange(serverUrls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    NodeLinkEndpointPolicy.ValidateConfigured(configuredAddresses, grpcPort);
+
+    kestrel.ConfigureEndpointDefaults(listen =>
     {
-        listen.Protocols = HttpProtocols.Http2;
-    }
-}));
+        NodeLinkEndpointPolicy.ValidateResolved(listen.EndPoint, grpcPort);
+        if (grpcPort is { } port && listen.IPEndPoint?.Port == port)
+            listen.Protocols = HttpProtocols.Http2;
+    });
+});
 
 builder.AddNpgsqlDataSource("aiakos");
 builder.Services.AddSingleton<TenantRepository>();
@@ -87,6 +104,10 @@ if (grpcPort is { } p)
     // gRPC is reachable only on the gRPC endpoint (R14).
     grpcHealth.RequireHost($"*:{p.ToString(CultureInfo.InvariantCulture)}");
 }
+
+var nodeLink = app.MapGrpcService<NodeLinkService>();
+if (grpcPort is { } nodeLinkPort)
+    nodeLink.RequireHost($"*:{nodeLinkPort.ToString(CultureInfo.InvariantCulture)}");
 
 // A failed migration throws out of RunAsync after being logged with its script name, so the
 // process exits non-zero and never serves on a partially migrated database (R28). It is not
