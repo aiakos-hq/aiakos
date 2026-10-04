@@ -82,21 +82,29 @@ C2. Implement the diagnosed shutdown ownership correction in TelemetryShutdownSe
    Source diagnosis at artifacts/diagnoses/9-1-1.md identifies Task.Run shutdown workers and
    the WaitAsync/empty continuation at original lines 54 and 67-68: lifecycle completion
    can precede shutdown completion, permitting the DI-owned provider to be disposed concurrently.
-   Keep ownership of every tracer, meter and logger shutdown operation until it has completed
-   before lifecycle completion allows DI disposal. Timeout, cancellation and fault paths must
-   obey the same guarantee; no detached worker may still use a provider when DI disposes it.
+   Keep ownership of every tracer, meter and logger shutdown operation: any operation that
+   entered its provider must complete before lifecycle completion permits DI disposal. Timeout,
+   cancellation and fault paths obey the same guarantee. Observe all entered workers' completion
+   and faults; a timeout or another worker's fault must not release ownership of pending workers.
    Removing the empty continuation or canceling only WaitAsync is insufficient. Do not dispose
    providers in the shutdown service, transfer provider ownership out of DI, or disable tracing,
-   metrics/logging, instrumentation or the flush. Preserve the existing two bounds exactly:
+   metrics/logging, instrumentation or the flush. Preserve the provider timeout exactly:
    compute timeoutMs = (int)Math.Clamp(ShutdownFlushTimeout.TotalMilliseconds, 0, int.MaxValue),
-   default ShutdownFlushTimeout=2 seconds, and pass timeoutMs as each provider's shutdown bound;
-   keep the lifecycle flush-wait bound timeoutMs + 500L milliseconds (default 2500 ms), with
-   providers handled concurrently so this is not the sum of three per-provider bounds.
-   Neither an unbounded final join nor extending those bounds is an accepted fix. The bounds
-   are observable waits, not proof that an uncooperative library worker stops at the deadline.
-   If safe completion/DI ownership cannot be reconciled with both bounds under the pinned
-   dependency, stop and hand the exact conflicting source paths to lead for a maintainer
-   decision; do not silently pick one guarantee to violate or claim an unimplemented design.
+   default ShutdownFlushTimeout=2 seconds, and pass timeoutMs to each provider's Shutdown call.
+   Keep timeoutMs + 500L milliseconds (default 2500 ms) as the lifecycle admission/observation
+   deadline, with providers handled concurrently rather than summing three provider bounds.
+   Maintainer decision dated 2026-10-04, lead queue qitem-20261004212216-58da4ef3, explicitly
+   relaxes the earlier hard lifecycle-total bound and no-unbounded-join prohibition:
+   (a) work not yet inside its provider when the admission deadline expires is atomically
+   prevented from entering later; it never touches that DI-owned provider after lifecycle
+   completion, even if a queued worker finally runs. Admission closure and entry must be
+   mutually ordered so a worker cannot check permission before closure then enter after it.
+   (b) already-entered Shutdown work is awaited to completion before DI disposal, even beyond
+   the observation deadline. The service retains ownership on timeout/cancellation/fault;
+   lifecycle completion/disposal cannot proceed under that in-flight work. If a provider never
+   returns, lifecycle shutdown may remain pending; there is deliberately no finite total-return
+   guarantee for this case. The provider timeout value remains unchanged. This is the accepted
+   safety tradeoff, not a claim that synchronous library instrumentation obeys its timeout.
    This shared service also changes node shutdown because NodeProgram calls
    AddAiakosServiceDefaults; the same safe provider-ownership rule applies to node stop.
    Place focused tests of the shared service's actual lifecycle boundary in the permitted
@@ -107,7 +115,9 @@ C2. Implement the diagnosed shutdown ownership correction in TelemetryShutdownSe
    Use R4(b) at the diagnosed real host StoppedAsync-to-provider-disposal boundary: hold
    shutdown with a barrier/double and advance the lifecycle timeout deterministically. Before
    must observe disposal overlapping pending shutdown; after must observe no overlap on
-   success, timeout and error paths. The acceptance double records actual operation entry,
+   success, timeout/cancellation and error paths. Independently hold a worker before provider
+   entry until after the admission deadline and prove it never enters afterwards, and hold
+   another worker inside Shutdown beyond that deadline and prove disposal waits until release. The acceptance double records actual operation entry,
    completion and disposal; it never fabricates a provider exception. Preserve C1 and the
    configured time bounds. Any testability helper required inside the authorized file must
    preserve production defaults and provider ownership; no new package or other file scope.
@@ -208,7 +218,7 @@ R4. Replace reproduce-first acceptance with a deterministic regression selected 
 
 | `E7` | deterministic R4 gate cannot execute because Docker/container/Postgres is demonstrably unavailable before host startup | final exact line `REGRESSION: infrastructure failure`, exit 2 and raw cause; baseline-only assessment `BASELINE: infrastructure failure`; no boundary reproduction or fix claim; if done reached build, its recorded attempt count is retained and reported to lead before rerun |
 
-| `E8` | diagnosed shutdown operation held at the real StoppedAsync/provider-disposal boundary; success, timeout/cancellation and fault paths | no provider disposal overlaps an in-flight shutdown; shutdown service does not dispose DI-owned providers; each provider receives the clamped configured timeout (default 2000 ms), lifecycle flush-wait remains timeoutMs+500 (default 2500 ms), with concurrent providers; no detached worker, unbounded join, instrumentation removal or fabricated exception; shared-service focused lifecycle tests and full orchestrator/node test projects pass in Release; irreconcilable bounds are reported to lead, not marked fixed |
+| `E8` | real StoppedAsync/provider-disposal boundary; worker held before provider entry through the deadline; worker held inside Shutdown beyond the deadline; success, cancellation and fault paths | pre-entry work is atomically barred from later provider access at timeoutMs+500; already-entered work completes before lifecycle completion/DI disposal even beyond that deadline; zero disposal/shutdown overlap on every path; service does not dispose DI-owned providers; each provider gets the clamped configured timeout (default 2000 ms), concurrent admission/observation deadline timeoutMs+500 (default 2500 ms); no hard final-return bound for an entered call that never returns; shared-service focused tests and full orchestrator/node Release test projects pass; no fabricated exception or instrumentation removal |
 
 ## Tests
 
