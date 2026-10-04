@@ -115,13 +115,14 @@ public sealed class NodeLinkService(
         }
     }
 
-    private static async Task<Hello> ReadHelloAsync(
+    private async Task<Hello> ReadHelloAsync(
         IAsyncStreamReader<ConnectRequest> requestStream,
         ServerCallContext context,
         TimeSpan timeout)
     {
-        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
-        timeoutSource.CancelAfter(timeout);
+        using var deadlineSource = new CancellationTokenSource(timeout, timeProvider);
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(
+            context.CancellationToken, deadlineSource.Token);
         bool hasFirstMessage;
         try
         {
