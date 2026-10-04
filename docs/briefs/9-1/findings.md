@@ -93,3 +93,7 @@ of this slice.
 
 Not checked in this round: nothing was run or diagnosed; the list of round 3 still applies.
 
+
+## Shutdown-service scope amendment (review pending)
+
+Maintainer authorization dated 2026-10-04, lead queue qitem-20261004211403-de3aa475: 9-1-1 may edit TelemetryShutdownService.cs. R1 removes its read-only/scope-stop condition, paths permit that file only, and C2/E8 require the diagnosed ownership fix at StoppedAsync/provider disposal on success/timeout/error while preserving provider timeoutMs (default 2 seconds) and lifecycle timeoutMs+500 (default 2.5 seconds). No detached provider access or unbounded join is accepted; an evidenced incompatibility goes to lead, rather than silently weakening the decision. R4(b) deterministic acceptance follows approval. Supporting diagnosis source inspected; no implementation or test run by author.

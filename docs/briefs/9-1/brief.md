@@ -4,7 +4,7 @@ title: "#9 slice 1 — deterministic orchestrator host disposal"
 issue: 9
 status: draft
 route: impl/senior
-paths: [tests/Aiakos.Orchestrator.Tests/, src/Aiakos.Orchestrator/Program.cs, src/Aiakos.Orchestrator/OrchestratorTelemetry.cs]
+paths: [tests/Aiakos.Orchestrator.Tests/, src/Aiakos.Orchestrator/Program.cs, src/Aiakos.Orchestrator/OrchestratorTelemetry.cs, src/Aiakos.ServiceDefaults/TelemetryShutdownService.cs]
 date: 2026-10-04
 ---
 
@@ -37,8 +37,9 @@ This is historical evidence, not a claimed local reproduction or a known root ca
 | tests/Aiakos.Orchestrator.Tests/Infrastructure/ | Repair test-host lifetime if the diagnosed cause is there |
 | tests/Aiakos.Orchestrator.Tests/*.cs | Focused regression/synchronization fixture if the diagnosed cause needs it |
 | src/Aiakos.Orchestrator/Program.cs, OrchestratorTelemetry.cs | Host-local fix only if diagnosis shows it is necessary |
+| src/Aiakos.ServiceDefaults/TelemetryShutdownService.cs | Maintainer-authorized shutdown-task ownership fix for 9-1-1 only (C2) |
 
-Do not change packages, project files, ServiceDefaults production code, CI or other projects.
+Do not change packages, project files, other ServiceDefaults files, CI or other projects.
 The wider tests directory in paths permits test fixture support, not unrelated test edits.
 Public application APIs remain unchanged. Do not prescribe a speculative fix in advance.
 
@@ -58,13 +59,11 @@ R1. Diagnose the failing lifetime before changing behavior. Identify the concurr
    QA owns these gate runs, and lead uses the commit body in the PR. An unproved hypothesis
    must be called unknown; it is not a diagnosed cause. If the needed production change is
    outside allowed paths, stop and route the missing scope to lead, without modifying it.
-   TelemetryShutdownService.cs is intentionally read-only under the maintainer's narrow
-   authorization, even if it is the diagnosed cause. In that case record the source line and
-   required change, park the queue item on a scope decision, and hand the diagnostic evidence
-   to lead for maintainer-authorized scope amendment. The story is blocked on that decision,
-   not fixed or done; do not substitute an unrelated test workaround or consume a retry to
-   try one. Resume only after the brief permits the required file or lead records a different
-   in-scope fix that addresses the evidenced lifetime boundary.
+   The maintainer authorized TelemetryShutdownService.cs for this story on 2026-10-04,
+   through lead queue qitem-20261004211403-de3aa475. The prior read-only/scope-stop condition
+   for this one file is superseded by C2; no further scope permission is needed to fix it.
+   All other files outside the paths remain prohibited and require an evidenced scope decision.
+
 
 R2. Fix the diagnosed cause in the allowed host or test lifetime. If the dependency itself
    races, make the host/test setup or shutdown deterministic at the actual conflicting
@@ -78,6 +77,34 @@ C1. ActorSystemRunsAfterStartAndTerminatesAfterStop still starts a real Orchestr
    bound and asserts IsCompletedSuccessfully. A cause-driven change may adjust explicit
    start/stop ordering or test-host ownership, but must retain all these observable assertions.
    Other orchestrator tests keep their behavior and remain green.
+
+C2. Implement the diagnosed shutdown ownership correction in TelemetryShutdownService.cs.
+   Source diagnosis at artifacts/diagnoses/9-1-1.md identifies Task.Run shutdown workers and
+   the WaitAsync/empty continuation at original lines 54 and 67-68: lifecycle completion
+   can precede shutdown completion, permitting the DI-owned provider to be disposed concurrently.
+   Keep ownership of every tracer, meter and logger shutdown operation until it has completed
+   before lifecycle completion allows DI disposal. Timeout, cancellation and fault paths must
+   obey the same guarantee; no detached worker may still use a provider when DI disposes it.
+   Removing the empty continuation or canceling only WaitAsync is insufficient. Do not dispose
+   providers in the shutdown service, transfer provider ownership out of DI, or disable tracing,
+   metrics/logging, instrumentation or the flush. Preserve the existing two bounds exactly:
+   compute timeoutMs = (int)Math.Clamp(ShutdownFlushTimeout.TotalMilliseconds, 0, int.MaxValue),
+   default ShutdownFlushTimeout=2 seconds, and pass timeoutMs as each provider's shutdown bound;
+   keep the lifecycle flush-wait bound timeoutMs + 500L milliseconds (default 2500 ms), with
+   providers handled concurrently so this is not the sum of three per-provider bounds.
+   Neither an unbounded final join nor extending those bounds is an accepted fix. The bounds
+   are observable waits, not proof that an uncooperative library worker stops at the deadline.
+   If safe completion/DI ownership cannot be reconciled with both bounds under the pinned
+   dependency, stop and hand the exact conflicting source paths to lead for a maintainer
+   decision; do not silently pick one guarantee to violate or claim an unimplemented design.
+   This authority is limited to story 9-1-1 and this service file, not a telemetry redesign.
+   Use R4(b) at the diagnosed real host StoppedAsync-to-provider-disposal boundary: hold
+   shutdown with a barrier/double and advance the lifecycle timeout deterministically. Before
+   must observe disposal overlapping pending shutdown; after must observe no overlap on
+   success, timeout and error paths. The acceptance double records actual operation entry,
+   completion and disposal; it never fabricates a provider exception. Preserve C1 and the
+   configured time bounds. Any testability helper required inside the authorized file must
+   preserve production defaults and provider ownership; no new package or other file scope.
 
 R3. The supporting stress command, separate from gate.sh, runs the entire orchestrator test
    project 200 consecutive times in Release against real Postgres, with the project's normal xUnit class parallelism
@@ -175,6 +202,8 @@ R4. Replace reproduce-first acceptance with a deterministic regression selected 
 
 | `E7` | deterministic R4 gate cannot execute because Docker/container/Postgres is demonstrably unavailable before host startup | final exact line `REGRESSION: infrastructure failure`, exit 2 and raw cause; baseline-only assessment `BASELINE: infrastructure failure`; no boundary reproduction or fix claim; if done reached build, its recorded attempt count is retained and reported to lead before rerun |
 
+| `E8` | diagnosed shutdown operation held at the real StoppedAsync/provider-disposal boundary; success, timeout/cancellation and fault paths | no provider disposal overlaps an in-flight shutdown; shutdown service does not dispose DI-owned providers; each provider receives the clamped configured timeout (default 2000 ms), lifecycle flush-wait remains timeoutMs+500 (default 2500 ms), with concurrent providers; no detached worker, unbounded join, instrumentation removal or fabricated exception; irreconcilable bounds are reported to lead, not marked fixed |
+
 ## Tests
 
 T1. Local acceptance gate under artifacts/trials/9-1-1/gate.sh implements R4/E4 and
@@ -194,7 +223,7 @@ T1. Local acceptance gate under artifacts/trials/9-1-1/gate.sh implements R4/E4 
 
 ## Out of scope
 
-Package upgrades, application features, global telemetry redesign, changes to ServiceDefaults,
+Package upgrades, application features, global telemetry redesign, other ServiceDefaults files,
 other test projects, migrations, CI rerun policies, and claims that 200 passes prove races impossible.
 
 The contention reworked baseline saw BrokenMigrationTests fail once at iteration 79 with
