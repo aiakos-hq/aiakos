@@ -53,8 +53,7 @@ public sealed class SessionTableTests
 
         Assert.Equal(expected, step.State.KnownSession);
         Assert.Equal(activity, step.State.KnownActivity);
-        if (initial == SessionValue.Exited ||
-            (initial is SessionValue.Starting or SessionValue.Unknown) && !readinessSeen)
+        if (initial == SessionValue.Exited || initial == SessionValue.Starting && !readinessSeen)
             Assert.Contains(step.Findings, f => f.Kind == SeatVocabulary.FindingSourcesDisagree && f.Open);
         SeatAssert.Invariants(step);
     }

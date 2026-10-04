@@ -88,7 +88,7 @@ public static class SeatStateMachine
                 activityOnPresent: ActivityValue.Unknown,
                 activityReason: SeatVocabulary.SessionReasonSourcesDisagree);
             var findings = new List<FindingChange>();
-            if (!state.ReadinessSeen)
+            if (state.KnownSession == SessionValue.Starting && !state.ReadinessSeen)
                 findings.Add(new FindingChange(SeatVocabulary.FindingSourcesDisagree, true));
             findings.AddRange(ResolveLaunchFindings());
             return WithFindings(step, findings);
@@ -178,6 +178,8 @@ public static class SeatStateMachine
             var step = ApplySession(state, SessionValue.Absent, null, "S9", now);
             return WithFindings(step, Open(SeatVocabulary.FindingLaunchRejected));
         }
+        if (input.Status is CommandStatus.Rejected or CommandStatus.Failed)
+            return EmptyEvent(state, EventDisposition.Evidence);
         return EmptyEvent(state, state.KnownSession == SessionValue.Absent
             ? EventDisposition.Evidence
             : EventDisposition.Applied);
