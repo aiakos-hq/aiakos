@@ -40,3 +40,7 @@ Noted, not findings; the brief states both results:
 
 Not checked in this round: that the exclusion of `TelemetryShutdownService.cs` is the maintainer's decision (stated by the author); nothing was run.
 
+
+## Maintainer diagnosis-only amendment (review pending)
+
+Lead queue qitem-20261004202405-e06c9b51 authorizes replacement of reproduce-first acceptance after two unsuccessful baseline approaches. R1 requires resolved library/host/factory source evidence; R4/E4/T1 require deterministic direct or application-boundary regression. R3/E6 stress is supporting only. A diagnosis record returns through lead to author for acceptance before behavior changes. Single senior story and scope/attempt limits remain. BrokenMigrationTests contention failure is separate scope. Pending architect review and maintainer approval; local gates are not yet replaced.
