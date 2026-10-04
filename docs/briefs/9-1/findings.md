@@ -127,4 +127,25 @@ The timeout finding remains open for a maintainer choice via lead: queued-not-en
 
 ## Maintainer timeout decision resolution
 
-Lead queue qitem-20261004212216-58da4ef3 records the maintainer decision dated 2026-10-04: timeoutMs+500 now bounds admission/observation only; queued-not-entered work is atomically barred from late provider access; already-entered work must complete before DI disposal even beyond the deadline. The prior no-unbounded-join/hard lifecycle-total bound is explicitly relaxed, provider timeoutMs is preserved, and a nonreturning entered call may hold shutdown pending. C2/E8 and S1 notes now state satisfiable separate cases. Shared-node coverage at 83c7ed1 remains. Author tick records the change pending architect confirmation.
+Lead queue qitem-20261004212216-58da4ef3 records the maintainer decision dated 2026-10-04: timeoutMs+500 now bounds admission/observation only; queued-not-entered work is atomically barred from late provider access; already-entered work must complete before DI disposal even beyond the deadline. The prior no-unbounded-join/hard lifecycle-total bound is explicitly relaxed, provider timeoutMs is preserved, and a nonreturning entered call may hold shutdown pending. C2/E8 and S1 notes now state satisfiable separate cases. Shared-node coverage at 83c7ed1 remains. Author tick records the change.
+
+## Re-review of the shutdown-service scope amendment, round 6
+
+Reviewed at commit 2ad0e64. Stories: 1. Check: ok.
+
+Both findings of round 5 are resolved. C2 and E8 now give each timeout case one satisfiable
+result under the maintainer's decision: work that has not entered its provider at
+`timeoutMs + 500` is barred from entering later, and a call already inside the provider is
+awaited before disposal even beyond that deadline, with no finite bound on the total. C2, E8
+and T1 state that node stop changes too and that the after gate runs the orchestrator and node
+test projects with focused tests of the shared service.
+
+### Findings
+
+- [ ] S1 (context-gap): the decision changes what spec 0001 R37 promises ("a stop during which the dashboard is already gone still exits in about 3 s"): an entered provider call that does not return now holds the stop of the orchestrator and of the node without a bound, but the brief does not name R37, and `docs/specs/` is outside `paths`, so the story would merge code that deviates from an accepted spec with no item that records it. Fix: `author` names the R37 deviation in C2, and says who records it in spec 0001 and when (for example `lead`, as a "changes after acceptance" entry in the pull request of this amendment).
+
+## Not checked, round 6
+
+- The maintainer's decision itself (lead queue item named in C2); taken from the author's text.
+- `artifacts/diagnoses/9-1-1.md`, as in round 5; nothing was built or run.
+
