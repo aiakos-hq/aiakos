@@ -2,7 +2,7 @@
 id: 14-3
 title: "#14 slice 3 — file references and the resolved rig"
 issue: 14
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Spec/, tests/Aiakos.Spec.Tests/]
 date: 2026-10-04
