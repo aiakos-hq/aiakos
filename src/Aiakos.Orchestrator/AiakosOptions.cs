@@ -38,6 +38,15 @@ public sealed class NodeRegistration
     /// <summary>Node id (<c>AIAKOS_NODE_ID</c> on the node).</summary>
     public string Id { get; set; } = "";
 
+    /// <summary>Friendly node name; an empty value defaults to <see cref="Id"/>.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>Tenant identity for this node.</summary>
+    public Guid TenantId { get; set; } = Guid.Parse("00000000-0000-0000-0000-000000000001");
+
     /// <summary>Shared secret of the node (<c>AIAKOS_NODE_TOKEN</c> on the node).</summary>
     public string Token { get; set; } = "";
+
+    /// <summary>Optional precomputed SHA-256 token digest as 64 hexadecimal characters.</summary>
+    public string TokenHash { get; set; } = "";
 }

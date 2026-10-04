@@ -37,7 +37,8 @@ The rig is defined in [`rigs/aiakos-delivery/`](../rigs/aiakos-delivery/): `rig.
 per role under `agents/`, `CULTURE.md` and `SETUP.md`. It is started from the WSL checkout:
 
 ```bash
-rig up rigs/aiakos-delivery/rig.yaml
+rig up rigs/aiakos-delivery/rig.yaml     # first start, and after rig.yaml changed (new seats)
+rig up aiakos-delivery --existing        # every other start: the same rig resumes
 ```
 
 | Seat | Runtime | Role |
