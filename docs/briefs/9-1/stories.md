@@ -4,8 +4,7 @@ depends: -
 owns: C3
 outputs: E9, E10
 tests: T2
-route: impl/senior
-escalation: The clock/scheduler substitutions must preserve synchronous provider calls, Task.Run-equivalent scheduling and existing timeout/continuation semantics in one shared lifecycle service; separating them would leave the deterministic boundary test unusable. Lead explicitly routes this small behavior-neutral precursor to senior.
+route: impl
 notes: C3 fixes both constructor signatures and production defaults. Add no ownership repair here. E10 characterizes the current detached behavior only in S1; C2 deliberately corrects it in S2. Tests run unchanged orchestrator and node suites. Main must contain this seam before S2 acceptance baseline; no counter reset or premature ownership-fix attempt is authorized.
 
 ## S2: Fix shutdown admission and provider ownership
