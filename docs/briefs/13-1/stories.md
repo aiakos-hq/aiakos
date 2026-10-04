@@ -89,7 +89,7 @@ notes: These scripts use SourceSeq 0 or increasing, so no dependency on S9 is ne
 ## S12: Correct input recovery and preserve prompt detail
 goal: A7 recovers unknown activity according to spec 0006 and A2 preserves working detail while clearing the pending request.
 depends: S5
-owns: B23
+owns: B23, C1
 outputs: A7-recovery, A2-detail
 tests: T13
-notes: Correct merged S5 behavior without renumbering its rows or stories. B10 governs pending matching, distinct from the unconditional A7 unknown recovery. Existing A7 acceptance expectation is corrected to match the specification. No null-attribute behavior or request-ID normalization is introduced.
+notes: Ready only after PR #129 merges as accepted and this amendment is approved; #129 merged at 2026-10-04T21:03:23Z. Implement amended B10/A2/A7 here, not by retrying S5. C1 authorizes updating the named committed S5 A7 test and any conflicting A2 detail assertion. Correct merged S5 behavior without renumbering its rows or stories. B10 governs pending matching, distinct from the unconditional A7 unknown recovery. Existing A7 acceptance expectation is corrected to match the specification. No null-attribute behavior or request-ID normalization is introduced.

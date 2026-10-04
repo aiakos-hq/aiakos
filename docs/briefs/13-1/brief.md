@@ -392,6 +392,16 @@ are part of the test for that row, not new requirements introduced by a test.
 | `S15` | `NodeAttached`, new instance, inventory LAUNCHING / RUNNING / EXITED / UNKNOWN (same `launch_id`) | — | `starting` / `present` / `exited` / `unknown` | same mapping | same mapping | same mapping |
 | `S16` | `NodeAttached`, new instance, seat missing from inventory or other `launch_id` | — | `unknown`/inventory-missing +F(inventory-mismatch) | same | — | same |
 
+C1. **Earlier test corrections owned by story S12.** Update the committed S5 test
+    ActivityTableTests.A7InputResolvedChangesNeedsInputOnlyWhenItMatchesAndMovesUnknownToWorking
+    in tests/Aiakos.Orchestrator.Tests/Seats/ActivityTableTests.cs: when known session is
+    present and prior known activity is unknown, every INPUT_RESOLVED case expects working
+    with null reason regardless of pending-ID match. Preserve needs-input mismatch assertions
+    and every other activity column. Update any committed A2 assertion that expects a working
+    detail to be cleared: expect the original detail instead under B23, while pending clears.
+    Change only assertions for those corrected cells; all other earlier expected results stay.
+    The corrected local acceptance A7 expectation follows the same rule.
+
 B23. **Corrections to merged activity rows.** For current-launch INPUT_RESOLVED while known
     session is present and known activity is unknown, A7 always changes known and reported
     activity to working, clears its unknown reason and detail, and emits the ordinary A7
@@ -402,7 +412,10 @@ B23. **Corrections to merged activity rows.** For current-launch INPUT_RESOLVED 
     tool:<name>, compacting and retrying; B10 still clears PendingInputRequest. Value/reason
     remain unchanged and no activity transition is emitted. Preserve existing pipeline
     LastEventAt and activity-stale resolve behavior; extra resolves remain allowed by B2.
-    These corrections are implemented in new S12, not by editing merged story code now.
+    These corrections are implemented in new story S12, not by retrying S5. S12 becomes
+    ready only after PR #129 merges as accepted and this amendment is approved. PR #129 was
+    verified merged at 2026-10-04T21:03:23Z. The amended B10/A2/A7 text is the target for S12;
+    it does not invalidate or reopen the previously accepted S5 run.
 
 ### Activity rows
 
