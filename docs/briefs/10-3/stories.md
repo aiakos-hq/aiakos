@@ -20,7 +20,7 @@ depends: S1, S2
 owns: R4, R5, C5
 outputs: E4, E5, E19
 tests: -
-notes: R4 uses R2 authentication and R5 uses the R11 replay callback. C5 specifies every slim-host registration, the public registry constructor and host-owned ActorSystem lifetime. S3 creates the minimum registry/proxy support used by handshake; S4 extends it. E19 checks construction and teardown. Use that exact slim loopback host here; production wiring belongs to S7. S4 extends this service with ownership and post-Welcome processing; do not implement those items now.
+notes: R4 explicitly uses the injected TimeProvider for HelloTimeout; E4 advances only that clock. R4 uses R2 authentication and R5 uses the R11 replay callback. C5 specifies every slim-host registration, the public registry constructor and host-owned ActorSystem lifetime. S3 creates the minimum registry/proxy support used by handshake; S4 extends it. E19 checks construction and teardown. Use that exact slim loopback host here; production wiring belongs to S7. S4 extends this service with ownership and post-Welcome processing; do not implement those items now.
 
 ## S4: Server link ownership and liveness
 goal: Valid streams are owned by one link-only proxy per node, supersede older streams and track liveness without blocking behind application callbacks.
@@ -28,7 +28,7 @@ depends: S3
 owns: R6, R7
 outputs: E6, E7
 tests: -
-notes: C5 from S3 fixes the complete slim host and registry constructor for E6/E7 too, with no extra application registrations; host-provided IHostApplicationLifetime exposes shutdown and NodeLinkService supplies proxy time/options. R6 and R7 share the established stream lifetime and generation ownership. R7 defines callback concurrency and cancellation in the brief; implement its blocked-callback cases exactly. Preserve R4/R5 handshake behavior.
+notes: C5 from S3 fixes the complete slim host and registry constructor for E6/E7 too, with no extra application registrations; host-provided IHostApplicationLifetime exposes shutdown and NodeLinkService supplies proxy time/options. R6 and R7 share the established stream lifetime and generation ownership. R7 uses the same injected TimeProvider for all initial/reset liveness scheduling and elapsed-time accounting; E7 advances only that clock, while C5 teardown safety bounds remain real time. R7 defines callback concurrency and cancellation in the brief; implement its blocked-callback cases exactly. Preserve R4/R5 handshake behavior.
 
 ## S5: Full-jitter reconnect delay
 goal: Failed link attempts use exponential full jitter, bounded stored ceiling and status-specific caps.

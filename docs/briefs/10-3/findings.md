@@ -142,3 +142,7 @@ New findings: None.
 
 Not checked in this round: nothing was run; the list of round 5 still applies.
 
+
+## Server protocol-clock amendment (review pending)
+
+Lead queue qitem-20261004212849-70e5a0f7 records maintainer authorization dated 2026-10-04 for explicit R4 injected-clock timeout and a limited further S3 fix. R4/E4 now require provider-backed Hello timing and timer cleanup. R5 UTC, R6 event-driven shutdown/replacement, R7 initial/reset liveness, R8 pure arithmetic, R9 absence of an added server deadline, C5/E19 real external teardown bound and R12 transport clocks are explicitly classified. S3 acceptance already advances the virtual clock and needs no code change; future S4 E7 tests must use the same provider assumption. No product edits or acceptance run by author.
