@@ -340,6 +340,181 @@ public abstract class SessionHostContractTests
         Assert.Empty(await rig.ReceivedAsync(session));
     }
 
+    [Fact]
+    public async Task AllowsOneResubmit()
+    {
+        await using var rig = await CreateRigAsync();
+        var session = await rig.Host.StartAsync(rig.NewSpec(), CancellationToken.None);
+        var confirmer = new ResubmittingConfirmer();
+
+        var report = await rig.Host.DeliverAsync(session,
+            new DeliveryRequest("run", "", Confirmer: confirmer), CancellationToken.None);
+
+        Assert.Equal(1, report.Resubmits);
+        Assert.Equal(Encoding.UTF8.GetBytes("run\r\r"), await rig.ReceivedAsync(session));
+        Assert.IsType<InvalidOperationException>(confirmer.SecondCallException);
+    }
+
+    [Fact]
+    public async Task CaptureWorksWhileADeliveryWaits()
+    {
+        await using var rig = await CreateRigAsync();
+        var session = await rig.Host.StartAsync(rig.NewSpec(), CancellationToken.None);
+        await rig.PrintAsync(session, ["capture during delivery"]);
+        var confirmer = new CapturingConfirmer();
+        var delivery = rig.Host.DeliverAsync(session,
+            new DeliveryRequest("run", "body", Confirmer: confirmer), CancellationToken.None);
+
+        var snapshot = await confirmer.Captured.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        confirmer.Complete.TrySetResult(new Confirmation(ConfirmationOutcome.Confirmed, "turn"));
+        await delivery;
+
+        Assert.Contains("capture during delivery", snapshot.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SendsNamedKeys()
+    {
+        await using var rig = await CreateRigAsync();
+        var session = await rig.Host.StartAsync(rig.NewSpec(), CancellationToken.None);
+
+        await rig.Host.SendKeysAsync(session, [NamedKey.Enter, NamedKey.Up, NamedKey.CtrlC],
+            CancellationToken.None);
+
+        Assert.Equal(new byte[] { 0x0d, 0x1b, (byte)'[', (byte)'A', 0x03 },
+            await rig.ReceivedAsync(session));
+    }
+
+    [Fact]
+    public async Task RejectsMoreThanThirtyTwoKeys()
+    {
+        await using var rig = await CreateRigAsync();
+        var session = await rig.Host.StartAsync(rig.NewSpec(), CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<SessionHostException>(() =>
+            rig.Host.SendKeysAsync(session, Enumerable.Repeat(NamedKey.Enter, 33).ToArray(), CancellationToken.None));
+
+        Assert.Equal(SessionHostErrorCode.InvalidArgument, exception.Code);
+        Assert.Empty(await rig.ReceivedAsync(session));
+    }
+
+    [Fact]
+    public async Task CaptureDropsOldestLinesFirst()
+    {
+        await using var rig = await CreateRigAsync();
+        var session = await rig.Host.StartAsync(rig.NewSpec(), CancellationToken.None);
+        var lines = Enumerable.Range(0, 500)
+            .Select(index => $"line-{index:D3}-{new string('x', 20)}")
+            .ToArray();
+        await rig.PrintAsync(session, lines);
+
+        var snapshot = await rig.Host.CaptureAsync(session, new CaptureRequest(HistoryLines: 500, MaxBytes: 4096),
+            CancellationToken.None);
+
+        Assert.True(snapshot.Truncated);
+        Assert.DoesNotContain(lines[0], snapshot.Text, StringComparison.Ordinal);
+        for (var index = lines.Length - TerminalSize.Default.Rows; index < lines.Length; index++)
+            Assert.Contains(lines[index], snapshot.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CaptureWorksOnADeadPane()
+    {
+        await using var rig = await CreateRigAsync();
+        var session = await rig.Host.StartAsync(rig.NewSpec(), CancellationToken.None);
+        await rig.PrintAsync(session, ["last screen"]);
+        await rig.ExitPaneAsync(session, 9);
+
+        var snapshot = await rig.Host.CaptureAsync(session, new CaptureRequest(), CancellationToken.None);
+
+        Assert.True(snapshot.PaneDead);
+        Assert.Contains("last screen", snapshot.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StopCancelsADeliveryInFlight()
+    {
+        await using var rig = await CreateRigAsync();
+        var session = await rig.Host.StartAsync(rig.NewSpec(), CancellationToken.None);
+        var confirmer = new CancellationConfirmer();
+        var delivery = rig.Host.DeliverAsync(session,
+            new DeliveryRequest("run", "body", Confirmer: confirmer), CancellationToken.None);
+        await confirmer.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        var stop = await rig.Host.StopAsync(session, new StopRequest(TimeSpan.Zero), CancellationToken.None);
+        var report = await delivery.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Equal(StopOutcome.Stopped, stop.Outcome);
+        Assert.Equal(DeliveryStage.Submitted, report.Stage);
+    }
+
+    [Fact]
+    public async Task AStaleHandleIsNotFound()
+    {
+        await using var rig = await CreateRigAsync();
+        var host = rig.Host;
+        var old = await host.StartAsync(rig.NewSpec(), CancellationToken.None);
+        await host.StopAsync(old, new StopRequest(TimeSpan.Zero), CancellationToken.None);
+        var current = await host.StartAsync(rig.NewSpec(), CancellationToken.None);
+
+        await AssertNotFound(() => host.DeliverAsync(old, new DeliveryRequest("run", "body"), CancellationToken.None));
+        await AssertNotFound(() => host.SendKeysAsync(old, [NamedKey.Enter], CancellationToken.None));
+        await AssertNotFound(() => host.CaptureAsync(old, new CaptureRequest(), CancellationToken.None));
+        await AssertNotFound(() => host.StopAsync(old, new StopRequest(TimeSpan.Zero), CancellationToken.None));
+        Assert.Empty(await rig.ReceivedAsync(current));
+    }
+
+    private static async Task AssertNotFound(Func<Task> operation)
+    {
+        var exception = await Assert.ThrowsAsync<SessionHostException>(operation);
+        Assert.Equal(SessionHostErrorCode.NotFound, exception.Code);
+    }
+
+    private sealed class ResubmittingConfirmer : IDeliveryConfirmer
+    {
+        public Exception? SecondCallException { get; private set; }
+
+        public async Task<Confirmation> ConfirmAsync(DeliveryContext context, CancellationToken ct)
+        {
+            await context.ResubmitAsync("retry", ct);
+            try
+            {
+                await context.ResubmitAsync("second retry", ct);
+            }
+            catch (Exception exception)
+            {
+                SecondCallException = exception;
+            }
+
+            return new Confirmation(ConfirmationOutcome.Unconfirmed, null);
+        }
+    }
+
+    private sealed class CapturingConfirmer : IDeliveryConfirmer
+    {
+        public TaskCompletionSource<PaneSnapshot> Captured { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<Confirmation> Complete { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<Confirmation> ConfirmAsync(DeliveryContext context, CancellationToken ct)
+        {
+            Captured.TrySetResult(await context.CaptureAsync(new CaptureRequest(), ct));
+            return await Complete.Task;
+        }
+    }
+
+    private sealed class CancellationConfirmer : IDeliveryConfirmer
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<Confirmation> ConfirmAsync(DeliveryContext context, CancellationToken ct)
+        {
+            Started.TrySetResult();
+            return Task.Delay(Timeout.InfiniteTimeSpan, ct)
+                .ContinueWith(_ => new Confirmation(ConfirmationOutcome.Unconfirmed, null),
+                    CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+    }
+
     private sealed class FixedConfirmer(Confirmation confirmation) : IDeliveryConfirmer
     {
         public Task<Confirmation> ConfirmAsync(DeliveryContext context, CancellationToken ct) =>
