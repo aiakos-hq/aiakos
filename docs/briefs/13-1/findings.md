@@ -451,3 +451,19 @@ F38: Verified with gh pr view 129 --json state,mergedAt that #129 is MERGED at
 2026-10-04T21:03:23Z. B23 and the S12 note explicitly require that accepted merge plus
 amendment approval, and place amended B10/A2/A7 behavior in S12 rather than a retry of S5.
 This preserves lead's separate amendment/follow-up path and does not reopen accepted S5.
+
+## Re-review of the A7/A2 amendment
+
+Reviewed at commit c6dfd9e. Stories: 12. Check: ok.
+
+F37 and F38 are resolved: C1 is a `change` item owned by S12 that names the committed A7 test
+and its new expectation and allows only the conflicting A2 detail assertions to change; B23 and
+the S12 note place the corrected cells in S12 and make it ready only after #129 is merged and
+the amendment approved. Checked with `gh pr view 129`: state MERGED, merged at
+2026-10-04T21:03:23Z.
+
+New findings: None.
+
+Not checked in this re-review: the list of the review above still applies; nothing was built
+or run.
+
