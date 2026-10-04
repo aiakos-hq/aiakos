@@ -416,21 +416,17 @@ public static class SeatStateMachine
                 if (MatchesPendingInput(pending, attributes))
                 {
                     pending = null;
-                    if (activity == ActivityValue.NeedsInput)
+                    if (activity is ActivityValue.NeedsInput or ActivityValue.Unknown)
                     {
                         activity = ActivityValue.Working;
                         detail = null;
                     }
                 }
-                if (activity == ActivityValue.Unknown)
-                {
-                    activity = ActivityValue.Working;
-                    detail = null;
-                }
                 break;
         }
 
-        return SetActivity(state, activity, detail, null, pending, now, kind switch
+        var reason = activity == state.KnownActivity ? state.KnownActivityReason : null;
+        return SetActivity(state, activity, detail, reason, pending, now, kind switch
         {
             HarnessEventKind.PromptSubmitted => "A2",
             HarnessEventKind.Active => "A3",

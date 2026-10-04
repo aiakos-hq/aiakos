@@ -68,7 +68,9 @@ public sealed class ActivityTableTests
             new Dictionary<string, string> { ["request_id"] = "request" });
         AssertActivity(HarnessEventKind.InputResolved, ActivityValue.NeedsInput, ActivityValue.NeedsInput, "request",
             new Dictionary<string, string> { ["request_id"] = "other" });
-        AssertActivity(HarnessEventKind.InputResolved, ActivityValue.Unknown, ActivityValue.Working, pending: "request");
+        AssertActivity(HarnessEventKind.InputResolved, ActivityValue.Unknown, ActivityValue.Unknown, pending: "request");
+        AssertActivity(HarnessEventKind.InputResolved, ActivityValue.Unknown, ActivityValue.Working, "request",
+            new Dictionary<string, string> { ["request_id"] = "request" });
     }
 
     [Fact]
