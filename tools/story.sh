@@ -405,13 +405,19 @@ set_state() {
   gh issue edit "$number" --repo "$REPO" "${args[@]}" --add-label "$1" >/dev/null
 }
 
+# Classify the complete output, not the displayed tail, of a non-zero build.
+build_infrastructure_failure() {
+  grep -Eq 'Fatal error|Internal CLR error|Unhandled exception' "$1" ||
+    ! grep -Eiq 'error [[:alpha:]]+[[:digit:]]+|warning' "$1"
+}
+
 # Failed attempts so far: gate runs that reached the build and failed, and reviews that blocked.
 # A run that stopped at a process check (uncommitted changes, a file outside the paths) is not one.
 failed_attempts() {
   local count=0 file
   for file in "$trial"/gate-*.txt; do
     [ -f "$file" ] || continue
-    if grep -q '^== dotnet build' "$file" && tail -n 1 "$file" | grep -q 'GATE: fail'; then count=$((count + 1)); fi
+    if grep -q '^== dotnet build' "$file" && tail -n 1 "$file" | grep -qx 'GATE: fail'; then count=$((count + 1)); fi
   done
   for file in "$trial"/review-block-*.md; do [ -f "$file" ] && count=$((count + 1)); done
   printf '%s' "$count"
@@ -497,7 +503,7 @@ cmd_done() {
   load_issue "${1:-}"
   [ -d "$worktree" ] || die "no worktree for $story: $worktree"
   [ -f "$trial/gate.sh" ] || die "no acceptance gate: $trial/gate.sh"
-  local run failed attempt log paths path file bad="" ok=1
+  local run failed attempt log paths path file bad="" ok=1 infrastructure=0 build_log
   # The file number counts every run; the attempt counts only runs that can use up the retry.
   run=$(( $(find "$trial" -maxdepth 1 -name 'gate-*.txt' | wc -l) + 1 ))
   failed="$(failed_attempts)"
@@ -526,7 +532,21 @@ cmd_done() {
 
     if [ "$ok" -eq 1 ]; then
       echo "== dotnet build -c Release"
-      if ! (cd "$worktree" && dotnet build -c Release 2>&1 | tail -n 15); then echo "FAIL: build"; ok=0; fi
+      build_log="$(mktemp)"
+      if (cd "$worktree" && dotnet build -c Release > "$build_log" 2>&1); then
+        tail -n 15 "$build_log"
+      else
+        ok=0
+        if build_infrastructure_failure "$build_log"; then
+          infrastructure=1
+          cat "$build_log"
+          echo "FAIL: build infrastructure"
+        else
+          tail -n 15 "$build_log"
+          echo "FAIL: build"
+        fi
+      fi
+      rm -f "$build_log"
     fi
     if [ "$ok" -eq 1 ]; then
       echo "== acceptance (gate.sh)"
@@ -536,7 +556,8 @@ cmd_done() {
       fi
     fi
     echo
-    if [ "$ok" -eq 1 ]; then echo "GATE: pass"; else echo "GATE: fail"; fi
+    if [ "$infrastructure" -eq 1 ]; then echo "GATE: infrastructure failure"
+    elif [ "$ok" -eq 1 ]; then echo "GATE: pass"; else echo "GATE: fail"; fi
   } > "$log" 2>&1 || true
   cat "$log"
   echo
@@ -548,6 +569,9 @@ cmd_done() {
     echo "  worktree  $(native "$worktree")"
     echo "  brief     $(native "$worktree/artifacts/briefs/$story.md")"
     echo "  gate      $(native "$log")"
+  elif tail -n 1 "$log" | grep -qx 'GATE: infrastructure failure'; then
+    echo "The build failed for infrastructure reasons; the raw cause is above."
+    echo "This run is not an attempt. The issue label is unchanged; rerun 'done $number'."
   elif ! grep -q '^== dotnet build' "$log"; then
     echo "A process check failed before the build. This run is not an attempt: fix what the"
     echo "FAIL lines name and run 'done $number' again."

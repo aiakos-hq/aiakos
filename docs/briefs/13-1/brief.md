@@ -2,7 +2,7 @@
 id: 13-1
 title: "#13 slice 1 — pure seat state machine and harness state profile"
 issue: 13
-status: approved
+status: draft
 route: impl/sonnet
 paths: [src/Aiakos.Orchestrator/Seats/, tests/Aiakos.Orchestrator.Tests/, Directory.Packages.props]
 max_outputs: 9
@@ -10,6 +10,8 @@ date: 2026-10-04
 ---
 
 # Brief: #13 slice 1 — pure seat state machine and harness state profile
+
+**Amendment 2026-10-05:** A7 unknown-activity recovery follows spec 0006 table A7; the earlier acceptance expectation was wrong. S12 corrects that merged behavior and the A2 detail ambiguity; existing story IDs stay unchanged.
 
 **Start only after #10 slice 1 is merged** (the proto enums in `Aiakos.Contracts.Node.V1`).
 
@@ -282,9 +284,10 @@ B8. **Readiness and native IDs.** An event is a readiness event only when `profi
 B9. **Conversation evidence (U2)** counts only when `profile.IsConversationEvidence` is true and
    the event's `NativeSessionId` equals the state's. Late events count when B7 is present;
    the B9 story tests `SourceSeq` 0 or increasing, and B7 owns the late variants.
-B10. **Pending input.** A6 stores the attribute `request_id`, or `*` when absent. A5 and A7 resolve
+B10. **Pending input.** A6 stores the attribute `request_id`, or `*` when absent. A5 and A7 resolve the pending request
     when the pending value is `*` or equals the event's `tool_use_id` or `request_id`. A2, A10,
     A11 and any change of session clear it. A4 detail is `tool:<tool_name>`.
+    Matching guards only the needs-input activity cell, not A7 from unknown (B23).
 B11. **Lost observation** (sequence gap, `ObservationGapBody`, new epoch, new node instance): open
     `observation-gap`; U6; when known session is `present`, activity → `unknown/observation-gap`
     (A16); when a launch exists and known session is `starting`, `present` or `unknown`, emit
@@ -389,6 +392,31 @@ are part of the test for that row, not new requirements introduced by a test.
 | `S15` | `NodeAttached`, new instance, inventory LAUNCHING / RUNNING / EXITED / UNKNOWN (same `launch_id`) | — | `starting` / `present` / `exited` / `unknown` | same mapping | same mapping | same mapping |
 | `S16` | `NodeAttached`, new instance, seat missing from inventory or other `launch_id` | — | `unknown`/inventory-missing +F(inventory-mismatch) | same | — | same |
 
+C1. **Earlier test corrections owned by story S12.** Update the committed S5 test
+    ActivityTableTests.A7InputResolvedChangesNeedsInputOnlyWhenItMatchesAndMovesUnknownToWorking
+    in tests/Aiakos.Orchestrator.Tests/Seats/ActivityTableTests.cs: when known session is
+    present and prior known activity is unknown, every INPUT_RESOLVED case expects working
+    with null reason regardless of pending-ID match. Preserve needs-input mismatch assertions
+    and every other activity column. Update any committed A2 assertion that expects a working
+    detail to be cleared: expect the original detail instead under B23, while pending clears.
+    Change only assertions for those corrected cells; all other earlier expected results stay.
+    The corrected local acceptance A7 expectation follows the same rule.
+
+B23. **Corrections to merged activity rows.** For current-launch INPUT_RESOLVED while known
+    session is present and known activity is unknown, A7 always changes known and reported
+    activity to working, clears its unknown reason and detail, and emits the ordinary A7
+    transition. This holds with no pending request, wildcard, matching or mismatching IDs,
+    for both profiles and both request_id/tool_use_id attributes. Clear a pending request
+    only on the B10 match; retain a mismatching pending request. No new effect or finding open.
+    For A2 from working, the dash preserves ActivityDetail/KnownActivityDetail, including
+    tool:<name>, compacting and retrying; B10 still clears PendingInputRequest. Value/reason
+    remain unchanged and no activity transition is emitted. Preserve existing pipeline
+    LastEventAt and activity-stale resolve behavior; extra resolves remain allowed by B2.
+    These corrections are implemented in new story S12, not by retrying S5. S12 becomes
+    ready only after PR #129 merges as accepted and this amendment is approved. PR #129 was
+    verified merged at 2026-10-04T21:03:23Z. The amended B10/A2/A7 text is the target for S12;
+    it does not invalidate or reopen the previously accepted S5 run.
+
 ### Activity rows
 
 Use known session `present` unless the row is explicitly about another session; B4 governs
@@ -398,12 +426,12 @@ with the row that consumes them. A13 is omitted: its complete outputs are S12/S1
 | ID | Input (`HarnessEventKind`, current launch, not late) | `idle` | `working` | `needs-input` | `unknown` |
 |---|---|---|---|---|---|
 | `A1` | readiness: `SESSION_STARTED` with a readiness source (profile) | `idle` | `idle` | `idle` | `idle` |
-| `A2` | `PROMPT_SUBMITTED` | `working` | — | `working` (a new prompt means no dialog is open) | `working` |
+| `A2` | `PROMPT_SUBMITTED` | `working` | — (preserve detail; clear pending request) | `working` (a new prompt means no dialog is open) | `working` |
 | `A3` | `ACTIVE` (level; OpenCode `busy`) | `working` | — | — (**sticky**, spike 0004) | `working` |
 | `A4` | `TOOL_STARTED` | `working` detail `tool:<name>` | detail `tool:<name>` | — (sticky: a parallel tool does not answer the dialog) | `working` |
 | `A5` | `TOOL_FINISHED` | `working` | — (detail cleared) | `working` if it resolves the pending request (below), else — | `working` |
 | `A6` | `INPUT_REQUESTED` | `needs-input` | `needs-input` | — (request ID updated) | `needs-input` |
-| `A7` | `INPUT_RESOLVED` | — | — | `working` if it matches the pending request, else — | `working` |
+| `A7` | `INPUT_RESOLVED` | — | — | `working` if it matches the pending request, else — | `working` unconditionally; clear unknown reason, even with absent or mismatching pending ID |
 | `A8` | `COMPACTION_STARTED` | `working` detail `compacting`, remember `idle` | detail `compacting`, remember `working` | — | `working` detail `compacting`, remember `unknown` |
 | `A9` | `COMPACTED` | — | if detail is `compacting`: the remembered value (an `unknown` stays `unknown`/observation-gap); else — | — | — |
 | `A10` | `TURN_ENDED` | — | `idle` | `idle` (dialog closed, e.g. denial) | `idle` |
@@ -557,3 +585,15 @@ generating IDs or tokens; building `StartSeat` or any proto message; usage sampl
 outcome and exit code bookkeeping; timers themselves (only the three `…Fired` inputs); the real
 Claude Code profile (#12); findings storage, counts and severities; logging, metrics, spans;
 changes to `docs/`, `CLAUDE.md`, CI, or any other project.
+
+### Amendment acceptance outputs
+
+| ID | Input | Exact expected output |
+|---|---|---|
+| `A7-recovery` | present/unknown observation-gap or quiet-timeout; INPUT_RESOLVED; pending absent, wildcard, matching or mismatching; either ID attribute; both profiles | known/reported activity working, null reason/detail; matching pending cleared, mismatching pending retained; one reported activity transition Rule A7; no effects or finding opens; Applied, LastEventAt now, activity-stale resolve |
+| `A2-detail` | present/working with detail tool:build, compacting or retrying and pending p1; PROMPT_SUBMITTED; both profiles | known/reported working and original detail, null reason; pending null; no activity transition, effects or finding opens; Applied, LastEventAt now, activity-stale resolve |
+
+T13. One acceptance test per A7-recovery and A2-detail output covers every named variant.
+    Retain all earlier A7 columns, including needs-input mismatch staying needs-input. Correct
+    the earlier A7 acceptance test to expect working from unknown per spec 0006; do not run
+    its gate on main as author. QA records the missing-behavior baseline for S12.
