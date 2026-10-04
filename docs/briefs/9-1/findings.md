@@ -44,3 +44,24 @@ Not checked in this round: that the exclusion of `TelemetryShutdownService.cs` i
 ## Maintainer diagnosis-only amendment (review pending)
 
 Lead queue qitem-20261004202405-e06c9b51 authorizes replacement of reproduce-first acceptance after two unsuccessful baseline approaches. R1 requires resolved library/host/factory source evidence; R4/E4/T1 require deterministic direct or application-boundary regression. R3/E6 stress is supporting only. A diagnosis record returns through lead to author for acceptance before behavior changes. Single senior story and scope/attempt limits remain. BrokenMigrationTests contention failure is separate scope. Pending architect review and maintainer approval; local gates are not yet replaced.
+
+## Review of the diagnosis-only amendment, round 3
+
+Reviewed at commit f538ef5. Stories: 1. Check: ok.
+
+Read: the amended goal, R1, R3, R4, E1 to E6, T1, the S1 block and `docs/workflow.md` (flow steps
+6 to 10, definitions 4 and 7). Replacing the reproduce-first gate by a deterministic regression
+with two evidence routes is consistent in R4, E2, E4 and T1.
+
+### Findings
+
+- [ ] S1 (context-gap): R4 puts a diagnosis by the `senior` seat before the acceptance test exists, so before the story is ready, has an issue or a worktree (`tools/story.sh start` needs the ready issue, and no seat may build or test in the main checkout), and it does not say where the "diagnosis-only record" is written while R1 puts the cause in the commit body of a commit that does not exist yet; the `escalation` line still says diagnosis and fix "cannot be split", which R4 now does. Fix: state in R4 where the diagnosis runs (which checkout, read-only or not), the file the record is written to and who may read it, or make the diagnosis a spike with its finding under `docs/spikes/` and leave the fix as the story; then correct the `escalation` line.
+- [ ] S1 (context-gap): R3 now says the stress command is not run by `baseline` or `done`, but R3 and E5 still give it a baseline assessment (`BASELINE: infrastructure failure`) and attempt accounting of `done`, which no longer apply to it, while the deterministic gate of R4, which starts a real `OrchestratorFactory` against Postgres, has no stated result when Docker or Postgres is unavailable. Fix: state the infrastructure result for the R4 gate (final line and exit code), and remove the baseline and attempt wording from R3 and E5 or move it to R4.
+- [ ] S1 (context-gap): R4 has the reviewer decide that a test on "a disconnected helper or an invented fake exception does not qualify", but after the gate a reviewer can block only on the four kinds of `docs/workflow.md`, so a regression that passes while observing the wrong boundary is done and the objection becomes a backlog item. Fix: place that check where it can stop the story: in the baseline assessment before ready (definition of ready, point 3: fails on `main` for the right reason), naming who confirms that the observed boundary is the diagnosed one.
+
+## Not checked, round 3
+
+- The maintainer's authorization of the amendment (reported by the author through `lead`).
+- The two baseline runs the amendment refers to (200/200 green, and the failure of `BrokenMigrationTests` at iteration 79) and their logs under `artifacts/trials/`; not read, by role.
+- Whether a deterministic regression can be written in test-only code for the cause that will be diagnosed; nothing was run or diagnosed.
+
