@@ -104,3 +104,24 @@ inspection in the merged `SharedReferencePaths.cs`. Ran a .NET 10 probe on this 
 1. R14 specifies Linux libc statx buffer/type fields, Windows attributes, and fail-closed AIK3001 for unsupported classification. No production subprocess/package.
 2. R5 defines special skill entries as scalar AIK3001 with no open/snapshot; PATH-special owns those new cases in S6, SKILL-links references them. S6 now depends S3 and shares classification with its enumerator, retaining R7 precedence.
 3. T6 uses Task.Run with a five-second Task.WhenAny timeout; test-only FIFO writer releases a blocked read after failure for cleanup, without a child executable.
+
+## Re-review of the special-file amendment, round 5
+
+Reviewed at commit 25d3d25. Stories: 6. Check: ok.
+
+The three findings of round 4 are resolved: R14 names the classification call, R5 and
+PATH-special state the result for special entries inside a skill directory with S6 depending on
+S3, and T6 runs `Load` on a task with a five-second wait. The `statx` constants in R14 were
+compared with the Linux definition: `AT_FDCWD` -100, `AT_SYMLINK_NOFOLLOW` 0x100, `STATX_TYPE` 1,
+a 256-byte structure, `stx_mask` at offset 0, `stx_mode` at offset 28, type mask 0xF000 with
+regular 0x8000 and directory 0x4000. They agree.
+
+New findings: None.
+
+Noted, not findings; the brief states both results:
+
+- On an operating system other than Linux and Windows, and on Linux without `statx` in libc, every file reference fails with AIK3001 (fail closed).
+- Between the merge of S2 or S3 and the merge of S6, a FIFO as guidance file or inside a skill directory is opened and `Load` waits for a writer.
+
+Not checked in this round: nothing was run; the P/Invoke was not compiled or tried, and Windows was not checked.
+
