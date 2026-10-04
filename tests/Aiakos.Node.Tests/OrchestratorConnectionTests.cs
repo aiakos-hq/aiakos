@@ -8,8 +8,12 @@ using Grpc.Core;
 
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -21,36 +25,42 @@ public sealed class OrchestratorConnectionTests
     private static readonly TimeSpan StepTimeout = TimeSpan.FromSeconds(20);
 
     [Fact]
-    public async Task ConnectsWithBearerHelloAndSendsPeriodicHeartbeat()
+    public async Task HealthServiceAloneDoesNotConnectThenConnectStreamRecoversAfterRestart()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        var service = new ProbeNodeLinkService();
-        var server = await StartNodeLinkServerAsync(service, cancellationToken);
-        var port = new Uri(server.Urls.Single()).Port;
+        var server = await StartServerAsync(port: 0, nodeLink: false, cancellationToken);
+        var port = BoundPort(server);
         using var logs = new CapturingLoggerProvider();
         using var loggerFactory = new LoggerFactory([logs]);
         using var metrics = new ServiceCollection().AddMetrics().BuildServiceProvider();
         var telemetry = new NodeTelemetry(metrics.GetRequiredService<System.Diagnostics.Metrics.IMeterFactory>());
-        var source = new ProbeNodeLinkSource();
         var options = Options.Create(new NodeOptions
         {
-            OrchestratorUrl = $"http://127.0.0.1:{port}", Home = "unused", NodeId = "test-node", NodeToken = "test-secret",
+            OrchestratorUrl = $"http://127.0.0.1:{port}", Home = "unused", NodeId = "test-node", NodeToken = "secret-token",
         });
-        using var connection = new OrchestratorConnection(options, new NodeReconnectDelay(static () => 0), source,
-            telemetry, loggerFactory.CreateLogger<OrchestratorConnection>());
-
+        using var connection = new OrchestratorConnection(options, new NodeReconnectDelay(static () => 0.1), new TestLinkSource(), telemetry, loggerFactory.CreateLogger<OrchestratorConnection>());
         var states = Channel.CreateUnbounded<ConnectionState>();
         connection.StateChanged += (_, state) => states.Writer.TryWrite(state);
+
         await connection.StartAsync(cancellationToken);
         try
         {
+            await WaitForAsync(states, ConnectionState.Unavailable, cancellationToken);
+            Assert.False(telemetry.Connected);
+            await server.StopAsync(cancellationToken);
+            await server.DisposeAsync();
+
+            server = await StartServerAsync(port, nodeLink: true, cancellationToken);
             await WaitForAsync(states, ConnectionState.Connected, cancellationToken);
             Assert.True(telemetry.Connected);
-            Assert.True(await service.HeartbeatSeen.Task.WaitAsync(StepTimeout, cancellationToken));
-            Assert.True(Guid.TryParse((await service.Hello.Task.WaitAsync(StepTimeout, cancellationToken)).NodeInstanceId, out var instanceId));
-            Assert.NotEqual(Guid.Empty, instanceId);
-            Assert.Equal("Bearer test-secret", service.Authorization);
-            Assert.True(source.WelcomeSeen);
+
+            await server.StopAsync(cancellationToken);
+            await server.DisposeAsync();
+            await WaitForAsync(states, ConnectionState.Unavailable, cancellationToken);
+
+            server = await StartServerAsync(port, nodeLink: true, cancellationToken);
+            await WaitForAsync(states, ConnectionState.Connected, cancellationToken);
+            Assert.True(telemetry.Connected);
         }
         finally
         {
@@ -58,50 +68,48 @@ public sealed class OrchestratorConnectionTests
             await server.DisposeAsync();
         }
 
-        Assert.DoesNotContain("test-secret", logs.Text, StringComparison.Ordinal);
-        Assert.True(connection.ExecuteTask?.IsCompletedSuccessfully);
+        Assert.Contains("connected to http://127.0.0.1:", logs.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", logs.Text, StringComparison.Ordinal);
+        Assert.True(connection.ExecuteTask?.IsCompletedSuccessfully, "The loop ends cleanly on stop.");
     }
 
     [Fact]
-    public async Task KeepsRetryingWhenTheServerIsUnavailableWithoutLoggingPeerDetails()
+    public async Task KeepsRetryingWhileNothingListens()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var logs = new CapturingLoggerProvider();
         using var loggerFactory = new LoggerFactory([logs]);
         using var metrics = new ServiceCollection().AddMetrics().BuildServiceProvider();
         var telemetry = new NodeTelemetry(metrics.GetRequiredService<System.Diagnostics.Metrics.IMeterFactory>());
-        var options = Options.Create(new NodeOptions
-        {
-            OrchestratorUrl = $"http://127.0.0.1:{FreePort()}", Home = "unused", NodeId = "n", NodeToken = "test-secret",
-        });
-        using var connection = new OrchestratorConnection(options, new NodeReconnectDelay(static () => 0),
-            new ProbeNodeLinkSource(), telemetry, loggerFactory.CreateLogger<OrchestratorConnection>());
-        using var enough = new SemaphoreSlim(0);
+        var options = Options.Create(new NodeOptions { OrchestratorUrl = $"http://127.0.0.1:{FreePort()}", Home = "unused", NodeId = "n", NodeToken = "secret" });
+        using var connection = new OrchestratorConnection(options, new NodeReconnectDelay(static () => 0.1), new TestLinkSource(), telemetry, loggerFactory.CreateLogger<OrchestratorConnection>());
+
         var unavailable = 0;
+        using var enough = new SemaphoreSlim(0);
         connection.StateChanged += (_, state) =>
         {
-            if (state == ConnectionState.Unavailable && Interlocked.Increment(ref unavailable) == 3)
-                enough.Release();
+            if (state == ConnectionState.Unavailable && Interlocked.Increment(ref unavailable) == 4) enough.Release();
         };
 
         await connection.StartAsync(cancellationToken);
         Assert.True(await enough.WaitAsync(StepTimeout, cancellationToken));
         await connection.StopAsync(CancellationToken.None);
 
+        Assert.Equal(4, logs.Lines.Count(static l => l.Contains("next retry in", StringComparison.Ordinal)));
         Assert.True(connection.ExecuteTask?.IsCompletedSuccessfully);
         Assert.False(telemetry.Connected);
-        Assert.DoesNotContain("test-secret", logs.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret", logs.Text, StringComparison.Ordinal);
     }
 
-    private static async Task WaitForAsync(Channel<ConnectionState> states, ConnectionState expected,
-        CancellationToken cancellationToken)
+    private static async Task WaitForAsync(Channel<ConnectionState> states, ConnectionState expected, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(StepTimeout);
-        while (await states.Reader.ReadAsync(timeout.Token) != expected)
-        {
-        }
+        while (await states.Reader.ReadAsync(timeout.Token) != expected) { }
     }
+
+    private static int BoundPort(WebApplication app) =>
+        new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First()).Port;
 
     private static int FreePort()
     {
@@ -110,72 +118,53 @@ public sealed class OrchestratorConnectionTests
         return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
-    private static async Task<WebApplication> StartNodeLinkServerAsync(ProbeNodeLinkService service,
-        CancellationToken cancellationToken)
+    private static async Task<WebApplication> StartServerAsync(int port, bool nodeLink, CancellationToken cancellationToken)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
-        builder.WebHost.ConfigureKestrel(kestrel =>
-            kestrel.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http2));
+        builder.WebHost.ConfigureKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, port, listen => listen.Protocols = HttpProtocols.Http2));
         builder.Services.AddGrpc();
-        builder.Services.AddSingleton(service);
+        builder.Services.AddGrpcHealthChecks().AddCheck("self", static () => HealthCheckResult.Healthy());
         var app = builder.Build();
-        app.MapGrpcService<ProbeNodeLinkService>();
-        await app.StartAsync(cancellationToken);
+        if (nodeLink) app.MapGrpcService<FakeNodeLinkService>();
+        app.MapGrpcHealthChecksService();
+        app.MapGet("/", () => Results.Ok());
+        for (var attempt = 1; ; attempt++)
+        {
+            try { await app.StartAsync(cancellationToken); break; }
+            catch (IOException) when (attempt < 20) { await Task.Delay(100, cancellationToken); }
+        }
         return app;
     }
 
-    private sealed class ProbeNodeLinkSource : INodeLinkSource
+    public sealed class FakeNodeLinkService : NodeLinkService.NodeLinkServiceBase
     {
-        public bool WelcomeSeen { get; private set; }
-
-        public Hello CreateHello(string nodeInstanceId) => new()
+        public override async Task Connect(IAsyncStreamReader<ConnectRequest> requestStream, IServerStreamWriter<ConnectResponse> responseStream, ServerCallContext context)
         {
-            Protocol = new ProtocolVersion { Major = 1, Minor = 0 },
-            NodeName = "test-node",
-            NodeInstanceId = nodeInstanceId,
-            Limits = new Limits { MaxMessageBytes = 4194304, MaxInflightCommands = 64, EventBufferCapacity = 10000 },
-        };
-
-        public Heartbeat CreateHeartbeat() => new();
-
-        public Task WelcomeAsync(Welcome welcome, CancellationToken ct)
-        {
-            WelcomeSeen = true;
-            return Task.CompletedTask;
-        }
-
-        public Task ReceiveAsync(ConnectResponse response, CancellationToken ct) => Task.CompletedTask;
-    }
-
-    private sealed class ProbeNodeLinkService : NodeLinkService.NodeLinkServiceBase
-    {
-        public TaskCompletionSource<Hello> Hello { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource<bool> HeartbeatSeen { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public string? Authorization { get; private set; }
-
-        public override async Task Connect(IAsyncStreamReader<ConnectRequest> requestStream,
-            IServerStreamWriter<ConnectResponse> responseStream, ServerCallContext context)
-        {
-            Authorization = context.RequestHeaders.Single(entry => entry.Key == "authorization").Value;
-            if (!await requestStream.MoveNext(context.CancellationToken))
-                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Missing hello."));
-            Hello.TrySetResult(requestStream.Current.Hello);
+            if (!await requestStream.MoveNext(context.CancellationToken) || requestStream.Current.BodyCase != ConnectRequest.BodyOneofCase.Hello)
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Expected hello."));
             await responseStream.WriteAsync(new ConnectResponse
             {
                 Welcome = new Welcome
                 {
-                    HeartbeatInterval = Google.Protobuf.WellKnownTypes.Duration.FromTimeSpan(TimeSpan.FromMilliseconds(20)),
+                    Protocol = new ProtocolVersion { Major = 1 }, NodeId = "node-1",
+                    HeartbeatInterval = Google.Protobuf.WellKnownTypes.Duration.FromTimeSpan(TimeSpan.FromSeconds(30)),
+                    LivenessTimeout = Google.Protobuf.WellKnownTypes.Duration.FromTimeSpan(TimeSpan.FromSeconds(45)),
                 },
             });
             while (await requestStream.MoveNext(context.CancellationToken))
-            {
-                if (requestStream.Current.BodyCase == ConnectRequest.BodyOneofCase.Heartbeat)
-                {
-                    HeartbeatSeen.TrySetResult(true);
-                    return;
-                }
-            }
+                if (requestStream.Current.BodyCase == ConnectRequest.BodyOneofCase.Goodbye) return;
         }
+    }
+
+    private sealed class TestLinkSource : INodeLinkSource
+    {
+        public Hello CreateHello(string nodeInstanceId) => new()
+        {
+            Protocol = new ProtocolVersion { Major = 1, Minor = 0 }, NodeName = "test-node", NodeInstanceId = nodeInstanceId,
+        };
+        public Heartbeat CreateHeartbeat() => new();
+        public Task WelcomeAsync(Welcome welcome, CancellationToken ct) => Task.CompletedTask;
+        public Task ReceiveAsync(ConnectResponse response, CancellationToken ct) => Task.CompletedTask;
     }
 }
