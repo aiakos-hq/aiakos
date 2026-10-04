@@ -152,4 +152,20 @@ test projects with focused tests of the shared service.
 
 ## R37 deviation resolution
 
-C2 names spec 0001 R37's changed stop guarantee and requires lead to record the 2026-10-04 maintainer decision and both-host effects in Changes after acceptance, correcting conflicting R37 shutdown wording in the same amendment PR before approval. Spec edits are lead's analysis/approval work, not implementation scope. Author tick records this responsibility/time assignment pending architect confirmation.
+C2 names spec 0001 R37's changed stop guarantee and requires lead to record the 2026-10-04 maintainer decision and both-host effects in Changes after acceptance, correcting conflicting R37 shutdown wording in the same amendment PR before approval. Spec edits are lead's analysis/approval work, not implementation scope. Author tick records this responsibility/time assignment.
+
+## Re-review of the shutdown-service scope amendment, round 7
+
+Reviewed at commit db1691b. Stories: 1. Check: ok.
+
+The finding of round 6 is resolved: C2 names the deviation from spec 0001 R37 and assigns its
+record to `lead`, as a "Changes after acceptance" entry with corrected R37 wording, in the pull
+request of this amendment and before approval.
+
+New findings: None.
+
+Open action outside the brief, for `lead`: spec 0001 does not carry that entry yet; C2 makes it
+part of the amendment pull request.
+
+Not checked in this round: the lists of rounds 5 and 6 still apply; nothing was built or run.
+
