@@ -93,3 +93,79 @@ of this slice.
 
 Not checked in this round: nothing was run or diagnosed; the list of round 3 still applies.
 
+
+## Shutdown-service scope amendment (review pending)
+
+Maintainer authorization dated 2026-10-04, lead queue qitem-20261004211403-de3aa475: 9-1-1 may edit TelemetryShutdownService.cs. R1 removes its read-only/scope-stop condition, paths permit that file only, and C2/E8 require the diagnosed ownership fix at StoppedAsync/provider disposal on success/timeout/error while preserving provider timeoutMs (default 2 seconds) and lifecycle timeoutMs+500 (default 2.5 seconds). No detached provider access or unbounded join is accepted; an evidenced incompatibility goes to lead, rather than silently weakening the decision. R4(b) deterministic acceptance follows approval. Supporting diagnosis source inspected; no implementation or test run by author.
+
+## Review of the shutdown-service scope amendment, round 5
+
+Reviewed at commit a30b4bc. Stories: 1. Check: ok.
+
+Read: the amendment commit (paths, R1, C2, E8, the S1 block), `TelemetryShutdownService.cs`
+and spec 0001 R37 with its design note. The widening of `paths` to that one file, the removal of
+the scope-stop from R1 and the prohibition of detached workers, provider disposal in the service
+and longer bounds are consistent with each other.
+
+### Findings
+
+- [x] S1 (context-gap): for the timeout path C2 and E8 ask for two results that cannot both hold: when a provider's `Shutdown` has been entered and is still running at `timeoutMs + 500`, either `StoppedAsync` completes at the bound and the host disposes the provider under the running call, or it waits and the bound is exceeded; C2 answers this with "stop and hand to lead", so the E8 case "shutdown held by a barrier, lifecycle timeout advanced, no overlap, bound kept" cannot pass for any implementation and the story ends in the stop it was amended to avoid. Fix: split the timeout case in C2 and E8 into (a) a worker that has not entered the provider at the bound, which must never touch the provider afterwards, and (b) a call already inside the provider at the bound, with the result the maintainer chooses for it (which guarantee yields), so that every E8 case has one satisfiable expected output.
+- [x] S1 (context-gap): `TelemetryShutdownService.cs` is shared with the node through `AddAiakosServiceDefaults`, and C2 changes when a node's stop completes as well, but the brief's gate and its "earlier tests" are the orchestrator test project only, and no test anywhere covers this service today. Fix: state in C2 that the node's stop behaviour changes with it and which test projects the after gate runs (at least `tests/Aiakos.Node.Tests`), or state that the node is deliberately not checked.
+
+## Not checked, round 5
+
+- `artifacts/diagnoses/9-1-1.md`: R4 names `lead`, the author and `qa` as its readers, so it was not read; C2's account of the cause (lines 54 and 67-68) was compared with the source only.
+- The maintainer's authorization of the wider scope (lead queue item named in R1).
+- Whether a deterministic regression for E8 compiles and fails on `main` without a seam in the service; nothing was built or run.
+
+
+## Shutdown-service review resolution in progress
+
+The shared-node finding is addressed in C2/E8/T1 and S1 notes: node stop changes too, focused shared-service lifecycle tests live in the allowed orchestrator directory, and the after gate runs full orchestrator and node Release suites. Author tick records the text change.
+
+The timeout finding remains open for a maintainer choice via lead: queued-not-entered workers must be prevented from entering after the deadline; entered and uncompleted provider calls cannot satisfy both bounded lifecycle return and disposal-after-completion. Proposed safe choice is to retain ownership and await already-entered calls even beyond the lifecycle wait bound, preserving the configured provider timeout and documenting that the lifecycle bound then limits admission/wait observation rather than final return. Alternative bounded-return choice would require another permitted ownership/termination design and evidence that no provider can be disposed under a still-running call. No choice is authorized or silently implemented here.
+
+## Maintainer timeout decision resolution
+
+Lead queue qitem-20261004212216-58da4ef3 records the maintainer decision dated 2026-10-04: timeoutMs+500 now bounds admission/observation only; queued-not-entered work is atomically barred from late provider access; already-entered work must complete before DI disposal even beyond the deadline. The prior no-unbounded-join/hard lifecycle-total bound is explicitly relaxed, provider timeoutMs is preserved, and a nonreturning entered call may hold shutdown pending. C2/E8 and S1 notes now state satisfiable separate cases. Shared-node coverage at 83c7ed1 remains. Author tick records the change.
+
+## Re-review of the shutdown-service scope amendment, round 6
+
+Reviewed at commit 2ad0e64. Stories: 1. Check: ok.
+
+Both findings of round 5 are resolved. C2 and E8 now give each timeout case one satisfiable
+result under the maintainer's decision: work that has not entered its provider at
+`timeoutMs + 500` is barred from entering later, and a call already inside the provider is
+awaited before disposal even beyond that deadline, with no finite bound on the total. C2, E8
+and T1 state that node stop changes too and that the after gate runs the orchestrator and node
+test projects with focused tests of the shared service.
+
+### Findings
+
+- [x] S1 (context-gap): the decision changes what spec 0001 R37 promises ("a stop during which the dashboard is already gone still exits in about 3 s"): an entered provider call that does not return now holds the stop of the orchestrator and of the node without a bound, but the brief does not name R37, and `docs/specs/` is outside `paths`, so the story would merge code that deviates from an accepted spec with no item that records it. Fix: `author` names the R37 deviation in C2, and says who records it in spec 0001 and when (for example `lead`, as a "changes after acceptance" entry in the pull request of this amendment).
+
+## Not checked, round 6
+
+- The maintainer's decision itself (lead queue item named in C2); taken from the author's text.
+- `artifacts/diagnoses/9-1-1.md`, as in round 5; nothing was built or run.
+
+
+## R37 deviation resolution
+
+C2 names spec 0001 R37's changed stop guarantee and requires lead to record the 2026-10-04 maintainer decision and both-host effects in Changes after acceptance, correcting conflicting R37 shutdown wording in the same amendment PR before approval. Spec edits are lead's analysis/approval work, not implementation scope. Author tick records this responsibility/time assignment.
+
+## Re-review of the shutdown-service scope amendment, round 7
+
+Reviewed at commit db1691b. Stories: 1. Check: ok.
+
+The finding of round 6 is resolved: C2 names the deviation from spec 0001 R37 and assigns its
+record to `lead`, as a "Changes after acceptance" entry with corrected R37 wording, in the pull
+request of this amendment and before approval.
+
+New findings: None.
+
+Open action outside the brief, for `lead`: spec 0001 does not carry that entry yet; C2 makes it
+part of the amendment pull request.
+
+Not checked in this round: the lists of rounds 5 and 6 still apply; nothing was built or run.
+
