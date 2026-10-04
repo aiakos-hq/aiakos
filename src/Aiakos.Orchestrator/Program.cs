@@ -2,12 +2,14 @@ using System.Globalization;
 
 using Aiakos.Data;
 using Aiakos.Orchestrator;
+using Aiakos.Orchestrator.Link;
 using Aiakos.ServiceDefaults;
 
 using Akka.Hosting;
 
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -32,6 +34,8 @@ builder.Services.AddOpenTelemetry()
 // Options: Aiakos:Instance and Aiakos:Nodes are bound but not validated here (spec 0002 owns tokens).
 var aiakosSection = builder.Configuration.GetSection(AiakosOptions.Section);
 builder.Services.Configure<AiakosOptions>(aiakosSection);
+builder.Services.Configure<NodeLinkOptions>(static _ => { });
+builder.Services.TryAddSingleton<INodeLinkApplication, EmptyNodeLinkApplication>();
 var grpcPort = ReadGrpcPort(builder.Configuration);
 
 // Per-endpoint protocols (R13, R14): the endpoint on the gRPC port is HTTP/2 only (h2c); all other

@@ -18,8 +18,8 @@ E2	output	once	R2,G1
 E3	output	once	R3
 E4	output	once	R4,G1
 E5	output	once	R5
-E6	output	once	R6
-E7	output	once	R7
+E6	output	once	R6,C5
+E7	output	once	R7,C5
 E8	output	once	R8
 E9	output	once	R9,G1
 E10	output	once	R10
@@ -31,3 +31,10 @@ E14	output	once	C2,R11
 R13	rule	once	-
 E15	output	once	R3,R12
 E16	output	once	R13
+R14	rule	once	R3
+C3	change	once	R14
+C4	change	once	R12,R14
+E17	output	once	R14,C3
+E18	output	once	C4,R12
+C5	change	once	R4,R5
+E19	output	once	C5

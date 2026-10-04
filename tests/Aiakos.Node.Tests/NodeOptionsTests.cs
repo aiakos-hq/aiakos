@@ -6,6 +6,7 @@ public sealed class NodeOptionsTests
     [InlineData(NodeOptions.OrchestratorUrlVariable)]
     [InlineData(NodeOptions.HomeVariable)]
     [InlineData(NodeOptions.NodeIdVariable)]
+    [InlineData(NodeOptions.NodeTokenVariable)]
     public async Task MissingRequiredVariableExits2AndNamesIt(string variable)
     {
         using var home = new TempDirectory();
@@ -38,13 +39,15 @@ public sealed class NodeOptionsTests
     }
 
     [Fact]
-    public void NodeTokenIsNotRequired()
+    public void NodeTokenIsRequired()
     {
         var options = new NodeOptions { OrchestratorUrl = "http://127.0.0.1:5180", Home = ".aiakos-dev", NodeId = "wsl-local" };
 
         var result = new NodeOptionsValidator().Validate(null, options);
 
-        Assert.True(result.Succeeded, result.FailureMessage);
+        Assert.False(result.Succeeded);
+        Assert.NotNull(result.Failures);
+        Assert.Equal("AIAKOS_NODE_TOKEN is required.", Assert.Single(result.Failures));
     }
 
     [Theory]
@@ -52,7 +55,7 @@ public sealed class NodeOptionsTests
     [InlineData("http://127.0.0.1:5180")]
     public void AbsoluteHttpUrlsAreValid(string url)
     {
-        var options = new NodeOptions { OrchestratorUrl = url, Home = "x", NodeId = "n" };
+        var options = new NodeOptions { OrchestratorUrl = url, Home = "x", NodeId = "n", NodeToken = "token" };
 
         Assert.True(new NodeOptionsValidator().Validate(null, options).Succeeded);
     }

@@ -50,3 +50,95 @@ New findings: None.
 Not checked in this round, in addition to the list above:
 
 - That `ConfigureEndpointDefaults` gives a loopback `IPEndPoint` for a `http://localhost:<port>` URL, which R3 now relies on.
+
+## Maintainer-authorized endpoint amendment (review pending)
+
+Source: artifacts/trials/10-3-1/review.md first two backlog entries; lead queue qitem-20261004094038-19747b9a reports maintainer authorization.
+
+R14/C3/E17 and S9 amend the already merged pure policy. C4/E18 add the same checks to startup S7 without an invalid forward dependency on S9. Literal forms accepted/rejected and port-zero choice are exact in the amended brief. Slice/index status is draft pending architect review. Existing resolved findings remain resolved; this amendment needs a fresh review.
+
+## Review of the endpoint amendment, round 3
+
+Reviewed at commit fbca99e. Stories: 9. Check: ok.
+
+Read: R14, C3, C4, E17, E18, the S7 and S9 blocks, and the merged `NodeLinkEndpointPolicy` with
+its tests (no merged test asserts an address that R14 now rejects, so C3 changes no merged
+expectation). The R14 grammar and the E17 matrix agree.
+
+### Findings
+
+- [x] S7 (context-gap): C4 tells the S7 implementer to reuse the tightened policy "if S9 has already merged" and otherwise to write the same grammar a second time at startup, so the code depends on the merge order, and when S7 merges first the startup copy stays beside the policy for good because S9 is told to do no startup wiring. Fix: take C4 and E18 out of S7 into a last story that depends on S7 and S9, and reduce C4 to "startup passes each configured address string unchanged to the policy".
+- [x] S7 (context-gap): E18 does not give `GrpcPort`, and R3 validates only the addresses "on that port" when it is set, without saying how the port of an address that fails the grammar is found: with `GrpcPort=5180` and a valid `http://127.0.0.1:5180` beside `http://127.0.0.1:0` or `http://127.0.0.1#@example.test`, the bad address is not on the port, is not validated and the host starts, where E18 expects a failure; "every malformed address is rejected" is not the answer either, because E15 needs the non-loopback health address to pass. Fix: say in C4 how eligibility is decided for an address the grammar rejects, and give the `GrpcPort` setting and the other configured addresses for the E18 cases.
+
+## Not checked, round 3
+
+- The maintainer's authorization of the amendment (reported by `lead`) and `artifacts/trials/10-3-1/review.md`, which the amendment cites; not read, by role.
+- That `tools/story.sh check` forbids a dependency on a later-numbered story, as the author reports.
+- What Kestrel itself does with each E18 address.
+
+
+## Endpoint amendment resolution
+
+- C4/E18 moved to S10 depending on S7 and S9. Startup passes eligible original strings to the one policy implementation; no second grammar and no merge-order implementation choice remain.
+- C4 specifies eligibility separately, and E18 specifies GrpcPort unset for all malformed-address cases. Additional explicit-port-5180 cases with an excluded 5181 health listener verify filtered startup behavior. Port-zero and implicit-port cases no longer claim eligibility at 5180.
+
+Author ticks record the revisions.
+
+## Re-review of the endpoint amendment, round 4
+
+Reviewed at commit a062a95. Stories: 10. Check: ok.
+
+Both findings of round 3 are resolved: C4 and E18 are in S10, which depends on S7 and S9, startup
+passes the original strings to the one policy, and C4 defines eligibility. Each "explicit-5180"
+address of E18 was walked through C4: it is either selected by its parsed port and rejected by
+the policy, or indeterminate and rejected, so the expected failure holds in both cases.
+
+New findings: None.
+
+Noted, not a finding: under C4 a configured URL that `Uri.TryCreate` cannot parse fails startup
+even on another port, so a wildcard health URL such as `http://*:5181` next to a valid link
+endpoint stops the host with the NodeLink error. The brief states this result (fail closed).
+
+Not checked in this round: what `Uri.TryCreate` returns for each E18 address; nothing was run.
+
+
+## S3 host dependency amendment (review pending)
+
+Lead queue qitem-20261004113038-5f124168 reports context-gap: the acceptance host omitted NodeLinkRegistry/ActorSystem, so implemented S3 could not be constructed. C5/E19 specify the slim-host application dependency set, public registry constructor, host-owned Akka lifetime and explicit generated-service qualification. S3 owns the minimum handshake support; S4 retains its ownership/liveness scope. This is an amendment pending architect and maintainer approval; no third story attempt is authorized by it. Acceptance rewrite/baseline follows approval.
+
+## Review of the S3 host dependency amendment, round 5
+
+Reviewed at commit aa84578. Stories: 10. Check: ok.
+
+Read: C5, E19, the changed public surface, the S3 and S4 blocks and `show 10-3 4`. C5 and E19
+close the gap for S3: the registration set is complete for R4 and R5, the registry constructor
+is fixed, and the host owns the `ActorSystem`.
+
+### Findings
+
+- [x] S4 (context-gap): C5 fixes the registration set and the two-parameter `NodeLinkRegistry` constructor for the S3 host only, while S4 adds host-shutdown `Goodbye` (R6) and the liveness timer (R7) and its E6/E7 also run on a slim host; nothing says that this same set must be enough for S4, so an S4 implementation that needs one more registration (for example a hosted service that sends `Goodbye` on stop) fails to construct in the acceptance host exactly as S3 did. Fix: state in R6/R7 or in C5 that the C5 registration set and constructor are also the complete host for E6 and E7 (shutdown observed through the host-provided `IHostApplicationLifetime`, time and options reaching the proxy through `NodeLinkService`), or list what the S4 host adds, and say so in the S4 note.
+
+## Not checked, round 5
+
+- The two failed attempts of story 10-3-3 and their gate output; the cause was taken from the author's note.
+- That `AddAkka("aiakos-link-acceptance", _ => { })` on a slim host starts and stops an `ActorSystem` as C5 assumes; nothing was run.
+- `artifacts/trials/` (acceptance tests), by role.
+
+
+## S4 host dependency resolution
+
+C5 now fixes the same complete host and two-parameter registry constructor for E6/E7, with no extra application registrations. It explicitly permits the framework-provided IHostApplicationLifetime for shutdown and routes proxy time/options through NodeLinkService. S4 notes repeat the cross-story dependency; E6/E7 traceability includes C5. Author tick records the amendment.
+
+## Re-review of the S3 host dependency amendment, round 6
+
+Reviewed at commit 1ffb73a. Stories: 10. Check: ok.
+
+The finding of round 5 is resolved: C5 makes the same registration set and the two-parameter
+registry constructor the complete slim host for S4 and E6/E7, with shutdown observed through
+`IHostApplicationLifetime` and time and options reaching the proxy through `NodeLinkService`;
+the S4 note names it and E6/E7 list C5 in `items.tsv`.
+
+New findings: None.
+
+Not checked in this round: nothing was run; the list of round 5 still applies.
+
