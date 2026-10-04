@@ -1,9 +1,11 @@
 using Aiakos.ServiceDefaults;
+using Aiakos.Node.Link;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Aiakos.Node;
 
@@ -51,6 +53,7 @@ public static partial class NodeProgram
 
         builder.Services.AddSingleton<NodeTelemetry>();
         builder.Services.AddSingleton(static _ => Backoff.CreateDefault());
+        builder.Services.TryAddSingleton<INodeLinkSource, DefaultNodeLinkSource>();
 
         builder.Services.AddSingleton<SighupHandler>();
         builder.Services.AddHostedService(static sp => sp.GetRequiredService<SighupHandler>());
