@@ -166,6 +166,12 @@ Every finding carries one tag that says why it happened:
 **What counts as an attempt:** a gate run that reached the build and failed, or a review that
 blocked. A run that stops at a process check before the build (uncommitted changes, a file
 outside the brief's paths) is not an attempt; the implementer fixes it and runs the gate again.
+A build that aborts with
+`Fatal error`, `Internal CLR error` or `Unhandled exception`, or exits non-zero without
+compiler diagnostics (error codes or warning lines), is an infrastructure failure, not an
+attempt. The gate preserves the raw cause, ends with `GATE: infrastructure failure` and leaves
+the issue label unchanged. Such logs do not count in the retry history; rerun the gate.
+Compiler errors, warnings treated as errors and acceptance test failures still count.
 
 **Sending a story back:** `tools/story.sh start <issue> --retry` is the only way. It keeps the
 worktree and branch, merges `main` in, writes the story text again from the brief on `main`
