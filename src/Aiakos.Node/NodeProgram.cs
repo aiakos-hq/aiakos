@@ -52,7 +52,7 @@ public static partial class NodeProgram
         builder.Services.AddSingleton<IValidateOptions<NodeOptions>, NodeOptionsValidator>();
 
         builder.Services.AddSingleton<NodeTelemetry>();
-        builder.Services.AddSingleton(static _ => Backoff.CreateDefault());
+        builder.Services.AddSingleton<NodeReconnectDelay>();
         builder.Services.TryAddSingleton<INodeLinkSource, DefaultNodeLinkSource>();
 
         builder.Services.AddSingleton<SighupHandler>();
