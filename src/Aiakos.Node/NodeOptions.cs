@@ -9,7 +9,7 @@ namespace Aiakos.Node;
 /// Node settings, read from the environment (spec 0001 R39, Design → Configuration → Node
 /// environment). Identity comes from here, never from a request body (rule 2).
 /// </summary>
-public sealed class NodeOptions
+public sealed class NodeOptions : IValidatableObject
 {
     public const string OrchestratorUrlVariable = "AIAKOS_ORCHESTRATOR_URL";
     public const string HomeVariable = "AIAKOS_HOME";
@@ -32,9 +32,17 @@ public sealed class NodeOptions
     [Required(ErrorMessage = NodeIdVariable + " is required.")]
     public string? NodeId { get; set; }
 
-    /// <summary>Per-node token. Transported only; validated from spec 0002 on.</summary>
+    /// <summary>Per-node token used to authenticate the node link.</summary>
     [ConfigurationKeyName(NodeTokenVariable)]
     public string? NodeToken { get; set; }
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (string.IsNullOrWhiteSpace(NodeToken))
+        {
+            yield return new ValidationResult(NodeTokenVariable + " is required.");
+        }
+    }
 
     /// <summary>The orchestrator URL as a URI. Valid only after validation.</summary>
     public Uri OrchestratorUri => new(OrchestratorUrl!, UriKind.Absolute);
