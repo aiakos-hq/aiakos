@@ -6,6 +6,9 @@ namespace Aiakos.Node.Testing;
 
 public abstract class SessionHostContractTests
 {
+    private static readonly string[] ReadOnlyAttachCommand = ["fake-attach", "-r", "=demo_impl"];
+    private static readonly string[] WritableAttachCommand = ["fake-attach", "=demo_impl"];
+
     protected abstract Task<ISessionHostRig> CreateRigAsync();
 
     [Fact]
@@ -283,6 +286,57 @@ public abstract class SessionHostContractTests
             new DeliveryRequest("l", "b", SubmitDelay: TimeSpan.MaxValue), CancellationToken.None));
 
         Assert.Equal(SessionHostErrorCode.InvalidArgument, exception.Code);
+        Assert.Empty(await rig.ReceivedAsync(session));
+    }
+
+    [Fact]
+    public async Task ListsStartedSessionAsManaged()
+    {
+        await using var rig = await CreateRigAsync();
+        var spec = rig.NewSpec();
+        var session = await rig.Host.StartAsync(spec, CancellationToken.None);
+
+        var listing = Assert.Single(await rig.Host.ListAsync(CancellationToken.None));
+
+        Assert.Equal(ListingClass.Managed, listing.Class);
+        Assert.Equal("demo_impl", listing.SessionName);
+        Assert.Equal(session.SessionId, listing.SessionId);
+        Assert.Equal(session.PaneId, listing.PaneId);
+        Assert.Equal(session.PanePid, listing.PanePid);
+        Assert.NotNull(listing.Labels);
+        Assert.Equal(spec.SeatId, listing.Labels.SeatId);
+        Assert.Equal(spec.SeatAddress, listing.Labels.SeatAddress);
+        Assert.Equal(spec.LaunchId, listing.Labels.LaunchId);
+        Assert.Equal(spec.Harness, listing.Labels.Harness);
+        Assert.Null(listing.Registry);
+    }
+
+    [Fact]
+    public async Task AdoptsManagedListingIdempotently()
+    {
+        await using var rig = await CreateRigAsync();
+        var session = await rig.Host.StartAsync(rig.NewSpec(), CancellationToken.None);
+        var listing = Assert.Single(await rig.Host.ListAsync(CancellationToken.None));
+
+        var first = await rig.Host.AdoptAsync(listing, CancellationToken.None);
+        var second = await rig.Host.AdoptAsync(listing, CancellationToken.None);
+
+        Assert.Equal(session, first);
+        Assert.Equal(session, second);
+        Assert.False(first.ReadOnly);
+        Assert.Single(await rig.Host.ListAsync(CancellationToken.None));
+        Assert.Empty(await rig.ReceivedAsync(session));
+    }
+
+    [Fact]
+    public async Task ReturnsExactAttachCommand()
+    {
+        await using var rig = await CreateRigAsync();
+        var session = await rig.Host.StartAsync(rig.NewSpec(), CancellationToken.None);
+
+        Assert.Equal(ReadOnlyAttachCommand, rig.Host.GetAttachCommand(session));
+        Assert.Equal(ReadOnlyAttachCommand, rig.Host.GetAttachCommand(session, readOnlyMode: true));
+        Assert.Equal(WritableAttachCommand, rig.Host.GetAttachCommand(session, readOnlyMode: false));
         Assert.Empty(await rig.ReceivedAsync(session));
     }
 
