@@ -167,3 +167,50 @@ Not checked in this round:
 - That a `TimeProvider` double without a new package can drive both `CancellationTokenSource(TimeSpan, TimeProvider)` and the proxy's timers as E4 and E7 need; nothing was built or run.
 - `artifacts/trials/` (acceptance tests), by role.
 
+## Review of the recut against merged S3, round 8
+
+Reviewed at commit cdfd25c. Stories: 10. Check: ok.
+
+Read: the amendment commit (the baseline paragraph, R7, C4, C5, C6, C7, E6, E7, E18, E20, E21
+and the S3, S4, S7 and S10 notes) and the code merged by #145: `NodeLinkService.cs`,
+`NodeLinkRegistry.cs`, `NodeProxyActor.cs`, `Program.cs` and the names of the tests in
+`NodeLinkHandshakeTests.cs`. The description of `main` in the brief matches the code: the
+receive loop, the `Connected` and final state callbacks, a registry that stops the previous
+actor, the original instance-ID spelling passed on (`NodeLinkService.cs:55`), `TrimEntries` in
+`Program.cs:60` and a default-only `NodeLinkOptions` registration (`Program.cs:38`). No merged
+test asserts a non-canonical instance ID, so C6 changes no committed test.
+
+### Findings
+
+- [x] S7 (context-gap): C7 binds all three `NodeLinkOptions` values from `Aiakos:NodeLink` and validates only `HelloTimeout`, so `LivenessTimeout=00:00:00`, a negative `HeartbeatInterval` or a heartbeat interval longer than the liveness timeout start the orchestrator; the first two give a `Welcome` that every node rejects as `FailedPrecondition` under R9 and, in S4, a liveness timer armed with a non-positive due time, the third a link that turns `Unknown` between heartbeats. Fix: state in C7 the accepted range of `HeartbeatInterval` and `LivenessTimeout` and their relation with the fixed failure text, and add the cases to E21; or state that these two are not bound from configuration.
+
+Noted, not a finding: the baseline paragraph names `artifacts/trials/10-3-3/review.md` in the
+brief text that implementers receive, a folder they are told not to read; the sentence says its
+observations are not requirements.
+
+## Not checked, round 8
+
+- `artifacts/trials/10-3-3/review.md`, by role; the amendment's account of it was compared with the merged code only.
+- Lead's request for the recut; taken from the author's text.
+- The node side for S7 (`NodeProgram`, message sizes, keepalive) against R12; nothing was built or run.
+
+
+## Author resolution of round 8
+
+C7 now bounds all three configured durations to 1..4294967294 ms inclusive using TimeSpan comparisons, requires HeartbeatInterval < LivenessTimeout when both ranges are valid, fixes every failure string and aggregate ordering, and suppresses relation errors for already-invalid values. E21 adds independent invalid ranges, equality/greater relation cases, valid boundary pairs and all-invalid ordered failures. The baseline paragraph no longer directs implementers to the role-restricted acceptance folder. No code or acceptance tests changed.
+
+## Re-review of the recut against merged S3, round 9
+
+Reviewed at commit e11bf7d. Stories: 10. Check: ok.
+
+The finding of round 8 is resolved: C7 validates all three durations in the same inclusive
+range with one fixed failure text each, requires `HeartbeatInterval < LivenessTimeout` when both
+are in range, and fixes the order of the collected failures; E21 has the independent range
+cases, the equal and greater relation, two valid boundary pairs and the all-zero case. Each E21
+case was walked through C7 and has one expected result. The pointer to the acceptance folder is
+gone from the brief text.
+
+New findings: None.
+
+Not checked in this round: the list of round 8 still applies; nothing was built or run.
+

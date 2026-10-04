@@ -38,3 +38,7 @@ E17	output	once	R14,C3
 E18	output	once	C4,R12
 C5	change	once	R4,R5
 E19	output	once	C5
+C6	change	once	R5
+E20	output	once	C6
+C7	change	once	R12
+E21	output	once	C7,R1,G1
