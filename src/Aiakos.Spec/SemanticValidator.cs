@@ -18,7 +18,7 @@ internal sealed class SemanticValidator
         ("GitHub token", new Regex("(?<![A-Za-z0-9])(ghp_|github_pat_)[A-Za-z0-9_]{6,}", RegexOptions.CultureInvariant)),
         ("Slack token", new Regex("(?<![A-Za-z0-9])xox[bp]-[A-Za-z0-9-]{6,}", RegexOptions.CultureInvariant)),
         ("private key", new Regex("-----BEGIN [A-Z ]*PRIVATE KEY-----", RegexOptions.CultureInvariant)),
-        ("URL with user info", new Regex("[A-Za-z][A-Za-z0-9+.-]*://[^/\\s@]+@", RegexOptions.CultureInvariant))
+        ("URL with user info", new Regex("[A-Za-z][A-Za-z0-9+.-]*://[^/\\s@]+@", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking))
     ];
 
     private readonly SemanticDocument rig;
@@ -395,12 +395,12 @@ internal sealed class SemanticValidator
 
     internal static string? CredentialKind(string? text) => FindCredential(text)?.Kind;
 
-    private static (string Kind, string Text)? FindCredential(string? text)
+    internal static (string Kind, string Text, int Index)? FindCredential(string? text)
     {
         if (text is null) return null;
         foreach (var (kind, pattern) in Credentials)
         {
-            if (pattern.Match(text) is { Success: true } match) return (kind, match.Value);
+            if (pattern.Match(text) is { Success: true } match) return (kind, match.Value, match.Index);
         }
 
         return null;
