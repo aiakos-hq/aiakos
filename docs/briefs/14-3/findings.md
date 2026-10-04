@@ -77,3 +77,24 @@ SKILL-limits. The change was read against R5, R7, R8 and G3.
 
 New findings: None.
 
+## Review of the special-file amendment, round 4
+
+Reviewed at commit 9b33be7. Stories: 6. Check: ok.
+
+Read: R14, C3, the changed R2, PATH-special, PATH-unreadable, T6, the S6 block and the entry
+inspection in the merged `SharedReferencePaths.cs`. Ran a .NET 10 probe on this machine (Linux):
+`File.GetAttributes` returns `Normal` for a FIFO, for `/dev/null` and for `/dev/sda`, and
+`File.GetUnixFileMode` returns permission bits only.
+
+### Findings
+
+- [ ] S6 (context-gap): R14 requires telling a FIFO, socket, character device and block device from a regular file without opening it, but the managed file API cannot (probe above: all are `Normal`), and the brief forbids packages and external programs and names no mechanism, so the implementer has to find and choose a native call alone. Fix: name the mechanism in R14 (for example a P/Invoke of libc `stat`/`statx` on Unix, with the result on Windows stated), or what to do where the type cannot be determined.
+- [ ] S3 (context-gap): R14 covers `File`-kind resolution and `agent.yaml`, but R5 enumerates a skill directory itself and says only "all regular files", so a FIFO, socket or device inside a skill directory (for example `SKILL.md` as a FIFO) has no stated result, and an implementation that reads every non-directory entry waits for a writer. Fix: state the result in R5 (never opened, and which diagnostic at the skill scalar), add the input to SKILL-links, and name the tie to the classification that S6 builds in the notes of S3 and S6.
+- [ ] S6 (context-gap): T6 requires a "child Load probe" that is killed after five seconds, while the brief allows no new project and no process access, and the test project has no executable that could run `Load` in a child process. Fix: say in T6 how the probe runs (for example `Load` on a background task with a five-second wait), or name the executable.
+
+## Not checked, round 4
+
+- The maintainer's authorization of the amendment; reported by the author.
+- Whether a P/Invoke of `stat`/`statx` is acceptable for the consumers of `Aiakos.Spec` (trimming, AOT).
+- Windows behaviour for the special-file cases.
+
