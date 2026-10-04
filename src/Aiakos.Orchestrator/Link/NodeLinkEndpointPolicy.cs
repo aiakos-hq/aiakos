@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace Aiakos.Orchestrator.Link;
 
 public static class NodeLinkEndpointPolicy
@@ -118,5 +120,22 @@ public static class NodeLinkEndpointPolicy
         }
 
         return true;
+    }
+
+    public static void ValidateConfigured(IEnumerable<string> addresses, int? grpcPort)
+    {
+        var eligible = addresses
+            .Where(address => grpcPort is null ||
+                Uri.TryCreate(address, UriKind.Absolute, out var uri) && uri.Port == grpcPort.Value)
+            .ToArray();
+        Validate(eligible);
+    }
+
+    public static void ValidateResolved(EndPoint? endpoint, int? grpcPort)
+    {
+        if (endpoint is IPEndPoint ipEndpoint && grpcPort is { } port && ipEndpoint.Port != port)
+            return;
+        if (endpoint is not IPEndPoint resolved || !IPAddress.IsLoopback(resolved.Address))
+            throw new InvalidOperationException(PolicyError);
     }
 }
