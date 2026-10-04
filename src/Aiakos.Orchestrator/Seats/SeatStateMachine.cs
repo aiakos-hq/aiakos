@@ -93,7 +93,12 @@ public static class SeatStateMachine
             if (!state.ReadinessSeen)
                 return EmptyEvent(state, EventDisposition.Orphan);
             if (state.KnownSession is SessionValue.Present or SessionValue.Unknown)
-                return ApplySession(state, SessionValue.Exited, null, "S12", now);
+            {
+                var ended = ApplySession(state, SessionValue.Exited, null, "S12", now);
+                if (state.Desired == SeatDesired.Up && state.Launch?.StopRequested != true)
+                    return WithFindings(ended, Open(SeatVocabulary.FindingUnexpectedExit));
+                return ended;
+            }
             return EmptyEvent(state, state.KnownSession == SessionValue.Exited
                 ? EventDisposition.Applied
                 : EventDisposition.Evidence);
