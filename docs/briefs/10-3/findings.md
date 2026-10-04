@@ -198,3 +198,19 @@ observations are not requirements.
 ## Author resolution of round 8
 
 C7 now bounds all three configured durations to 1..4294967294 ms inclusive using TimeSpan comparisons, requires HeartbeatInterval < LivenessTimeout when both ranges are valid, fixes every failure string and aggregate ordering, and suppresses relation errors for already-invalid values. E21 adds independent invalid ranges, equality/greater relation cases, valid boundary pairs and all-invalid ordered failures. The baseline paragraph no longer directs implementers to the role-restricted acceptance folder. No code or acceptance tests changed.
+
+## Re-review of the recut against merged S3, round 9
+
+Reviewed at commit e11bf7d. Stories: 10. Check: ok.
+
+The finding of round 8 is resolved: C7 validates all three durations in the same inclusive
+range with one fixed failure text each, requires `HeartbeatInterval < LivenessTimeout` when both
+are in range, and fixes the order of the collected failures; E21 has the independent range
+cases, the equal and greater relation, two valid boundary pairs and the all-zero case. Each E21
+case was walked through C7 and has one expected result. The pointer to the acceptance folder is
+gone from the brief text.
+
+New findings: None.
+
+Not checked in this round: the list of round 8 still applies; nothing was built or run.
+
