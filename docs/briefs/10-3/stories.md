@@ -49,10 +49,10 @@ notes: R9 uses R11 source and R8 delay. R9/R10 share one call lifetime/writer; C
 ## S7: Production registration and transport settings
 goal: The production hosts serve and use the node link with loopback enforcement, message limits and keepalive.
 depends: S1, S2, S3, S4, S5, S6
-owns: R12, C4
-outputs: E12, E15, E18
+owns: R12
+outputs: E12, E15
 tests: -
-notes: R12 activates R3 startup address enforcement, R11 replaceable defaults and R9/R10 client registrations. E15 verifies configured non-loopback Kestrel rejection before bind and TestServer exemption. C4/E18 add the full literal-address rejection matrix, independent of S9 ordering; C4 repeats the full grammar and E18 repeats the complete fixtures, so the startup story is self-contained. Existing database fixture verifies production registration; slim hosts cover remaining protocol cases.
+notes: R12 activates R3 startup address enforcement, R11 replaceable defaults and R9/R10 client registrations. E15 verifies configured non-loopback Kestrel rejection before bind and TestServer exemption. Existing database fixture verifies production registration; slim hosts cover remaining protocol cases.
 
 ## S8: Per-message trace context
 goal: Both link directions propagate ambient W3C context and start named per-envelope receive activities.
@@ -68,4 +68,12 @@ depends: S1
 owns: R14, C3
 outputs: E17
 tests: -
-notes: R14/C3 amend R3 policy in S1; retain canonical E3 behavior and exact Validate error. C4/E18 in S7 independently require the same startup protection, so S9 can merge before or after S7 without renumbering approved stories. No startup wiring is implemented in S9.
+notes: R14/C3 amend R3 policy in S1; retain canonical E3 behavior and exact Validate error. S10 integrates this policy at startup after both S7 and S9 merge. No startup wiring is implemented in S9.
+
+## S10: Integrate strict endpoint policy at startup
+goal: Production startup passes original eligible URL strings to the strict policy and rejects ambiguous listener forms before binding.
+depends: S7, S9
+owns: C4
+outputs: E18
+tests: -
+notes: S7 provides R12 wiring and S9 provides R14 policy. C4 changes startup to use that policy once, with no grammar copy or merge-order branch. E18 distinguishes the unset-GrpcPort all-address matrix from selected 5180 link URLs and excluded 5181 health listeners. No pure-policy change is implemented here.

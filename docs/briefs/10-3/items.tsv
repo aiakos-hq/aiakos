@@ -33,6 +33,6 @@ E15	output	once	R3,R12
 E16	output	once	R13
 R14	rule	once	R3
 C3	change	once	R14
-C4	change	once	R12
+C4	change	once	R12,R14
 E17	output	once	R14,C3
 E18	output	once	C4,R12

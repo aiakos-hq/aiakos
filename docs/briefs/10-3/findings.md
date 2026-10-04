@@ -67,8 +67,8 @@ expectation). The R14 grammar and the E17 matrix agree.
 
 ### Findings
 
-- [ ] S7 (context-gap): C4 tells the S7 implementer to reuse the tightened policy "if S9 has already merged" and otherwise to write the same grammar a second time at startup, so the code depends on the merge order, and when S7 merges first the startup copy stays beside the policy for good because S9 is told to do no startup wiring. Fix: take C4 and E18 out of S7 into a last story that depends on S7 and S9, and reduce C4 to "startup passes each configured address string unchanged to the policy".
-- [ ] S7 (context-gap): E18 does not give `GrpcPort`, and R3 validates only the addresses "on that port" when it is set, without saying how the port of an address that fails the grammar is found: with `GrpcPort=5180` and a valid `http://127.0.0.1:5180` beside `http://127.0.0.1:0` or `http://127.0.0.1#@example.test`, the bad address is not on the port, is not validated and the host starts, where E18 expects a failure; "every malformed address is rejected" is not the answer either, because E15 needs the non-loopback health address to pass. Fix: say in C4 how eligibility is decided for an address the grammar rejects, and give the `GrpcPort` setting and the other configured addresses for the E18 cases.
+- [x] S7 (context-gap): C4 tells the S7 implementer to reuse the tightened policy "if S9 has already merged" and otherwise to write the same grammar a second time at startup, so the code depends on the merge order, and when S7 merges first the startup copy stays beside the policy for good because S9 is told to do no startup wiring. Fix: take C4 and E18 out of S7 into a last story that depends on S7 and S9, and reduce C4 to "startup passes each configured address string unchanged to the policy".
+- [x] S7 (context-gap): E18 does not give `GrpcPort`, and R3 validates only the addresses "on that port" when it is set, without saying how the port of an address that fails the grammar is found: with `GrpcPort=5180` and a valid `http://127.0.0.1:5180` beside `http://127.0.0.1:0` or `http://127.0.0.1#@example.test`, the bad address is not on the port, is not validated and the host starts, where E18 expects a failure; "every malformed address is rejected" is not the answer either, because E15 needs the non-loopback health address to pass. Fix: say in C4 how eligibility is decided for an address the grammar rejects, and give the `GrpcPort` setting and the other configured addresses for the E18 cases.
 
 ## Not checked, round 3
 
@@ -76,3 +76,10 @@ expectation). The R14 grammar and the E17 matrix agree.
 - That `tools/story.sh check` forbids a dependency on a later-numbered story, as the author reports.
 - What Kestrel itself does with each E18 address.
 
+
+## Endpoint amendment resolution
+
+- C4/E18 moved to S10 depending on S7 and S9. Startup passes eligible original strings to the one policy implementation; no second grammar and no merge-order implementation choice remain.
+- C4 specifies eligibility separately, and E18 specifies GrpcPort unset for all malformed-address cases. Additional explicit-port-5180 cases with an excluded 5181 health listener verify filtered startup behavior. Port-zero and implicit-port cases no longer claim eligibility at 5180.
+
+Author ticks record the revisions, pending architect re-review.
