@@ -182,7 +182,7 @@ test asserts a non-canonical instance ID, so C6 changes no committed test.
 
 ### Findings
 
-- [ ] S7 (context-gap): C7 binds all three `NodeLinkOptions` values from `Aiakos:NodeLink` and validates only `HelloTimeout`, so `LivenessTimeout=00:00:00`, a negative `HeartbeatInterval` or a heartbeat interval longer than the liveness timeout start the orchestrator; the first two give a `Welcome` that every node rejects as `FailedPrecondition` under R9 and, in S4, a liveness timer armed with a non-positive due time, the third a link that turns `Unknown` between heartbeats. Fix: state in C7 the accepted range of `HeartbeatInterval` and `LivenessTimeout` and their relation with the fixed failure text, and add the cases to E21; or state that these two are not bound from configuration.
+- [x] S7 (context-gap): C7 binds all three `NodeLinkOptions` values from `Aiakos:NodeLink` and validates only `HelloTimeout`, so `LivenessTimeout=00:00:00`, a negative `HeartbeatInterval` or a heartbeat interval longer than the liveness timeout start the orchestrator; the first two give a `Welcome` that every node rejects as `FailedPrecondition` under R9 and, in S4, a liveness timer armed with a non-positive due time, the third a link that turns `Unknown` between heartbeats. Fix: state in C7 the accepted range of `HeartbeatInterval` and `LivenessTimeout` and their relation with the fixed failure text, and add the cases to E21; or state that these two are not bound from configuration.
 
 Noted, not a finding: the baseline paragraph names `artifacts/trials/10-3-3/review.md` in the
 brief text that implementers receive, a folder they are told not to read; the sentence says its
@@ -194,3 +194,7 @@ observations are not requirements.
 - Lead's request for the recut; taken from the author's text.
 - The node side for S7 (`NodeProgram`, message sizes, keepalive) against R12; nothing was built or run.
 
+
+## Author resolution of round 8
+
+C7 now bounds all three configured durations to 1..4294967294 ms inclusive using TimeSpan comparisons, requires HeartbeatInterval < LivenessTimeout when both ranges are valid, fixes every failure string and aggregate ordering, and suppresses relation errors for already-invalid values. E21 adds independent invalid ranges, equality/greater relation cases, valid boundary pairs and all-invalid ordered failures. The baseline paragraph no longer directs implementers to the role-restricted acceptance folder. No code or acceptance tests changed.
