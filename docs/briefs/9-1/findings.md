@@ -97,3 +97,24 @@ Not checked in this round: nothing was run or diagnosed; the list of round 3 sti
 ## Shutdown-service scope amendment (review pending)
 
 Maintainer authorization dated 2026-10-04, lead queue qitem-20261004211403-de3aa475: 9-1-1 may edit TelemetryShutdownService.cs. R1 removes its read-only/scope-stop condition, paths permit that file only, and C2/E8 require the diagnosed ownership fix at StoppedAsync/provider disposal on success/timeout/error while preserving provider timeoutMs (default 2 seconds) and lifecycle timeoutMs+500 (default 2.5 seconds). No detached provider access or unbounded join is accepted; an evidenced incompatibility goes to lead, rather than silently weakening the decision. R4(b) deterministic acceptance follows approval. Supporting diagnosis source inspected; no implementation or test run by author.
+
+## Review of the shutdown-service scope amendment, round 5
+
+Reviewed at commit a30b4bc. Stories: 1. Check: ok.
+
+Read: the amendment commit (paths, R1, C2, E8, the S1 block), `TelemetryShutdownService.cs`
+and spec 0001 R37 with its design note. The widening of `paths` to that one file, the removal of
+the scope-stop from R1 and the prohibition of detached workers, provider disposal in the service
+and longer bounds are consistent with each other.
+
+### Findings
+
+- [ ] S1 (context-gap): for the timeout path C2 and E8 ask for two results that cannot both hold: when a provider's `Shutdown` has been entered and is still running at `timeoutMs + 500`, either `StoppedAsync` completes at the bound and the host disposes the provider under the running call, or it waits and the bound is exceeded; C2 answers this with "stop and hand to lead", so the E8 case "shutdown held by a barrier, lifecycle timeout advanced, no overlap, bound kept" cannot pass for any implementation and the story ends in the stop it was amended to avoid. Fix: split the timeout case in C2 and E8 into (a) a worker that has not entered the provider at the bound, which must never touch the provider afterwards, and (b) a call already inside the provider at the bound, with the result the maintainer chooses for it (which guarantee yields), so that every E8 case has one satisfiable expected output.
+- [ ] S1 (context-gap): `TelemetryShutdownService.cs` is shared with the node through `AddAiakosServiceDefaults`, and C2 changes when a node's stop completes as well, but the brief's gate and its "earlier tests" are the orchestrator test project only, and no test anywhere covers this service today. Fix: state in C2 that the node's stop behaviour changes with it and which test projects the after gate runs (at least `tests/Aiakos.Node.Tests`), or state that the node is deliberately not checked.
+
+## Not checked, round 5
+
+- `artifacts/diagnoses/9-1-1.md`: R4 names `lead`, the author and `qa` as its readers, so it was not read; C2's account of the cause (lines 54 and 67-68) was compared with the source only.
+- The maintainer's authorization of the wider scope (lead queue item named in R1).
+- Whether a deterministic regression for E8 compiles and fails on `main` without a seam in the service; nothing was built or run.
+
