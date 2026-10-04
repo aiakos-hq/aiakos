@@ -169,3 +169,7 @@ part of the amendment pull request.
 
 Not checked in this round: the lists of rounds 5 and 6 still apply; nothing was built or run.
 
+
+## Two-story seam sequencing amendment (review pending)
+
+Lead instruction dated 2026-10-04 21:34Z confirms the TimeProvider/TaskScheduler constructor seam and requires it to merge first so the ownership baseline can compile and fail for the real boundary. Based on approved #137 main text: C3/E9/E10/T2 are S1 neutral seam; existing R1-R4/C1/C2/E1-E8/T1 are S2 ownership fix depending on S1. Exact public two-parameter and internal four-parameter constructor signatures, production System/Default delegation, controlled scheduling and provider-backed wait are specified. S1 retains unsafe continuation/worker behavior deliberately; S2 corrects it under prior maintainer decisions. Existing diagnosis filename is preserved; ownership trial moves to 9-1-2. No new authorization or scope, no resets. Pending architect review; neither gate is handed to QA before amendment approval.

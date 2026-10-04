@@ -14,3 +14,7 @@ E6	output	once	R3
 E7	output	once	R4
 C2	change	once	R1,R2,R4
 E8	output	once	C2
+C3	change	once	-
+E9	output	once	C3
+E10	output	once	C3
+T2	test	once	C3
