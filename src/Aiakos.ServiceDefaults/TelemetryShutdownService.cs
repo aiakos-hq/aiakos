@@ -8,7 +8,7 @@ using OpenTelemetry.Trace;
 
 namespace Aiakos.ServiceDefaults;
 
-/// <summary>Bound for the final telemetry flush (spec 0001 R37).</summary>
+/// <summary>Provider shutdown timeout and lifecycle admission deadline (spec 0001 R37).</summary>
 public sealed class TelemetryShutdownOptions
 {
     /// <summary>Configuration section.</summary>
@@ -19,9 +19,8 @@ public sealed class TelemetryShutdownOptions
 }
 
 /// <summary>
-/// Flushes and shuts down the telemetry providers once the host has stopped, with a bounded
-/// timeout, so a stop while the collector is gone does not wait for the exporter's default
-/// timeout (spike 0003 §4).
+/// Flushes and shuts down telemetry concurrently after the host stops. Admission is bounded;
+/// entered provider calls finish before DI disposal, even when they exceed that bound.
 /// </summary>
 internal sealed class TelemetryShutdownService : IHostedLifecycleService
 {
@@ -64,44 +63,100 @@ internal sealed class TelemetryShutdownService : IHostedLifecycleService
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    public Task StoppedAsync(CancellationToken cancellationToken)
+    public async Task StoppedAsync(CancellationToken cancellationToken)
     {
         var timeoutMs = (int)Math.Clamp(options.Value.ShutdownFlushTimeout.TotalMilliseconds, 0, int.MaxValue);
+        var admissionTimeout = TimeSpan.FromMilliseconds(timeoutMs + 500L);
+        var startedAt = timeProvider.GetTimestamp();
+        var gate = new object();
+        var closed = false;
+        var workers = new List<ShutdownWork>(3);
 
-        // Shutdown flushes pending data first. Each provider gets the bound and they run in parallel,
-        // so the total stays near one bound.
-        var flushes = new List<Task>(3);
+        // Closing admission completes only workers that have not entered. Entered workers
+        // retain ownership until their provider call returns, even beyond the deadline.
+        void CloseAdmission()
+        {
+            lock (gate)
+            {
+                closed = true;
+                foreach (var worker in workers)
+                {
+                    if (!worker.Entered)
+                        worker.Completion.TrySetResult();
+                }
+            }
+        }
+
+        void StartShutdown(Action shutdown)
+        {
+            var worker = new ShutdownWork();
+            lock (gate)
+            {
+                workers.Add(worker);
+                if (closed)
+                {
+                    worker.Completion.TrySetResult();
+                    return;
+                }
+            }
+
+            try
+            {
+                _ = Task.Factory.StartNew(() =>
+                {
+                    lock (gate)
+                    {
+                        // Check elapsed time as well as the timer: a delayed callback must
+                        // never let a queued worker gain admission after the deadline.
+                        if (timeProvider.GetElapsedTime(startedAt) >= admissionTimeout)
+                            CloseAdmission();
+                        if (closed)
+                            return;
+                        worker.Entered = true;
+                    }
+
+                    try
+                    {
+                        shutdown();
+                        worker.Completion.TrySetResult();
+                    }
+                    catch (Exception exception)
+                    {
+                        worker.Completion.TrySetException(exception);
+                    }
+                }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, taskScheduler);
+            }
+            catch (Exception exception)
+            {
+                worker.Completion.TrySetException(exception);
+            }
+        }
+
+        using var timer = timeProvider.CreateTimer(
+            _ => CloseAdmission(), null, admissionTimeout, Timeout.InfiniteTimeSpan);
+        using var cancellation = cancellationToken.Register(CloseAdmission);
         if (tracer is not null)
-        {
-            flushes.Add(Task.Factory.StartNew(
-                () => tracer.Shutdown(timeoutMs),
-                CancellationToken.None,
-                TaskCreationOptions.DenyChildAttach,
-                taskScheduler));
-        }
-
+            StartShutdown(() => tracer.Shutdown(timeoutMs));
         if (meter is not null)
-        {
-            flushes.Add(Task.Factory.StartNew(
-                () => meter.Shutdown(timeoutMs),
-                CancellationToken.None,
-                TaskCreationOptions.DenyChildAttach,
-                taskScheduler));
-        }
-
+            StartShutdown(() => meter.Shutdown(timeoutMs));
         if (logger is not null)
-        {
-            flushes.Add(Task.Factory.StartNew(
-                () => logger.Shutdown(timeoutMs),
-                CancellationToken.None,
-                TaskCreationOptions.DenyChildAttach,
-                taskScheduler));
-        }
+            StartShutdown(() => logger.Shutdown(timeoutMs));
 
-        return Task.WhenAll(flushes).WaitAsync(
-                TimeSpan.FromMilliseconds(timeoutMs + 500L),
-                timeProvider,
-                CancellationToken.None)
-            .ContinueWith(static _ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        try
+        {
+            // WhenAll observes faults only after every entered call finishes. Queued
+            // delegates may run later, but closed admission keeps them off the providers.
+            await Task.WhenAll(workers.Select(static worker => worker.Completion.Task)).ConfigureAwait(false);
+        }
+        finally
+        {
+            CloseAdmission();
+        }
+    }
+
+    private sealed class ShutdownWork
+    {
+        public bool Entered { get; set; }
+        public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }
