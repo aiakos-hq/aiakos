@@ -1,3 +1,5 @@
+using System.Runtime.ExceptionServices;
+
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -71,14 +73,18 @@ internal sealed class TelemetryShutdownService : IHostedLifecycleService
         var gate = new object();
         var closed = false;
         var workers = new List<ShutdownWork>(3);
+        var failures = new List<Exception>();
 
         // Closing admission completes only workers that have not entered. Entered workers
         // retain ownership until their provider call returns, even beyond the deadline.
-        void CloseAdmission()
+        void CloseAdmission(Exception? failure = null)
         {
             lock (gate)
             {
                 closed = true;
+                if (failure is not null)
+                    failures.Add(failure);
+
                 foreach (var worker in workers)
                 {
                     if (!worker.Entered)
@@ -118,23 +124,29 @@ internal sealed class TelemetryShutdownService : IHostedLifecycleService
                     try
                     {
                         shutdown();
-                        worker.Completion.TrySetResult();
                     }
                     catch (Exception exception)
                     {
-                        worker.Completion.TrySetException(exception);
+                        lock (gate)
+                            failures.Add(exception);
+                    }
+                    finally
+                    {
+                        worker.Completion.TrySetResult();
                     }
                 }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, taskScheduler);
             }
             catch (Exception exception)
             {
-                worker.Completion.TrySetException(exception);
+                // A scheduler may throw after queuing work. Close admission under the same
+                // lock used by worker entry, then retain ownership of anything already entered.
+                CloseAdmission(exception);
             }
         }
 
         using var timer = timeProvider.CreateTimer(
             _ => CloseAdmission(), null, admissionTimeout, Timeout.InfiniteTimeSpan);
-        using var cancellation = cancellationToken.Register(CloseAdmission);
+        using var cancellation = cancellationToken.Register(() => CloseAdmission());
         if (tracer is not null)
             StartShutdown(() => tracer.Shutdown(timeoutMs));
         if (meter is not null)
@@ -144,9 +156,14 @@ internal sealed class TelemetryShutdownService : IHostedLifecycleService
 
         try
         {
-            // WhenAll observes faults only after every entered call finishes. Queued
-            // delegates may run later, but closed admission keeps them off the providers.
+            // Admission failures complete queued-but-not-entered workers. Entered calls
+            // finish before any recorded scheduling or provider fault is surfaced.
             await Task.WhenAll(workers.Select(static worker => worker.Completion.Task)).ConfigureAwait(false);
+            Exception? failure;
+            lock (gate)
+                failure = failures.FirstOrDefault();
+            if (failure is not null)
+                ExceptionDispatchInfo.Capture(failure).Throw();
         }
         finally
         {
