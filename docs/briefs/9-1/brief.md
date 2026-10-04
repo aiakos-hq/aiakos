@@ -274,9 +274,11 @@ T2. Local seam acceptance at artifacts/trials/9-1-1/gate.sh checks C3/E9/E10 and
 
 ## Definition of done
 
-- Identical deterministic baseline/after gate with E4 evidence and R1 source diagnosis, all earlier tests green, build zero warnings/errors.
+- S1: C3/E9/E10/T2 seam acceptance passes after an absent-constructor baseline; unchanged orchestrator/node suites pass, build zero warnings/errors. No E4 ownership evidence or R1 fix diagnosis is required for this neutral story.
+- S2: identical deterministic baseline/after gate with E4 evidence and R1 source diagnosis, all earlier tests green, build zero warnings/errors.
 - S1 local commit: `refactor(telemetry): expose shutdown test controls (#9)`; S2 local commit: `fix(orchestrator): make host disposal deterministic (#9)`.
-- Commit body includes R1 evidence and `Risks: #9 has no open risk assigned; this fixes #103's host-disposal regression.`
+- S1 commit body records neutral constructor/clock/scheduler changes and `Risks: #9 has no open risk assigned; behavior-neutral controls only, #103 remains for 9-1-2.` Do not claim the disposal race is fixed.
+- S2 commit body includes R1 evidence and `Risks: #9 has no open risk assigned; this fixes #103's host-disposal regression.`
 - LF, UTF-8 without BOM, final newline. No push/PR. Use tools/story.sh and its one-retry limit.
 - Lead routes 9-1-1 (neutral seam) then 9-1-2 (ownership fix) as sub-issues of #9 and handles the superseded #103 record. Each story follows its own ready/baseline and attempt accounting; no counter is reset by this amendment.
 

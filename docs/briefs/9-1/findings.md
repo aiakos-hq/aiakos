@@ -189,7 +189,7 @@ four-parameter constructor, `TimeProvider.System` and `TaskScheduler.Default` in
 
 ### Findings
 
-- [ ] S1 (context-gap): `show 9-1 1` gives the S1 implementer the definition of done of S2: "Identical deterministic baseline/after gate with E4 evidence and R1 source diagnosis" and "Commit body includes R1 evidence and `Risks: … this fixes #103's host-disposal regression`", while S1 owns neither R1 nor E4 and fixes nothing, so the implementer must decide what its commit body says and the stated text would be false for S1. Fix: `author` writes those two lines per story (for S1: the T2 gate, and a `Risks:` line that says the seam changes no behaviour and does not fix #103).
+- [x] S1 (context-gap): `show 9-1 1` gives the S1 implementer the definition of done of S2: "Identical deterministic baseline/after gate with E4 evidence and R1 source diagnosis" and "Commit body includes R1 evidence and `Risks: … this fixes #103's host-disposal regression`", while S1 owns neither R1 nor E4 and fixes nothing, so the implementer must decide what its commit body says and the stated text would be false for S1. Fix: `author` writes those two lines per story (for S1: the T2 gate, and a `Risks:` line that says the seam changes no behaviour and does not fix #103).
 
 Noted, not a finding: S1 is routed `impl/senior`, and its `escalation` line gives lead's routing
 as the reason. C3 fixes the signatures and the calls exactly, so the story looks sized for
@@ -202,3 +202,7 @@ This is `lead`'s and the maintainer's call at approval.
 - That reflection reaches the internal constructor from the orchestrator test project as T2 assumes; nothing was built or run.
 - `artifacts/diagnoses/9-1-1.md` and `artifacts/trials/`, as before.
 
+
+## Per-story completion resolution
+
+Definition of done now separates S1's absent-constructor baseline, neutral controls, unchanged suites and neutral risk text from S2's diagnosed-boundary E4/R1 proof and fix claim. Author tick records the change pending architect re-review.
