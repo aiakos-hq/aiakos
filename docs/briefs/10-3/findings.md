@@ -127,4 +127,18 @@ is fixed, and the host owns the `ActorSystem`.
 
 ## S4 host dependency resolution
 
-C5 now fixes the same complete host and two-parameter registry constructor for E6/E7, with no extra application registrations. It explicitly permits the framework-provided IHostApplicationLifetime for shutdown and routes proxy time/options through NodeLinkService. S4 notes repeat the cross-story dependency; E6/E7 traceability includes C5. Author tick records the amendment, pending architect re-review.
+C5 now fixes the same complete host and two-parameter registry constructor for E6/E7, with no extra application registrations. It explicitly permits the framework-provided IHostApplicationLifetime for shutdown and routes proxy time/options through NodeLinkService. S4 notes repeat the cross-story dependency; E6/E7 traceability includes C5. Author tick records the amendment.
+
+## Re-review of the S3 host dependency amendment, round 6
+
+Reviewed at commit 1ffb73a. Stories: 10. Check: ok.
+
+The finding of round 5 is resolved: C5 makes the same registration set and the two-parameter
+registry constructor the complete slim host for S4 and E6/E7, with shutdown observed through
+`IHostApplicationLifetime` and time and options reaching the proxy through `NodeLinkService`;
+the S4 note names it and E6/E7 list C5 in `items.tsv`.
+
+New findings: None.
+
+Not checked in this round: nothing was run; the list of round 5 still applies.
+
