@@ -110,7 +110,7 @@ and longer bounds are consistent with each other.
 ### Findings
 
 - [ ] S1 (context-gap): for the timeout path C2 and E8 ask for two results that cannot both hold: when a provider's `Shutdown` has been entered and is still running at `timeoutMs + 500`, either `StoppedAsync` completes at the bound and the host disposes the provider under the running call, or it waits and the bound is exceeded; C2 answers this with "stop and hand to lead", so the E8 case "shutdown held by a barrier, lifecycle timeout advanced, no overlap, bound kept" cannot pass for any implementation and the story ends in the stop it was amended to avoid. Fix: split the timeout case in C2 and E8 into (a) a worker that has not entered the provider at the bound, which must never touch the provider afterwards, and (b) a call already inside the provider at the bound, with the result the maintainer chooses for it (which guarantee yields), so that every E8 case has one satisfiable expected output.
-- [ ] S1 (context-gap): `TelemetryShutdownService.cs` is shared with the node through `AddAiakosServiceDefaults`, and C2 changes when a node's stop completes as well, but the brief's gate and its "earlier tests" are the orchestrator test project only, and no test anywhere covers this service today. Fix: state in C2 that the node's stop behaviour changes with it and which test projects the after gate runs (at least `tests/Aiakos.Node.Tests`), or state that the node is deliberately not checked.
+- [x] S1 (context-gap): `TelemetryShutdownService.cs` is shared with the node through `AddAiakosServiceDefaults`, and C2 changes when a node's stop completes as well, but the brief's gate and its "earlier tests" are the orchestrator test project only, and no test anywhere covers this service today. Fix: state in C2 that the node's stop behaviour changes with it and which test projects the after gate runs (at least `tests/Aiakos.Node.Tests`), or state that the node is deliberately not checked.
 
 ## Not checked, round 5
 
@@ -118,3 +118,9 @@ and longer bounds are consistent with each other.
 - The maintainer's authorization of the wider scope (lead queue item named in R1).
 - Whether a deterministic regression for E8 compiles and fails on `main` without a seam in the service; nothing was built or run.
 
+
+## Shutdown-service review resolution in progress
+
+The shared-node finding is addressed in C2/E8/T1 and S1 notes: node stop changes too, focused shared-service lifecycle tests live in the allowed orchestrator directory, and the after gate runs full orchestrator and node Release suites. Author tick records the text change.
+
+The timeout finding remains open for a maintainer choice via lead: queued-not-entered workers must be prevented from entering after the deadline; entered and uncompleted provider calls cannot satisfy both bounded lifecycle return and disposal-after-completion. Proposed safe choice is to retain ownership and await already-entered calls even beyond the lifecycle wait bound, preserving the configured provider timeout and documenting that the lifecycle bound then limits admission/wait observation rather than final return. Alternative bounded-return choice would require another permitted ownership/termination design and evidence that no provider can be disposed under a still-running call. No choice is authorized or silently implemented here.

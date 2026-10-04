@@ -97,7 +97,13 @@ C2. Implement the diagnosed shutdown ownership correction in TelemetryShutdownSe
    If safe completion/DI ownership cannot be reconciled with both bounds under the pinned
    dependency, stop and hand the exact conflicting source paths to lead for a maintainer
    decision; do not silently pick one guarantee to violate or claim an unimplemented design.
-   This authority is limited to story 9-1-1 and this service file, not a telemetry redesign.
+   This shared service also changes node shutdown because NodeProgram calls
+   AddAiakosServiceDefaults; the same safe provider-ownership rule applies to node stop.
+   Place focused tests of the shared service's actual lifecycle boundary in the permitted
+   orchestrator tests directory (exercise tracer, meter and logger success/timeout/fault paths).
+   The after gate runs the full tests/Aiakos.Orchestrator.Tests and tests/Aiakos.Node.Tests
+   projects in Release; no node source/test file scope is added. This authority is limited
+   to story 9-1-1 and this service file, not a telemetry redesign.
    Use R4(b) at the diagnosed real host StoppedAsync-to-provider-disposal boundary: hold
    shutdown with a barrier/double and advance the lifecycle timeout deterministically. Before
    must observe disposal overlapping pending shutdown; after must observe no overlap on
@@ -202,13 +208,14 @@ R4. Replace reproduce-first acceptance with a deterministic regression selected 
 
 | `E7` | deterministic R4 gate cannot execute because Docker/container/Postgres is demonstrably unavailable before host startup | final exact line `REGRESSION: infrastructure failure`, exit 2 and raw cause; baseline-only assessment `BASELINE: infrastructure failure`; no boundary reproduction or fix claim; if done reached build, its recorded attempt count is retained and reported to lead before rerun |
 
-| `E8` | diagnosed shutdown operation held at the real StoppedAsync/provider-disposal boundary; success, timeout/cancellation and fault paths | no provider disposal overlaps an in-flight shutdown; shutdown service does not dispose DI-owned providers; each provider receives the clamped configured timeout (default 2000 ms), lifecycle flush-wait remains timeoutMs+500 (default 2500 ms), with concurrent providers; no detached worker, unbounded join, instrumentation removal or fabricated exception; irreconcilable bounds are reported to lead, not marked fixed |
+| `E8` | diagnosed shutdown operation held at the real StoppedAsync/provider-disposal boundary; success, timeout/cancellation and fault paths | no provider disposal overlaps an in-flight shutdown; shutdown service does not dispose DI-owned providers; each provider receives the clamped configured timeout (default 2000 ms), lifecycle flush-wait remains timeoutMs+500 (default 2500 ms), with concurrent providers; no detached worker, unbounded join, instrumentation removal or fabricated exception; shared-service focused lifecycle tests and full orchestrator/node test projects pass in Release; irreconcilable bounds are reported to lead, not marked fixed |
 
 ## Tests
 
 T1. Local acceptance gate under artifacts/trials/9-1-1/gate.sh implements R4/E4 and
    records the baseline commit in main-before.txt through tools/story.sh baseline. Author
-   writes it after source diagnosis and before behavior changes; QA confirms a compiled
+   writes it after source diagnosis and before behavior changes; the after gate runs both full
+   orchestrator and node Release test projects plus focused shared-service lifecycle tests. QA confirms a compiled
    boundary failure on main and the after-run result. Supporting R3 stress has a separate
    entry point and output log. No gate may manufacture the library exception or require its
    probabilistic reproduction under route (b).
