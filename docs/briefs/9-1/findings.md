@@ -4,8 +4,8 @@ Reviewed at commit ed2f210. Stories: 1. Check: ok.
 
 ## Findings
 
-- [ ] S1 (context-gap): the only code of this repository that acts on the `TracerProvider` during shutdown is `src/Aiakos.ServiceDefaults/TelemetryShutdownService.cs` (`StoppedAsync` starts `tracer.Shutdown` with `Task.Run` and stops waiting after the timeout plus 500 ms, while the host goes on to dispose the provider); the brief has the implementer read it and forbids changing it, so if the diagnosis lands there, R1 stops the story before any fix, and R2 leaves only an ordering change in the test. Fix: add that file to `paths` under the same "only if the diagnosis shows it is necessary" condition as `Program.cs`, or state in R1 that the maintainer has excluded it and that this outcome ends the story as blocked.
-- [ ] S1 (context-gap): R3 fails the gate "on any nonzero test run, exception or timeout" and only asks that infrastructure failures be distinguishable, so a Postgres container that does not start in iteration 137 of the after-run counts as a failed attempt against a correct fix, and two of them stop the story under the one-retry rule. Fix: state in R3 the gate's result for an iteration that fails before any test ran (for example a distinct final line and exit code that `qa` reruns and does not count as an attempt).
+- [x] S1 (context-gap): the only code of this repository that acts on the `TracerProvider` during shutdown is `src/Aiakos.ServiceDefaults/TelemetryShutdownService.cs` (`StoppedAsync` starts `tracer.Shutdown` with `Task.Run` and stops waiting after the timeout plus 500 ms, while the host goes on to dispose the provider); the brief has the implementer read it and forbids changing it, so if the diagnosis lands there, R1 stops the story before any fix, and R2 leaves only an ordering change in the test. Fix: add that file to `paths` under the same "only if the diagnosis shows it is necessary" condition as `Program.cs`, or state in R1 that the maintainer has excluded it and that this outcome ends the story as blocked.
+- [x] S1 (context-gap): R3 fails the gate "on any nonzero test run, exception or timeout" and only asks that infrastructure failures be distinguishable, so a Postgres container that does not start in iteration 137 of the after-run counts as a failed attempt against a correct fix, and two of them stop the story under the one-retry rule. Fix: state in R3 the gate's result for an iteration that fails before any test ran (for example a distinct final line and exit code that `qa` reruns and does not count as an attempt).
 
 ## Not checked
 
@@ -14,3 +14,10 @@ Reviewed at commit ed2f210. Stories: 1. Check: ok.
 - How long one run of the orchestrator test project takes, and so whether 200 runs before and 200 after fit the time that `tools/story.sh baseline` and `done` allow.
 - Whether the story could be split into a diagnosis and a fix; the `impl/senior` route and its `escalation` line were accepted as written.
 - `artifacts/trials/` (acceptance tests), by role.
+
+## Author resolution
+
+1. R1 explicitly keeps TelemetryShutdownService read-only under the maintainer's narrow scope. A diagnosis requiring that file is reported/parked for lead and maintainer scope amendment, with no speculative workaround or completion claim.
+2. R3/E5 separate known infrastructure failures (exit 2, explicit marker and raw trace) from real test failures (exit 1). Baseline infrastructure is not reproduction. Preflight availability before done; if a reached-build run fails, the existing script still counts it and QA reports the count to lead before rerun. This brief does not override the repository's attempt rule.
+
+Ticks reflect author revision; architect re-review pending.
