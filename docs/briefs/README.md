@@ -30,7 +30,7 @@ Acceptance tests are not here: they stay local, so that an implementer cannot re
 |---|---|---|---|---|---|---|
 | [9-1 Deterministic orchestrator host disposal](9-1/brief.md) | #9 | `impl/senior` | approved | [1](9-1/stories.md) | | #103 (superseded at ready) |
 | [10-1 Proto and buf checks](10-1/brief.md) | #10 | `impl/opencode` | implemented | not split (before the story workflow) | | PR #44 |
-| [10-3 Authenticated node link](10-3/brief.md) | #10 | `impl` | draft | [10](10-3/stories.md) | | |
+| [10-3 Authenticated node link](10-3/brief.md) | #10 | `impl` | approved | [10](10-3/stories.md) | | |
 | [10-2 Contract helpers and contract tests](10-2/brief.md) | #10 | `impl/opencode` | approved | [1](10-2/stories.md) | | |
 | [11-1 Session host interface, validators and the fake](11-1/brief.md) | #11 | `impl/sonnet` | draft | [4](11-1/stories.md) | [2](11-1/findings.md) | |
 | [13-1 Pure seat state machine and harness state profile](13-1/brief.md) | #13 | `impl/sonnet` | approved | [11](13-1/stories.md) |  | |
