@@ -23,14 +23,36 @@ public sealed class TelemetryShutdownOptions
 /// timeout, so a stop while the collector is gone does not wait for the exporter's default
 /// timeout (spike 0003 §4).
 /// </summary>
-internal sealed class TelemetryShutdownService(IServiceProvider services, IOptions<TelemetryShutdownOptions> options)
-    : IHostedLifecycleService
+internal sealed class TelemetryShutdownService : IHostedLifecycleService
 {
+    private readonly TimeProvider timeProvider;
+    private readonly TaskScheduler taskScheduler;
+    private readonly IOptions<TelemetryShutdownOptions> options;
+
     // Resolved when the service is created, so a host that failed to start (and whose container
     // is already being disposed) can still be stopped without touching the service provider.
-    private readonly TracerProvider? tracer = services.GetService<TracerProvider>();
-    private readonly MeterProvider? meter = services.GetService<MeterProvider>();
-    private readonly LoggerProvider? logger = services.GetService<LoggerProvider>();
+    private readonly TracerProvider? tracer;
+    private readonly MeterProvider? meter;
+    private readonly LoggerProvider? logger;
+
+    public TelemetryShutdownService(IServiceProvider services, IOptions<TelemetryShutdownOptions> options)
+        : this(services, options, TimeProvider.System, TaskScheduler.Default)
+    {
+    }
+
+    internal TelemetryShutdownService(
+        IServiceProvider services,
+        IOptions<TelemetryShutdownOptions> options,
+        TimeProvider timeProvider,
+        TaskScheduler taskScheduler)
+    {
+        this.options = options;
+        this.timeProvider = timeProvider;
+        this.taskScheduler = taskScheduler;
+        tracer = services.GetService<TracerProvider>();
+        meter = services.GetService<MeterProvider>();
+        logger = services.GetService<LoggerProvider>();
+    }
 
     public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -51,20 +73,35 @@ internal sealed class TelemetryShutdownService(IServiceProvider services, IOptio
         var flushes = new List<Task>(3);
         if (tracer is not null)
         {
-            flushes.Add(Task.Run(() => tracer.Shutdown(timeoutMs), CancellationToken.None));
+            flushes.Add(Task.Factory.StartNew(
+                () => tracer.Shutdown(timeoutMs),
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                taskScheduler));
         }
 
         if (meter is not null)
         {
-            flushes.Add(Task.Run(() => meter.Shutdown(timeoutMs), CancellationToken.None));
+            flushes.Add(Task.Factory.StartNew(
+                () => meter.Shutdown(timeoutMs),
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                taskScheduler));
         }
 
         if (logger is not null)
         {
-            flushes.Add(Task.Run(() => logger.Shutdown(timeoutMs), CancellationToken.None));
+            flushes.Add(Task.Factory.StartNew(
+                () => logger.Shutdown(timeoutMs),
+                CancellationToken.None,
+                TaskCreationOptions.DenyChildAttach,
+                taskScheduler));
         }
 
-        return Task.WhenAll(flushes).WaitAsync(TimeSpan.FromMilliseconds(timeoutMs + 500L), CancellationToken.None)
+        return Task.WhenAll(flushes).WaitAsync(
+                TimeSpan.FromMilliseconds(timeoutMs + 500L),
+                timeProvider,
+                CancellationToken.None)
             .ContinueWith(static _ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 }
