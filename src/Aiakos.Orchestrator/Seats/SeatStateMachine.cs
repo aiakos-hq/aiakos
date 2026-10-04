@@ -56,6 +56,9 @@ public static class SeatStateMachine
 
         SeatStep result = input.Body switch
         {
+            HarnessBody harness => HarnessEvent(state, harness, profile, now),
+            SessionObservedBody observed when !observed.MatchesExpected => SessionIdMismatch(state,
+                state.Resumability == ResumabilityValue.None ? EventDisposition.Evidence : EventDisposition.Applied, now),
             LaunchResultBody launch => LaunchResult(state, launch, now),
             StartNotCompletedBody start => StartNotCompleted(state, start, now),
             StopResultBody stop => StopResult(state, stop, now),
@@ -66,11 +69,136 @@ public static class SeatStateMachine
                     Open(SeatVocabulary.FindingSourcesDisagree), NoEffects),
             _ => new SeatStep(state, null, EventDisposition.Evidence, NoTransitions, NoFindings, NoEffects)
         };
+        var findings = result.Findings;
+        if (input.Body is HarnessBody)
+            findings = [.. findings, new FindingChange(SeatVocabulary.FindingActivityStale, false)];
+
         return result with
         {
             State = result.State with { LastEventAt = now },
-            Disposition = result.Disposition ?? EventDisposition.Applied
+            Disposition = result.Disposition ?? EventDisposition.Applied,
+            Findings = findings
         };
+    }
+
+    private static SeatStep HarnessEvent(SeatState state, HarnessBody input, IHarnessStateProfile profile,
+        DateTimeOffset now)
+    {
+        var kind = Enum.IsDefined(input.Kind) && input.Kind != HarnessEventKind.Unspecified
+            ? input.Kind
+            : HarnessEventKind.Other;
+
+        if (kind == HarnessEventKind.SessionEnded)
+        {
+            if (!state.ReadinessSeen)
+                return EmptyEvent(state, EventDisposition.Orphan);
+            if (state.KnownSession is SessionValue.Present or SessionValue.Unknown)
+                return ApplySession(state, SessionValue.Exited, null, "S12", now);
+            return EmptyEvent(state, state.KnownSession == SessionValue.Exited
+                ? EventDisposition.Applied
+                : EventDisposition.Evidence);
+        }
+
+        if (!profile.IsReadiness(kind, input.Attributes))
+            return EmptyEvent(state, kind is HarnessEventKind.Telemetry or HarnessEventKind.Other
+                ? EventDisposition.Applied
+                : EventDisposition.Evidence);
+
+        if (string.Equals(input.NativeSessionId, state.NativeSessionId, StringComparison.Ordinal))
+            return Readiness(state, now);
+
+        if (profile.IsSessionRotation(kind, input.Attributes) &&
+            input.Attributes.TryGetValue("previous_session_id", out var previousSessionId) &&
+            string.Equals(previousSessionId, state.NativeSessionId, StringComparison.Ordinal) &&
+            profile.IsValidNativeSessionId(input.NativeSessionId))
+            return RotateSession(state, input.NativeSessionId, previousSessionId, now);
+
+        return SessionIdMismatch(state, state.Resumability == ResumabilityValue.None
+            ? EventDisposition.Evidence
+            : EventDisposition.Applied, now);
+    }
+
+    private static SeatStep Readiness(SeatState state, DateTimeOffset now)
+    {
+        var ready = state with { ReadinessSeen = true };
+        if (state.KnownSession == SessionValue.Absent)
+            return EmptyEvent(ready, EventDisposition.Evidence);
+
+        if (state.KnownSession == SessionValue.Exited)
+        {
+            var disagree = ApplySession(ready, SessionValue.Unknown, SeatVocabulary.SessionReasonSourcesDisagree,
+                "S11", now);
+            return WithFindings(disagree, Open(SeatVocabulary.FindingSourcesDisagree));
+        }
+
+        var step = ApplySession(ready, SessionValue.Present, null, "S11", now,
+            activityOnPresent: ActivityValue.Idle, activityRule: "A1");
+        return WithFindings(step, ResolveLaunchFindings());
+    }
+
+    private static SeatStep SessionIdMismatch(SeatState state, EventDisposition disposition, DateTimeOffset now)
+    {
+        if (state.Resumability == ResumabilityValue.None)
+            return EmptyEvent(state, disposition);
+
+        var next = state;
+        IReadOnlyList<SeatTransition> transitions = NoTransitions;
+        if (state.Resumability != ResumabilityValue.Unknown)
+        {
+            next = state with
+            {
+                Resumability = ResumabilityValue.Unknown,
+                ResumabilityReason = SeatVocabulary.ResumabilityReasonSessionIdMismatch,
+                ResumabilitySince = now
+            };
+            transitions = [new SeatTransition("resumability", true,
+                SeatVocabulary.ToStored(state.Resumability), SeatVocabulary.ToStored(ResumabilityValue.Unknown),
+                SeatVocabulary.ResumabilityReasonSessionIdMismatch, "U7")];
+        }
+
+        return new SeatStep(next, null, disposition, transitions,
+            Open(SeatVocabulary.FindingSessionIdMismatch), NoEffects);
+    }
+
+    private static SeatStep RotateSession(SeatState state, string nativeSessionId, string previousSessionId,
+        DateTimeOffset now)
+    {
+        var next = state with { NativeSessionId = nativeSessionId, ReadinessSeen = true };
+        var transitions = new List<SeatTransition>();
+        if (state.Resumability != ResumabilityValue.None &&
+            (state.Resumability != ResumabilityValue.FreshOnly || state.ResumabilityReason is not null))
+        {
+            next = next with
+            {
+                Resumability = ResumabilityValue.FreshOnly,
+                ResumabilityReason = null,
+                ResumabilitySince = now
+            };
+            transitions.Add(new SeatTransition("resumability", true,
+                SeatVocabulary.ToStored(state.Resumability), SeatVocabulary.ToStored(ResumabilityValue.FreshOnly),
+                null, "U8"));
+        }
+
+        if (state.KnownSession == SessionValue.Present &&
+            (state.KnownActivity != ActivityValue.Idle || state.KnownActivityReason is not null || state.KnownActivityDetail is not null))
+        {
+            next = next with
+            {
+                KnownActivity = ActivityValue.Idle,
+                KnownActivityReason = null,
+                KnownActivityDetail = null,
+                Activity = state.Overlay is null ? ActivityValue.Idle : state.Activity,
+                ActivityReason = state.Overlay is null ? null : state.ActivityReason,
+                ActivityDetail = state.Overlay is null ? null : state.ActivityDetail,
+                ActivitySince = now
+            };
+            transitions.Add(new SeatTransition("activity", state.Overlay is null,
+                SeatVocabulary.ToStored(state.KnownActivity), SeatVocabulary.ToStored(ActivityValue.Idle), null, "A1"));
+        }
+
+        return new SeatStep(next, null, EventDisposition.Applied, transitions,
+            [new FindingChange(SeatVocabulary.FindingSessionIdMismatch, false)],
+            [new AdoptRotatedSession(nativeSessionId, previousSessionId)]);
     }
 
     private static SeatStep LaunchResult(SeatState state, LaunchResultBody input, DateTimeOffset now) => input.Outcome switch
@@ -224,7 +352,8 @@ public static class SeatStateMachine
     }
 
     private static SeatStep ApplySession(SeatState state, SessionValue session, string? reason, string rule,
-        DateTimeOffset now, ActivityValue? activityOnPresent = null, string? activityReason = null)
+        DateTimeOffset now, ActivityValue? activityOnPresent = null, string? activityReason = null,
+        string activityRule = "R10")
     {
         var transitions = new List<SeatTransition>();
         var changed = state.KnownSession != session || state.KnownSessionReason != reason;
@@ -275,7 +404,7 @@ public static class SeatStateMachine
                     ActivitySince = now
                 };
                 transitions.Add(new SeatTransition("activity", state.Overlay is null,
-                    SeatVocabulary.ToStored(state.KnownActivity), SeatVocabulary.ToStored(activity), derivedReason, "R10"));
+                    SeatVocabulary.ToStored(state.KnownActivity), SeatVocabulary.ToStored(activity), derivedReason, activityRule));
             }
         }
         return new SeatStep(next, null, null, transitions, NoFindings, NoEffects);
