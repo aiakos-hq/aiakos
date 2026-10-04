@@ -82,4 +82,22 @@ expectation). The R14 grammar and the E17 matrix agree.
 - C4/E18 moved to S10 depending on S7 and S9. Startup passes eligible original strings to the one policy implementation; no second grammar and no merge-order implementation choice remain.
 - C4 specifies eligibility separately, and E18 specifies GrpcPort unset for all malformed-address cases. Additional explicit-port-5180 cases with an excluded 5181 health listener verify filtered startup behavior. Port-zero and implicit-port cases no longer claim eligibility at 5180.
 
-Author ticks record the revisions, pending architect re-review.
+Author ticks record the revisions.
+
+## Re-review of the endpoint amendment, round 4
+
+Reviewed at commit a062a95. Stories: 10. Check: ok.
+
+Both findings of round 3 are resolved: C4 and E18 are in S10, which depends on S7 and S9, startup
+passes the original strings to the one policy, and C4 defines eligibility. Each "explicit-5180"
+address of E18 was walked through C4: it is either selected by its parsed port and rejected by
+the policy, or indeterminate and rejected, so the expected failure holds in both cases.
+
+New findings: None.
+
+Noted, not a finding: under C4 a configured URL that `Uri.TryCreate` cannot parse fails startup
+even on another port, so a wildcard health URL such as `http://*:5181` next to a valid link
+endpoint stops the host with the NodeLink error. The brief states this result (fail closed).
+
+Not checked in this round: what `Uri.TryCreate` returns for each E18 address; nothing was run.
+
