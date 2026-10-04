@@ -4,7 +4,7 @@ title: "#9 slice 1 — deterministic orchestrator host disposal"
 issue: 9
 status: approved
 route: impl/senior
-paths: [tests/Aiakos.Orchestrator.Tests/, src/Aiakos.Orchestrator/Program.cs, src/Aiakos.Orchestrator/OrchestratorTelemetry.cs]
+paths: [tests/Aiakos.Orchestrator.Tests/, src/Aiakos.Orchestrator/Program.cs, src/Aiakos.Orchestrator/OrchestratorTelemetry.cs, src/Aiakos.ServiceDefaults/TelemetryShutdownService.cs]
 date: 2026-10-04
 ---
 
@@ -37,8 +37,9 @@ This is historical evidence, not a claimed local reproduction or a known root ca
 | tests/Aiakos.Orchestrator.Tests/Infrastructure/ | Repair test-host lifetime if the diagnosed cause is there |
 | tests/Aiakos.Orchestrator.Tests/*.cs | Focused regression/synchronization fixture if the diagnosed cause needs it |
 | src/Aiakos.Orchestrator/Program.cs, OrchestratorTelemetry.cs | Host-local fix only if diagnosis shows it is necessary |
+| src/Aiakos.ServiceDefaults/TelemetryShutdownService.cs | Maintainer-authorized shutdown-task ownership fix for 9-1-1 only (C2) |
 
-Do not change packages, project files, ServiceDefaults production code, CI or other projects.
+Do not change packages, project files, other ServiceDefaults files, CI or other projects.
 The wider tests directory in paths permits test fixture support, not unrelated test edits.
 Public application APIs remain unchanged. Do not prescribe a speculative fix in advance.
 
@@ -58,13 +59,11 @@ R1. Diagnose the failing lifetime before changing behavior. Identify the concurr
    QA owns these gate runs, and lead uses the commit body in the PR. An unproved hypothesis
    must be called unknown; it is not a diagnosed cause. If the needed production change is
    outside allowed paths, stop and route the missing scope to lead, without modifying it.
-   TelemetryShutdownService.cs is intentionally read-only under the maintainer's narrow
-   authorization, even if it is the diagnosed cause. In that case record the source line and
-   required change, park the queue item on a scope decision, and hand the diagnostic evidence
-   to lead for maintainer-authorized scope amendment. The story is blocked on that decision,
-   not fixed or done; do not substitute an unrelated test workaround or consume a retry to
-   try one. Resume only after the brief permits the required file or lead records a different
-   in-scope fix that addresses the evidenced lifetime boundary.
+   The maintainer authorized TelemetryShutdownService.cs for this story on 2026-10-04,
+   through lead queue qitem-20261004211403-de3aa475. The prior read-only/scope-stop condition
+   for this one file is superseded by C2; no further scope permission is needed to fix it.
+   All other files outside the paths remain prohibited and require an evidenced scope decision.
+
 
 R2. Fix the diagnosed cause in the allowed host or test lifetime. If the dependency itself
    races, make the host/test setup or shutdown deterministic at the actual conflicting
@@ -78,6 +77,59 @@ C1. ActorSystemRunsAfterStartAndTerminatesAfterStop still starts a real Orchestr
    bound and asserts IsCompletedSuccessfully. A cause-driven change may adjust explicit
    start/stop ordering or test-host ownership, but must retain all these observable assertions.
    Other orchestrator tests keep their behavior and remain green.
+
+C2. Implement the diagnosed shutdown ownership correction in TelemetryShutdownService.cs.
+   Source diagnosis at artifacts/diagnoses/9-1-1.md identifies Task.Run shutdown workers and
+   the WaitAsync/empty continuation at original lines 54 and 67-68: lifecycle completion
+   can precede shutdown completion, permitting the DI-owned provider to be disposed concurrently.
+   Keep ownership of every tracer, meter and logger shutdown operation: any operation that
+   entered its provider must complete before lifecycle completion permits DI disposal. Timeout,
+   cancellation and fault paths obey the same guarantee. Observe all entered workers' completion
+   and faults; a timeout or another worker's fault must not release ownership of pending workers.
+   Removing the empty continuation or canceling only WaitAsync is insufficient. Do not dispose
+   providers in the shutdown service, transfer provider ownership out of DI, or disable tracing,
+   metrics/logging, instrumentation or the flush. Preserve the provider timeout exactly:
+   compute timeoutMs = (int)Math.Clamp(ShutdownFlushTimeout.TotalMilliseconds, 0, int.MaxValue),
+   default ShutdownFlushTimeout=2 seconds, and pass timeoutMs to each provider's Shutdown call.
+   Keep timeoutMs + 500L milliseconds (default 2500 ms) as the lifecycle admission/observation
+   deadline, with providers handled concurrently rather than summing three provider bounds.
+   Maintainer decision dated 2026-10-04, lead queue qitem-20261004212216-58da4ef3, explicitly
+   relaxes the earlier hard lifecycle-total bound and no-unbounded-join prohibition:
+   (a) work not yet inside its provider when the admission deadline expires is atomically
+   prevented from entering later; it never touches that DI-owned provider after lifecycle
+   completion, even if a queued worker finally runs. Admission closure and entry must be
+   mutually ordered so a worker cannot check permission before closure then enter after it.
+   (b) already-entered Shutdown work is awaited to completion before DI disposal, even beyond
+   the observation deadline. The service retains ownership on timeout/cancellation/fault;
+   lifecycle completion/disposal cannot proceed under that in-flight work. If a provider never
+   returns, lifecycle shutdown may remain pending; there is deliberately no finite total-return
+   guarantee for this case. The provider timeout value remains unchanged. This is the accepted
+   safety tradeoff, not a claim that synchronous library instrumentation obeys its timeout.
+   This deliberately deviates from docs/specs/0001-solution-skeleton.md R37's bounded final
+   flush/approximately-three-second stop promise: orchestrator and node stop may remain
+   pending indefinitely for an already-entered provider call that never returns. Lead records
+   this maintainer decision, date 2026-10-04, changed admission-versus-final-return semantics
+   and both-host effect in spec 0001's "Changes after acceptance" section in the same amendment
+   PR, before maintainer approval. Lead also updates conflicting R37 shutdown wording there
+   so the accepted spec no longer promises an unconditional total stop bound. This spec record
+   is analysis/approval work by lead, not implementation scope; docs/specs remains outside
+   the implementer's allowed paths. Approval of this amendment includes that recorded deviation.
+   This shared service also changes node shutdown because NodeProgram calls
+   AddAiakosServiceDefaults; the same safe provider-ownership rule applies to node stop.
+   Place focused tests of the shared service's actual lifecycle boundary in the permitted
+   orchestrator tests directory (exercise tracer, meter and logger success/timeout/fault paths).
+   The after gate runs the full tests/Aiakos.Orchestrator.Tests and tests/Aiakos.Node.Tests
+   projects in Release; no node source/test file scope is added. This authority is limited
+   to story 9-1-1 and this service file, not a telemetry redesign.
+   Use R4(b) at the diagnosed real host StoppedAsync-to-provider-disposal boundary: hold
+   shutdown with a barrier/double and advance the lifecycle timeout deterministically. Before
+   must observe disposal overlapping pending shutdown; after must observe no overlap on
+   success, timeout/cancellation and error paths. Independently hold a worker before provider
+   entry until after the admission deadline and prove it never enters afterwards, and hold
+   another worker inside Shutdown beyond that deadline and prove disposal waits until release. The acceptance double records actual operation entry,
+   completion and disposal; it never fabricates a provider exception. Preserve C1 and the
+   configured time bounds. Any testability helper required inside the authorized file must
+   preserve production defaults and provider ownership; no new package or other file scope.
 
 R3. The supporting stress command, separate from gate.sh, runs the entire orchestrator test
    project 200 consecutive times in Release against real Postgres, with the project's normal xUnit class parallelism
@@ -175,11 +227,14 @@ R4. Replace reproduce-first acceptance with a deterministic regression selected 
 
 | `E7` | deterministic R4 gate cannot execute because Docker/container/Postgres is demonstrably unavailable before host startup | final exact line `REGRESSION: infrastructure failure`, exit 2 and raw cause; baseline-only assessment `BASELINE: infrastructure failure`; no boundary reproduction or fix claim; if done reached build, its recorded attempt count is retained and reported to lead before rerun |
 
+| `E8` | real StoppedAsync/provider-disposal boundary; worker held before provider entry through the deadline; worker held inside Shutdown beyond the deadline; success, cancellation and fault paths | pre-entry work is atomically barred from later provider access at timeoutMs+500; already-entered work completes before lifecycle completion/DI disposal even beyond that deadline; zero disposal/shutdown overlap on every path; service does not dispose DI-owned providers; each provider gets the clamped configured timeout (default 2000 ms), concurrent admission/observation deadline timeoutMs+500 (default 2500 ms); no hard final-return bound for an entered call that never returns; shared-service focused tests and full orchestrator/node Release test projects pass; no fabricated exception or instrumentation removal |
+
 ## Tests
 
 T1. Local acceptance gate under artifacts/trials/9-1-1/gate.sh implements R4/E4 and
    records the baseline commit in main-before.txt through tools/story.sh baseline. Author
-   writes it after source diagnosis and before behavior changes; QA confirms a compiled
+   writes it after source diagnosis and before behavior changes; the after gate runs both full
+   orchestrator and node Release test projects plus focused shared-service lifecycle tests. QA confirms a compiled
    boundary failure on main and the after-run result. Supporting R3 stress has a separate
    entry point and output log. No gate may manufacture the library exception or require its
    probabilistic reproduction under route (b).
@@ -194,7 +249,7 @@ T1. Local acceptance gate under artifacts/trials/9-1-1/gate.sh implements R4/E4 
 
 ## Out of scope
 
-Package upgrades, application features, global telemetry redesign, changes to ServiceDefaults,
+Package upgrades, application features, global telemetry redesign, other ServiceDefaults files,
 other test projects, migrations, CI rerun policies, and claims that 200 passes prove races impossible.
 
 The contention reworked baseline saw BrokenMigrationTests fail once at iteration 79 with

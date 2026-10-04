@@ -243,7 +243,10 @@ Specs written in parallel own neighbouring parts. This spec only reserves their 
   the Generic Host's default graceful handling (spike 0003 §4, pitfall 9).
 - **R37** The final telemetry flush on shutdown is bounded (default 2 s), so a stop during which
   the dashboard is already gone still exits in about 3 s rather than the 10 s exporter default
-  (spike 0003 §4).
+  (spike 0003 §4). The bound is on admission: telemetry shutdown work that has not entered its
+  provider by the deadline never enters later, but a provider call that has already entered is
+  awaited before the provider is disposed, so the stop has no finite total bound if such a call
+  never returns (see "Changes after acceptance", 2026-10-04).
 - **R38** Single-instance lock: at startup the node takes an exclusive lock on
   `$AIAKOS_HOME/node.lock` and writes its pid into it. If the lock is held, it exits with code 3
   and a message that names the lock file and the holder's pid. It never kills the holder: the lock
@@ -673,7 +676,9 @@ Dapper conventions (`Aiakos.Data`):
   exporter (the released tool configures its own in #15).
 - Health: registers a `self` liveness check (tag `live`).
 - Shutdown bound (R37): the providers are disposed from an `IHostedLifecycleService.StoppedAsync`
-  with `ForceFlush(timeout)`, default 2 s, setting `Aiakos:Telemetry:ShutdownFlushTimeout`.
+  with `ForceFlush(timeout)`, default 2 s, setting `Aiakos:Telemetry:ShutdownFlushTimeout`. The
+  shutdown service keeps ownership of its shutdown work until it completes (see "Changes after
+  acceptance", 2026-10-04).
 
 ### Tests
 
@@ -1003,3 +1008,17 @@ recommendation in the review of PR #26; they are folded into the requirements an
     `SERVING`; any other status, including `NOT_SERVING` on the watch stream, counts as unavailable.
   - *Telemetry shutdown:* providers are shut down with `Shutdown(timeout)`, which flushes first,
     in parallel, and are resolved when the service is created.
+
+- **2026-10-04 — telemetry shutdown ownership (brief 9-1, issue #103).** The flaky
+  `StartupTests.ActorSystemRunsAfterStartAndTerminatesAfterStop` failure
+  (`InvalidOperationException: Collection was modified` in `TracerProviderSdk.Dispose`) was
+  traced to `TelemetryShutdownService`: its detached shutdown worker could outlive the lifecycle
+  wait, so the host disposed the provider while `OnShutdown` was still clearing the same list.
+  The maintainer decided on 2026-10-04 that the service keeps ownership: shutdown work that has
+  not entered its provider by `timeoutMs + 500` never enters later, and a call already inside the
+  provider is awaited before disposal even beyond that deadline. The provider timeout value is
+  unchanged. This changes R37 from "stop in about 3 s" to an admission bound, so the orchestrator
+  and the node (both call `AddAiakosServiceDefaults`) may stay in stop without a finite limit if
+  a synchronous provider call never returns. This is the accepted safety trade-off. Only
+  `src/Aiakos.ServiceDefaults/TelemetryShutdownService.cs` is added to the files story 9-1-1 may
+  change. No ADR.

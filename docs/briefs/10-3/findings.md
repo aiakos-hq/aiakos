@@ -142,3 +142,28 @@ New findings: None.
 
 Not checked in this round: nothing was run; the list of round 5 still applies.
 
+
+## Server protocol-clock amendment (review pending)
+
+Lead queue qitem-20261004212849-70e5a0f7 records maintainer authorization dated 2026-10-04 for explicit R4 injected-clock timeout and a limited further S3 fix. R4/E4 now require provider-backed Hello timing and timer cleanup. R5 UTC, R6 event-driven shutdown/replacement, R7 initial/reset liveness, R8 pure arithmetic, R9 absence of an added server deadline, C5/E19 real external teardown bound and R12 transport clocks are explicitly classified. S3 acceptance already advances the virtual clock and needs no code change; future S4 E7 tests must use the same provider assumption. No product edits or acceptance run by author.
+
+## Review of the server protocol-clock amendment, round 7
+
+Reviewed at commit 3d15fa1. Stories: 10. Check: ok.
+
+Read: the amendment commit (R4, R5, R6, R7, R8, R9, C5, E4, E7, E19, the audit paragraph and
+the S3 and S4 notes). The changes add no item and move none. R4 and R7 now say that the Hello
+deadline and every liveness deadline are measured and scheduled by the injected `TimeProvider`,
+and C5 and E19 keep host and actor-system teardown on real time; the two are stated apart and
+do not contradict each other. The sentences added to R8 and R9 describe stories that are
+already merged (S5, S6) and change no expected output of theirs: the merged
+`NodeReconnectDelay` holds no clock or timer.
+
+New findings: None.
+
+Not checked in this round:
+
+- The maintainer's authorization (lead queue item named in the author's note) and the failed attempts of story 10-3-3 (issue #116, `blocked`) that led to it.
+- That a `TimeProvider` double without a new package can drive both `CancellationTokenSource(TimeSpan, TimeProvider)` and the proxy's timers as E4 and E7 need; nothing was built or run.
+- `artifacts/trials/` (acceptance tests), by role.
+
