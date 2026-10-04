@@ -88,9 +88,9 @@ inspection in the merged `SharedReferencePaths.cs`. Ran a .NET 10 probe on this 
 
 ### Findings
 
-- [ ] S6 (context-gap): R14 requires telling a FIFO, socket, character device and block device from a regular file without opening it, but the managed file API cannot (probe above: all are `Normal`), and the brief forbids packages and external programs and names no mechanism, so the implementer has to find and choose a native call alone. Fix: name the mechanism in R14 (for example a P/Invoke of libc `stat`/`statx` on Unix, with the result on Windows stated), or what to do where the type cannot be determined.
-- [ ] S3 (context-gap): R14 covers `File`-kind resolution and `agent.yaml`, but R5 enumerates a skill directory itself and says only "all regular files", so a FIFO, socket or device inside a skill directory (for example `SKILL.md` as a FIFO) has no stated result, and an implementation that reads every non-directory entry waits for a writer. Fix: state the result in R5 (never opened, and which diagnostic at the skill scalar), add the input to SKILL-links, and name the tie to the classification that S6 builds in the notes of S3 and S6.
-- [ ] S6 (context-gap): T6 requires a "child Load probe" that is killed after five seconds, while the brief allows no new project and no process access, and the test project has no executable that could run `Load` in a child process. Fix: say in T6 how the probe runs (for example `Load` on a background task with a five-second wait), or name the executable.
+- [x] S6 (context-gap): R14 requires telling a FIFO, socket, character device and block device from a regular file without opening it, but the managed file API cannot (probe above: all are `Normal`), and the brief forbids packages and external programs and names no mechanism, so the implementer has to find and choose a native call alone. Fix: name the mechanism in R14 (for example a P/Invoke of libc `stat`/`statx` on Unix, with the result on Windows stated), or what to do where the type cannot be determined.
+- [x] S3 (context-gap): R14 covers `File`-kind resolution and `agent.yaml`, but R5 enumerates a skill directory itself and says only "all regular files", so a FIFO, socket or device inside a skill directory (for example `SKILL.md` as a FIFO) has no stated result, and an implementation that reads every non-directory entry waits for a writer. Fix: state the result in R5 (never opened, and which diagnostic at the skill scalar), add the input to SKILL-links, and name the tie to the classification that S6 builds in the notes of S3 and S6.
+- [x] S6 (context-gap): T6 requires a "child Load probe" that is killed after five seconds, while the brief allows no new project and no process access, and the test project has no executable that could run `Load` in a child process. Fix: say in T6 how the probe runs (for example `Load` on a background task with a five-second wait), or name the executable.
 
 ## Not checked, round 4
 
@@ -98,3 +98,9 @@ inspection in the merged `SharedReferencePaths.cs`. Ran a .NET 10 probe on this 
 - Whether a P/Invoke of `stat`/`statx` is acceptable for the consumers of `Aiakos.Spec` (trimming, AOT).
 - Windows behaviour for the special-file cases.
 
+
+## Author resolutions, amendment round 4
+
+1. R14 specifies Linux libc statx buffer/type fields, Windows attributes, and fail-closed AIK3001 for unsupported classification. No production subprocess/package.
+2. R5 defines special skill entries as scalar AIK3001 with no open/snapshot; PATH-special owns those new cases in S6, SKILL-links references them. S6 now depends S3 and shares classification with its enumerator, retaining R7 precedence.
+3. T6 uses Task.Run with a five-second Task.WhenAny timeout; test-only FIFO writer releases a blocked read after failure for cleanup, without a child executable.
