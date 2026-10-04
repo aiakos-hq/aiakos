@@ -2,7 +2,7 @@
 id: 10-3
 title: "#10 slice 3 — authenticated node link"
 issue: 10
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Orchestrator/Link/, src/Aiakos.Orchestrator/AiakosOptions.cs, src/Aiakos.Orchestrator/Program.cs, src/Aiakos.Node/Link/, src/Aiakos.Node/OrchestratorConnection.cs, src/Aiakos.Node/NodeProgram.cs, src/Aiakos.Node/NodeOptions.cs, tests/Aiakos.Orchestrator.Tests/Link/, tests/Aiakos.Node.Tests/Link/, tests/Aiakos.Node.Tests/OrchestratorConnectionTests.cs, tests/Aiakos.Node.Tests/NodeOptionsTests.cs]
 date: 2026-10-04
