@@ -2,7 +2,7 @@
 id: 9-1
 title: "#9 slice 1 — deterministic orchestrator host disposal"
 issue: 9
-status: draft
+status: approved
 route: impl/senior
 paths: [tests/Aiakos.Orchestrator.Tests/, src/Aiakos.Orchestrator/Program.cs, src/Aiakos.Orchestrator/OrchestratorTelemetry.cs, src/Aiakos.ServiceDefaults/TelemetryShutdownService.cs]
 date: 2026-10-04
