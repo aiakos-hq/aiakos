@@ -105,6 +105,15 @@ C2. Implement the diagnosed shutdown ownership correction in TelemetryShutdownSe
    returns, lifecycle shutdown may remain pending; there is deliberately no finite total-return
    guarantee for this case. The provider timeout value remains unchanged. This is the accepted
    safety tradeoff, not a claim that synchronous library instrumentation obeys its timeout.
+   This deliberately deviates from docs/specs/0001-solution-skeleton.md R37's bounded final
+   flush/approximately-three-second stop promise: orchestrator and node stop may remain
+   pending indefinitely for an already-entered provider call that never returns. Lead records
+   this maintainer decision, date 2026-10-04, changed admission-versus-final-return semantics
+   and both-host effect in spec 0001's "Changes after acceptance" section in the same amendment
+   PR, before maintainer approval. Lead also updates conflicting R37 shutdown wording there
+   so the accepted spec no longer promises an unconditional total stop bound. This spec record
+   is analysis/approval work by lead, not implementation scope; docs/specs remains outside
+   the implementer's allowed paths. Approval of this amendment includes that recorded deviation.
    This shared service also changes node shutdown because NodeProgram calls
    AddAiakosServiceDefaults; the same safe provider-ownership rule applies to node stop.
    Place focused tests of the shared service's actual lifecycle boundary in the permitted

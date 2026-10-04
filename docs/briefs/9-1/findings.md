@@ -142,10 +142,14 @@ test projects with focused tests of the shared service.
 
 ### Findings
 
-- [ ] S1 (context-gap): the decision changes what spec 0001 R37 promises ("a stop during which the dashboard is already gone still exits in about 3 s"): an entered provider call that does not return now holds the stop of the orchestrator and of the node without a bound, but the brief does not name R37, and `docs/specs/` is outside `paths`, so the story would merge code that deviates from an accepted spec with no item that records it. Fix: `author` names the R37 deviation in C2, and says who records it in spec 0001 and when (for example `lead`, as a "changes after acceptance" entry in the pull request of this amendment).
+- [x] S1 (context-gap): the decision changes what spec 0001 R37 promises ("a stop during which the dashboard is already gone still exits in about 3 s"): an entered provider call that does not return now holds the stop of the orchestrator and of the node without a bound, but the brief does not name R37, and `docs/specs/` is outside `paths`, so the story would merge code that deviates from an accepted spec with no item that records it. Fix: `author` names the R37 deviation in C2, and says who records it in spec 0001 and when (for example `lead`, as a "changes after acceptance" entry in the pull request of this amendment).
 
 ## Not checked, round 6
 
 - The maintainer's decision itself (lead queue item named in C2); taken from the author's text.
 - `artifacts/diagnoses/9-1-1.md`, as in round 5; nothing was built or run.
 
+
+## R37 deviation resolution
+
+C2 names spec 0001 R37's changed stop guarantee and requires lead to record the 2026-10-04 maintainer decision and both-host effects in Changes after acceptance, correcting conflicting R37 shutdown wording in the same amendment PR before approval. Spec edits are lead's analysis/approval work, not implementation scope. Author tick records this responsibility/time assignment pending architect confirmation.
