@@ -50,3 +50,54 @@ New findings: None.
 Not checked in this round, in addition to the list above:
 
 - That `ConfigureEndpointDefaults` gives a loopback `IPEndPoint` for a `http://localhost:<port>` URL, which R3 now relies on.
+
+## Maintainer-authorized endpoint amendment (review pending)
+
+Source: artifacts/trials/10-3-1/review.md first two backlog entries; lead queue qitem-20261004094038-19747b9a reports maintainer authorization.
+
+R14/C3/E17 and S9 amend the already merged pure policy. C4/E18 add the same checks to startup S7 without an invalid forward dependency on S9. Literal forms accepted/rejected and port-zero choice are exact in the amended brief. Slice/index status is draft pending architect review. Existing resolved findings remain resolved; this amendment needs a fresh review.
+
+## Review of the endpoint amendment, round 3
+
+Reviewed at commit fbca99e. Stories: 9. Check: ok.
+
+Read: R14, C3, C4, E17, E18, the S7 and S9 blocks, and the merged `NodeLinkEndpointPolicy` with
+its tests (no merged test asserts an address that R14 now rejects, so C3 changes no merged
+expectation). The R14 grammar and the E17 matrix agree.
+
+### Findings
+
+- [x] S7 (context-gap): C4 tells the S7 implementer to reuse the tightened policy "if S9 has already merged" and otherwise to write the same grammar a second time at startup, so the code depends on the merge order, and when S7 merges first the startup copy stays beside the policy for good because S9 is told to do no startup wiring. Fix: take C4 and E18 out of S7 into a last story that depends on S7 and S9, and reduce C4 to "startup passes each configured address string unchanged to the policy".
+- [x] S7 (context-gap): E18 does not give `GrpcPort`, and R3 validates only the addresses "on that port" when it is set, without saying how the port of an address that fails the grammar is found: with `GrpcPort=5180` and a valid `http://127.0.0.1:5180` beside `http://127.0.0.1:0` or `http://127.0.0.1#@example.test`, the bad address is not on the port, is not validated and the host starts, where E18 expects a failure; "every malformed address is rejected" is not the answer either, because E15 needs the non-loopback health address to pass. Fix: say in C4 how eligibility is decided for an address the grammar rejects, and give the `GrpcPort` setting and the other configured addresses for the E18 cases.
+
+## Not checked, round 3
+
+- The maintainer's authorization of the amendment (reported by `lead`) and `artifacts/trials/10-3-1/review.md`, which the amendment cites; not read, by role.
+- That `tools/story.sh check` forbids a dependency on a later-numbered story, as the author reports.
+- What Kestrel itself does with each E18 address.
+
+
+## Endpoint amendment resolution
+
+- C4/E18 moved to S10 depending on S7 and S9. Startup passes eligible original strings to the one policy implementation; no second grammar and no merge-order implementation choice remain.
+- C4 specifies eligibility separately, and E18 specifies GrpcPort unset for all malformed-address cases. Additional explicit-port-5180 cases with an excluded 5181 health listener verify filtered startup behavior. Port-zero and implicit-port cases no longer claim eligibility at 5180.
+
+Author ticks record the revisions.
+
+## Re-review of the endpoint amendment, round 4
+
+Reviewed at commit a062a95. Stories: 10. Check: ok.
+
+Both findings of round 3 are resolved: C4 and E18 are in S10, which depends on S7 and S9, startup
+passes the original strings to the one policy, and C4 defines eligibility. Each "explicit-5180"
+address of E18 was walked through C4: it is either selected by its parsed port and rejected by
+the policy, or indeterminate and rejected, so the expected failure holds in both cases.
+
+New findings: None.
+
+Noted, not a finding: under C4 a configured URL that `Uri.TryCreate` cannot parse fails startup
+even on another port, so a wildcard health URL such as `http://*:5181` next to a valid link
+endpoint stops the host with the NodeLink error. The brief states this result (fail closed).
+
+Not checked in this round: what `Uri.TryCreate` returns for each E18 address; nothing was run.
+

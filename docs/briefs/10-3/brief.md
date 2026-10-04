@@ -2,7 +2,7 @@
 id: 10-3
 title: "#10 slice 3 — authenticated node link"
 issue: 10
-status: approved
+status: draft
 route: impl
 paths: [src/Aiakos.Orchestrator/Link/, src/Aiakos.Orchestrator/AiakosOptions.cs, src/Aiakos.Orchestrator/Program.cs, src/Aiakos.Node/Link/, src/Aiakos.Node/OrchestratorConnection.cs, src/Aiakos.Node/NodeProgram.cs, src/Aiakos.Node/NodeOptions.cs, tests/Aiakos.Orchestrator.Tests/Link/, tests/Aiakos.Node.Tests/Link/, tests/Aiakos.Node.Tests/OrchestratorConnectionTests.cs, tests/Aiakos.Node.Tests/NodeOptionsTests.cs]
 date: 2026-10-04
@@ -134,6 +134,12 @@ C1. The earlier spec-0001 connection tests now host NodeLinkService-compatible l
 
 C2. Replace NodeOptionsTests.NodeTokenIsNotRequired with NodeTokenIsRequired, expecting validation failure with exactly "AIAKOS_NODE_TOKEN is required." Add missing/blank NodeToken to MissingRequiredVariableExits2AndNamesIt. Give AbsoluteHttpUrlsAreValid a nonblank token so it still isolates URL validation. No other URL/home/identity validation result changes.
 
+R14. Tighten IsAllowed to check the literal address before any URI normalization: the entire string must be an ASCII `http://<host>` optionally followed by `:<port>`, with scheme and localhost matched ordinal-ignore-case. Host is only `localhost`, exactly `[::1]`, or four decimal IPv4 octets with first octet exactly `127`, each other octet 0–255 and no leading zero unless the whole octet is `0`. Port, if present, is decimal 1–65535 with no leading zero. Missing port means 80. Reject all user info (`@`), paths (including a trailing `/`), query, fragment, whitespace anywhere, percent escapes, IPv6 scope IDs and alternate IPv4 numeric forms; do not strip or normalize these into accepted input. Port 0 is rejected for production link configuration. Invalid or null input returns false, without an exception. Validate continues to throw the fixed R3 error. No DNS lookup or listener is opened by the pure policy.
+
+C3. The already merged S1 policy becomes stricter under R14. The address fixtures of E17 that were previously accepted must now be rejected; the canonical E3 allowed addresses remain accepted. This amendment changes no credential behavior and keeps the policy error text unchanged.
+
+C4. After S7 startup wiring and S9 pure-policy correction exist, route every eligible configured URL string unchanged to NodeLinkEndpointPolicy.Validate before Kestrel binds. Do not trim, rewrite, normalize or duplicate the policy grammar at startup. Eligibility only selects listeners: when GrpcPort is absent all configured strings are eligible; when GrpcPort is set, use Uri.TryCreate with absolute HTTP scheme to read the configured port (including implicit port 80), and select strings whose parsed port equals GrpcPort. A string whose scheme/port cannot be determined is indeterminate and fails with the fixed policy error, rather than silently skipping it. A determinable different-port HTTP health listener is excluded. Never substitute the parsed URI string for the original selected string. A selected address failing Validate stops startup before any listener binds with "NodeLink requires an explicit loopback HTTP endpoint." Preserve R3's additional resolved-endpoint check, TestServer exemption and gRPC-port mapping. This correction is a final integration story depending on S7 and S9.
+
 ## Expected outputs: exact text
 
 | ID | Input | Expected |
@@ -156,6 +162,9 @@ C2. Replace NodeOptionsTests.NodeTokenIsNotRequired with NodeTokenIsRequired, ex
 
 | `E15` | production Kestrel configured urls=http://0.0.0.0:5180 with GrpcPort=5180; equivalent TestServer host; Kestrel loopback link port with separate non-loopback HTTP health port | Kestrel fails before binding with "NodeLink requires an explicit loopback HTTP endpoint."; TestServer starts; loopback link plus health listener starts and NodeLink is restricted to link port |
 | `E16` | two received envelopes with distinct valid W3C parents; invalid/missing parent under an unrelated ambient Connect activity; sends with/without an ambient W3C activity | source names Aiakos.Orchestrator.Link / Aiakos.Node.Link, Consumer activity node-link.receive: matching trace and parent span for each valid parent, root for invalid/missing; sent traceparent/tracestate exactly ambient Id/TraceStateString or both empty |
+
+| `E17` | IsAllowed on `http://user:pw@127.0.0.1:5180`; `http://example.test@127.0.0.1:5180`; `http://127.0.0.1#@example.test`; `http://127.0.0.1:5180/`; `http://127.0.0.1:5180/path`; `http://127.0.0.1:5180?x=1`; `http://127.0.0.1:5180#x`; ` http://127.0.0.1:5180`; `http://127.0.0.1:5180\n`; `http://[::1%1]:5180`; `http://127.1:5180`; `http://2130706433:5180`; `http://0x7f.0.0.1:5180`; `http://127.0.0.1:0`; `http://127.00.0.1:5180`; `http://127.0.0.1:05180`; null; canonical `http://127.0.0.1:5180`, `http://localhost:5180`, `http://[::1]:5180`, `http://127.2.3.4`, `HTTP://LOCALHOST:5180` | false for every rejected/null input; true for every canonical input; Validate on each rejected input throws "NodeLink requires an explicit loopback HTTP endpoint." |
+| `E18` | production Kestrel configured with each rejected address `http://user:pw@127.0.0.1:5180`; `http://example.test@127.0.0.1:5180`; `http://127.0.0.1#@example.test`; `http://127.0.0.1:5180/`; `http://127.0.0.1:5180/path`; `http://127.0.0.1:5180?x=1`; `http://127.0.0.1:5180#x`; ` http://127.0.0.1:5180`; `http://127.0.0.1:5180\n`; `http://[::1%1]:5180`; `http://127.1:5180`; `http://2130706433:5180`; `http://0x7f.0.0.1:5180`; `http://127.0.0.1:0`; `http://127.00.0.1:5180`; `http://127.0.0.1:05180` (literal trailing LF in the escaped `\n` case), GrpcPort unset so every configured string is eligible; canonical loopback endpoints; TestServer; additionally GrpcPort=5180 with each explicit-5180 rejected address beside canonical non-loopback health URL http://0.0.0.0:5181 | every rejected configuration fails before binding with "NodeLink requires an explicit loopback HTTP endpoint."; canonical loopback starts; TestServer remains exempt; explicit-5180 malformed link URLs fail with the same error, while a canonical loopback 5180 link plus non-loopback 5181 health URL starts; no-port or port-0 URLs are tested with GrpcPort unset, not asserted to be selected under GrpcPort=5180 |
 
 ## Tests
 

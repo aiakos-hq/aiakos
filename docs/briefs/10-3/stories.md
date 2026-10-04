@@ -61,3 +61,19 @@ owns: R13
 outputs: E16
 tests: -
 notes: R13 modifies both established stream loops and all outgoing envelope writes. Use exact source and activity names, explicit parent contexts and the invalid-parent root cases in E16. G1 forbids payload or credential trace content.
+
+## S9: Reject ambiguous literal endpoint addresses
+goal: The already merged pure loopback policy rejects URL forms that URI normalization accepts but Kestrel interprets differently.
+depends: S1
+owns: R14, C3
+outputs: E17
+tests: -
+notes: R14/C3 amend R3 policy in S1; retain canonical E3 behavior and exact Validate error. S10 integrates this policy at startup after both S7 and S9 merge. No startup wiring is implemented in S9.
+
+## S10: Integrate strict endpoint policy at startup
+goal: Production startup passes original eligible URL strings to the strict policy and rejects ambiguous listener forms before binding.
+depends: S7, S9
+owns: C4
+outputs: E18
+tests: -
+notes: S7 provides R12 wiring and S9 provides R14 policy. C4 changes startup to use that policy once, with no grammar copy or merge-order branch. E18 distinguishes the unset-GrpcPort all-address matrix from selected 5180 link URLs and excluded 5181 health listeners. No pure-policy change is implemented here.
