@@ -50,3 +50,9 @@ New findings: None.
 Not checked in this round, in addition to the list above:
 
 - That `ConfigureEndpointDefaults` gives a loopback `IPEndPoint` for a `http://localhost:<port>` URL, which R3 now relies on.
+
+## Maintainer-authorized endpoint amendment (review pending)
+
+Source: artifacts/trials/10-3-1/review.md first two backlog entries; lead queue qitem-20261004094038-19747b9a reports maintainer authorization.
+
+R14/C3/E17 and S9 amend the already merged pure policy. C4/E18 add the same checks to startup S7 without an invalid forward dependency on S9. Literal forms accepted/rejected and port-zero choice are exact in the amended brief. Slice/index status is draft pending architect review. Existing resolved findings remain resolved; this amendment needs a fresh review.

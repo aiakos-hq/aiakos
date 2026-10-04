@@ -49,10 +49,10 @@ notes: R9 uses R11 source and R8 delay. R9/R10 share one call lifetime/writer; C
 ## S7: Production registration and transport settings
 goal: The production hosts serve and use the node link with loopback enforcement, message limits and keepalive.
 depends: S1, S2, S3, S4, S5, S6
-owns: R12
-outputs: E12, E15
+owns: R12, C4
+outputs: E12, E15, E18
 tests: -
-notes: R12 activates R3 startup address enforcement, R11 replaceable defaults and R9/R10 client registrations. E15 verifies configured non-loopback Kestrel rejection before bind and TestServer exemption. Existing database fixture verifies production registration; slim hosts cover remaining protocol cases.
+notes: R12 activates R3 startup address enforcement, R11 replaceable defaults and R9/R10 client registrations. E15 verifies configured non-loopback Kestrel rejection before bind and TestServer exemption. C4/E18 add the full literal-address rejection matrix, independent of S9 ordering; C4 repeats the full grammar and E18 repeats the complete fixtures, so the startup story is self-contained. Existing database fixture verifies production registration; slim hosts cover remaining protocol cases.
 
 ## S8: Per-message trace context
 goal: Both link directions propagate ambient W3C context and start named per-envelope receive activities.
@@ -61,3 +61,11 @@ owns: R13
 outputs: E16
 tests: -
 notes: R13 modifies both established stream loops and all outgoing envelope writes. Use exact source and activity names, explicit parent contexts and the invalid-parent root cases in E16. G1 forbids payload or credential trace content.
+
+## S9: Reject ambiguous literal endpoint addresses
+goal: The already merged pure loopback policy rejects URL forms that URI normalization accepts but Kestrel interprets differently.
+depends: S1
+owns: R14, C3
+outputs: E17
+tests: -
+notes: R14/C3 amend R3 policy in S1; retain canonical E3 behavior and exact Validate error. C4/E18 in S7 independently require the same startup protection, so S9 can merge before or after S7 without renumbering approved stories. No startup wiring is implemented in S9.
