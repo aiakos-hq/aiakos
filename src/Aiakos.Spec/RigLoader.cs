@@ -30,46 +30,41 @@ public static class RigLoader
 
                 foreach (var seat in seats.Items)
                 {
+                    if (!IsAgentSeat(seat)) continue;
                     var reference = Values(seat, "agent_ref").FirstOrDefault();
-                    if (reference is not { Kind: YamlNodeKind.Scalar, IsNull: false, Value: { } text } || !text.StartsWith("local:", StringComparison.Ordinal))
+                    if (reference is not { Kind: YamlNodeKind.Scalar, IsNull: false, Value: { } text })
                     {
                         continue;
                     }
 
-                    // The agent file's diagnostics carry its path. A credential-like agent_ref is
-                    // reported as AIK4020 on the seat and must not reach the output through a path.
-                    var agentDirectory = text["local:".Length..];
-                    if (IsUnsafeAgentPath(agentDirectory) || SemanticValidator.IsCredentialLike(text))
+                    if (text.StartsWith("path:", StringComparison.Ordinal) || text.StartsWith("git:", StringComparison.Ordinal) ||
+                        !text.StartsWith("local:", StringComparison.Ordinal) || text.Length == "local:".Length)
                     {
                         continue;
                     }
+                    // Semantic validation emits the single AIK4020 for this reference later.
+                    if (SemanticValidator.IsCredentialLike(text)) continue;
 
-                    string directoryPath;
-                    try
-                    {
-                        directoryPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(root, agentDirectory)));
-                    }
-                    catch (ArgumentException)
-                    {
-                        continue;
-                    }
-                    catch (NotSupportedException)
-                    {
-                        continue;
-                    }
-                    catch (IOException)
-                    {
-                        continue;
-                    }
+                    var source = new ReferenceSource("rig.yaml", Math.Max(1, (int)reference.Mark.Line), Math.Max(1, (int)reference.Mark.Column));
+                    var pathDiagnostics = new List<Diagnostic>();
+                    var agentDirectory = SharedReferencePaths.Resolve(root, "", text["local:".Length..],
+                        SharedReferenceKind.Directory, source, pathDiagnostics);
+                    diagnostics.AddRange(pathDiagnostics);
+                    if (agentDirectory is null) continue;
 
                     // One agent directory may back several seats, under different spellings; it is loaded once.
-                    if (!agentsByDirectory.TryGetValue(directoryPath, out var agentDocument))
+                    if (!agentsByDirectory.TryGetValue(agentDirectory.AbsolutePath, out var agentDocument))
                     {
-                        var agentFile = Path.Combine(directoryPath, "agent.yaml");
-                        var agentDisplayPath = GetDisplayPath(root, agentFile);
-                        var agentNode = LoadFile(agentFile, agentDisplayPath, RigFileKind.Agent, diagnostics, out var agentParsed);
+                        pathDiagnostics.Clear();
+                        var agentFile = SharedReferencePaths.Resolve(root, agentDirectory.Path, "agent.yaml",
+                            SharedReferenceKind.File, source, pathDiagnostics);
+                        diagnostics.AddRange(pathDiagnostics);
+                        if (agentFile is null) continue;
+
+                        var agentDisplayPath = agentFile.Path;
+                        var agentNode = LoadFile(agentFile.AbsolutePath, agentDisplayPath, RigFileKind.Agent, diagnostics, out var agentParsed);
                         agentDocument = new SemanticDocument(agentNode, agentDisplayPath, agentParsed);
-                        agentsByDirectory.Add(directoryPath, agentDocument);
+                        agentsByDirectory.Add(agentDirectory.AbsolutePath, agentDocument);
                         agentDocuments.Add(agentDocument);
                     }
 
@@ -205,14 +200,12 @@ public static class RigLoader
         }
     }
 
-    private static bool IsUnsafeAgentPath(string path)
+    private static bool IsAgentSeat(YamlNode seat)
     {
-        if (string.IsNullOrEmpty(path) || Path.IsPathRooted(path) || path.Contains('\\', StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return path.Split('/').Any(segment => segment == "..");
+        var kind = Values(seat, "kind").FirstOrDefault();
+        if (kind is null) return true;
+        if (kind is not { Kind: YamlNodeKind.Scalar, IsNull: false, Value: { } value }) return false;
+        return value == "agent";
     }
 
     private static string GetDisplayPath(string root, string path)
