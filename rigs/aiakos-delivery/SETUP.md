@@ -25,20 +25,28 @@ logins, per-seat permission choices and OpenRig's own state (`~/.openrig`).
    ```
 
    The script installs nothing. It lists what is missing.
-6. Start the rig once (`rig up rigs/aiakos-delivery/rig.yaml`), then do
-   [Running unattended](#running-unattended), which needs the seats to exist.
+6. Start the rig for the first time, then do [Running unattended](#running-unattended):
+
+   ```bash
+   rig up rigs/aiakos-delivery/rig.yaml
+   ```
 
 ## Every day
 
 ```bash
 cd ~/aiakos
-rig up rigs/aiakos-delivery/rig.yaml     # start, or resume after a stop
+rig up aiakos-delivery --existing        # start the rig that was stopped; sessions resume
 rig tui                                  # the board; "terminal rig:aiakos-delivery" opens herdr
 rig down aiakos-delivery                 # stop; sessions are kept for the next start
 ```
 
 Give the team work by telling the `lead` seat which issue or slice to take
 (`rig send lead-lead@aiakos-delivery "..."`, or type in its terminal).
+
+**Start by name, not from the file.** `rig up rigs/aiakos-delivery/rig.yaml` on a stopped rig
+does not resume it: it creates a new rig with new seats and archives the old one. The new seats
+have no conversation history and no per-seat settings. Use the file only for the first start
+and after `rig.yaml` changed (see [After a change to rig.yaml](#after-a-change-to-rigyaml)).
 
 ## Running unattended
 
@@ -53,78 +61,91 @@ anything your WSL user can, including `/mnt/c`, the `gh` token and key files. A 
 auto mode runs commands without asking, behind Claude Code's own safety check. Merging stays
 blocked by branch protection in both cases.
 
-### 1. Codex seats: full access (in the repository)
+### 1. Codex seats: full access (in the repository, already there)
 
-In `rig.yaml`, add this line to each Codex member (`author`, `author2`, `impl`, `senior`, `qa`),
-at the same indent as its `model:` line:
+Each Codex member in `rig.yaml` (`author`, `author2`, `impl`, `senior`, `qa`) has this line:
 
 ```yaml
         permission_policy: builtin:yolo
 ```
 
-Check it before starting:
+Nothing to do on a new machine. To check:
 
 ```bash
-rig spec validate rigs/aiakos-delivery/rig.yaml
 rig policy permissions current --spec rigs/aiakos-delivery/rig.yaml
-```
-
-The second command must list those five members with `builtin:yolo` and
-`launch_posture=full_bypass`. Commit the change, so
-that the next machine has it. After the next start, each Codex seat runs with
-`-s danger-full-access -a never`:
-
-```bash
 ps -eo args | grep "[c]odex --no-daemon" | grep aiakos
 ```
 
-### 2. Claude seats: auto mode (on this machine)
+The first command lists the five members with `launch_posture=full_bypass`. The second, with
+the rig running, shows `-s danger-full-access -a never` on every Codex seat.
 
-This choice is stored by OpenRig per seat, not in the repository, so it is done once on every
-machine, after the first `rig up`:
+### 2. Claude seats: auto mode (per rig start from the file)
+
+`rig.yaml` has no field for Claude's auto mode. OpenRig stores it on the seat, so it has to be
+set again whenever the seats are new: on a new machine, and after every start from the file.
+
+With the rig running, record the choice. OpenRig takes the caller from the environment, so a
+plain shell must say who it is:
 
 ```bash
 for seat in lead-lead analysis-architect verify-reviewer; do
-  rig seat set-permissions "$seat@aiakos-delivery" --mode auto --reason "Unattended delivery rig"
+  OPENRIG_SESSION_NAME=operator-human@kernel rig seat set-permissions "$seat@aiakos-delivery" \
+    --mode auto --reason "Unattended delivery rig"
 done
 ```
 
-It applies at the next launch:
+Without `OPENRIG_SESSION_NAME` the command answers
+`Sender identity, mode and reason are required`.
+
+Check that it was recorded (`selectionState` must not be `inherit`):
 
 ```bash
-rig down aiakos-delivery && rig up rigs/aiakos-delivery/rig.yaml
+rig seat status lead-lead@aiakos-delivery --json | grep -A3 '"permissions"'
 ```
 
-Check that the seats were launched in auto mode:
+The choice applies when a seat is launched, so restart the same rig by name:
+
+```bash
+rig down aiakos-delivery && rig up aiakos-delivery --existing
+```
+
+Then check how the Claude seats were launched:
 
 ```bash
 ps -eo args | grep "[c]laude --permission-mode" | grep aiakos-delivery
 ```
 
-Every line must say `--permission-mode auto`. If `set-permissions` refuses `auto` (it depends on
-the Claude Code version OpenRig finds), either switch each Claude seat by hand after a start
-(Shift+Tab in its terminal until it shows "auto mode on"), or use `--mode full_bypass`, which
-skips all prompts and has no safety check.
+Every line must say `--permission-mode auto`.
+
+**If a line still says `acceptEdits`**, the stored choice was not used. Switch that seat by
+hand: open its terminal and press Shift+Tab until it shows "auto mode on". This lasts until the
+seat is launched again. The restart by name and the check above have not been confirmed on
+OpenRig 0.6.4 yet; the hand switch has.
 
 ### Going back
 
-Remove the `permission_policy: builtin:yolo` lines, and run `set-permissions` with
-`--mode inherit` for the three Claude seats. Then `rig down` and `rig up`.
+Remove the `permission_policy: builtin:yolo` lines from `rig.yaml`, and run the
+`set-permissions` loop with `--mode inherit`. Then start from the file.
+
+## After a change to rig.yaml
+
+A new seat, another model or a changed policy only takes effect on a start from the file, which
+makes a new rig:
+
+```bash
+rig down aiakos-delivery
+rig up rigs/aiakos-delivery/rig.yaml
+```
+
+Wait until the queue is quiet first: the new seats start with no conversation history. Queue
+items and the files in `docs/briefs/` and `artifacts/trials/` are kept. Then repeat step 2 of
+[Running unattended](#running-unattended) for the Claude seats.
 
 ## What the rig writes into the checkout
 
 OpenRig projects instructions, skills and plugins into the working directory. These paths are
 git-ignored: `CLAUDE.local.md`, `AGENTS.md`, `.agents/`, `.codex/`, `.openrig/`,
 `.claude/plugins/` and everything under `.claude/skills/` except `story`.
-
-## Changing a model
-
-Edit the seat's `model:` line in `rig.yaml`, then `rig down` and `rig up`.
-
-## Adding a seat to a running rig
-
-After a new member is merged into `rig.yaml`, `rig down` and `rig up` start it. A seat added
-this way needs its permission choice too (section "Running unattended").
 
 ## Pi seats (not used at the moment)
 
