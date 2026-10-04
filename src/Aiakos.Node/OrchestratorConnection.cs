@@ -1,7 +1,9 @@
 using System.Diagnostics;
 
+using Aiakos.Contracts.Node.V1;
+using Aiakos.Node.Link;
+
 using Grpc.Core;
-using Grpc.Health.V1;
 using Grpc.Net.Client;
 
 using Microsoft.Extensions.Hosting;
@@ -10,7 +12,6 @@ using Microsoft.Extensions.Options;
 
 namespace Aiakos.Node;
 
-/// <summary>State of the node's connection to the orchestrator.</summary>
 public enum ConnectionState
 {
     Connecting,
@@ -18,98 +19,105 @@ public enum ConnectionState
     Unavailable,
 }
 
-/// <summary>
-/// Keeps a connection to the orchestrator (spec 0001 R34, R35): calls
-/// <c>grpc.health.v1.Health/Check</c>, then holds a <c>Health/Watch</c> stream until it ends or
-/// fails, then waits a backoff delay and tries again. It never gives up because the orchestrator is
-/// unavailable. Spec 0002 replaces the two calls with the <c>Connect</c> stream.
-/// </summary>
+/// <summary>Keeps an authenticated bidirectional node link open and retries it after failures.</summary>
 public sealed partial class OrchestratorConnection(
     IOptions<NodeOptions> options,
-    Backoff backoff,
+    NodeReconnectDelay reconnectDelay,
+    INodeLinkSource source,
     NodeTelemetry telemetry,
     ILogger<OrchestratorConnection> logger) : BackgroundService
 {
-    /// <summary>HTTP/2 keep-alive ping interval, so a silently dead connection is noticed on the long stream.</summary>
     public static readonly TimeSpan KeepAlivePingDelay = TimeSpan.FromSeconds(30);
-
-    /// <summary>How long a keep-alive ping may go unanswered before the connection is dropped.</summary>
     public static readonly TimeSpan KeepAlivePingTimeout = TimeSpan.FromSeconds(10);
-
-    /// <summary>Deadline of the unary <c>Check</c> call.</summary>
-    public static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(10);
 
     private int _state = (int)ConnectionState.Connecting;
 
-    /// <summary>Current state.</summary>
     public ConnectionState State => (ConnectionState)Volatile.Read(ref _state);
 
-    /// <summary>Raised on every state change (also for repeated <c>connecting</c> attempts).</summary>
     public event EventHandler<ConnectionState>? StateChanged;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var url = options.Value.OrchestratorUri;
-        var urlText = options.Value.OrchestratorUrl!.TrimEnd('/');
+        var host = url.HostNameType == UriHostNameType.IPv6 ? $"[{url.Host.Trim('[', ']')}]" : url.Host;
+        var urlText = $"{url.Scheme}://{host}:{url.Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
         var connectedBefore = false;
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            string reason;
+            var status = StatusCode.Unavailable;
             try
             {
                 SetState(ConnectionState.Connecting);
                 LogConnecting(logger, urlText);
 
-                // A fresh channel per attempt: the client's subchannel layer otherwise applies its own
-                // reconnect backoff (up to minutes) underneath ours, and a call can wait on it.
                 using var channel = CreateChannel(url);
-                var client = new Health.HealthClient(channel);
+                var client = new NodeLinkService.NodeLinkServiceClient(channel);
+                var headers = new Metadata { { "authorization", $"Bearer {options.Value.NodeToken}" } };
+                using var call = client.Connect(headers, cancellationToken: stoppingToken);
+                var hello = source.CreateHello(Guid.NewGuid().ToString("D"));
+                await call.RequestStream.WriteAsync(new ConnectRequest { Hello = hello }, stoppingToken).ConfigureAwait(false);
 
-                var status = await CheckAsync(client, stoppingToken).ConfigureAwait(false);
-                if (status != HealthCheckResponse.Types.ServingStatus.Serving)
-                {
-                    reason = $"health status is {status}";
-                }
-                else
-                {
-                    backoff.Reset();
-                    if (connectedBefore)
-                    {
-                        telemetry.Reconnects.Add(1);
-                    }
+                if (!await call.ResponseStream.MoveNext(stoppingToken).ConfigureAwait(false) ||
+                    call.ResponseStream.Current.BodyCase != ConnectResponse.BodyOneofCase.Welcome)
+                    throw new RpcException(new Status(StatusCode.FailedPrecondition, "Welcome must be the first server message."));
 
-                    connectedBefore = true;
-                    SetState(ConnectionState.Connected);
-                    LogConnected(logger, urlText);
+                var welcome = call.ResponseStream.Current.Welcome;
+                await source.WelcomeAsync(welcome, stoppingToken).ConfigureAwait(false);
+                reconnectDelay.Reset();
+                if (connectedBefore)
+                    telemetry.Reconnects.Add(1);
+                connectedBefore = true;
+                SetState(ConnectionState.Connected);
+                LogConnected(logger, urlText);
 
-                    reason = await WatchAsync(client, stoppingToken).ConfigureAwait(false);
-                }
+                status = await ReadLinkAsync(call, welcome.HeartbeatInterval.ToTimeSpan(), stoppingToken)
+                    .ConfigureAwait(false);
             }
-            catch (Exception) when (stoppingToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 break;
             }
-            catch (RpcException ex)
+            catch (RpcException) when (stoppingToken.IsCancellationRequested)
             {
-                reason = $"{ex.StatusCode}: {ex.Status.Detail}";
+                break;
             }
-#pragma warning disable CA1031 // The loop must survive any failure to reach the orchestrator (R35).
-            catch (Exception ex)
-#pragma warning restore CA1031
+            catch (RpcException exception)
             {
-                reason = $"{ex.GetType().Name}: {ex.Message}";
+                status = exception.StatusCode;
+            }
+            catch (HttpRequestException exception)
+            {
+                status = StatusCode.Unavailable;
+                LogConnectionFailure(logger, exception.GetType().Name);
+            }
+            catch (IOException exception)
+            {
+                status = StatusCode.Unavailable;
+                LogConnectionFailure(logger, exception.GetType().Name);
+            }
+            catch (InvalidOperationException exception)
+            {
+                status = StatusCode.Unknown;
+                LogConnectionFailure(logger, exception.GetType().Name);
+            }
+            catch (TimeoutException exception)
+            {
+                status = StatusCode.DeadlineExceeded;
+                LogConnectionFailure(logger, exception.GetType().Name);
+            }
+            catch (ArgumentException exception)
+            {
+                status = StatusCode.Unknown;
+                LogConnectionFailure(logger, exception.GetType().Name);
             }
 
             if (stoppingToken.IsCancellationRequested)
-            {
                 break;
-            }
 
-            var delay = backoff.NextDelay();
+            var delay = reconnectDelay.NextDelay(status);
             SetState(ConnectionState.Unavailable);
-            LogUnavailable(logger, urlText, reason, delay.TotalSeconds);
-
+            LogUnavailable(logger, urlText, status, delay.TotalSeconds);
             try
             {
                 await Task.Delay(delay, stoppingToken).ConfigureAwait(false);
@@ -123,9 +131,6 @@ public sealed partial class OrchestratorConnection(
         telemetry.Connected = false;
     }
 
-    /// <summary>
-    /// Creates the h2c channel with HTTP/2 keep-alive pings (spec 0001, Design → Node).
-    /// </summary>
     public static GrpcChannel CreateChannel(Uri address)
     {
         var handler = new SocketsHttpHandler
@@ -144,44 +149,48 @@ public sealed partial class OrchestratorConnection(
         });
     }
 
-    private async Task<HealthCheckResponse.Types.ServingStatus> CheckAsync(Health.HealthClient client, CancellationToken cancellationToken)
+    private async Task<StatusCode> ReadLinkAsync(
+        AsyncDuplexStreamingCall<ConnectRequest, ConnectResponse> call,
+        TimeSpan heartbeatInterval,
+        CancellationToken cancellationToken)
     {
         using var activity = NodeTelemetry.ActivitySource.StartActivity("node.connect", ActivityKind.Internal);
         activity?.SetTag("aiakos.node.id", options.Value.NodeId);
         activity?.SetTag("server.address", options.Value.OrchestratorUri.Host);
         activity?.SetTag("server.port", options.Value.OrchestratorUri.Port);
 
-        try
-        {
-            var response = await client.CheckAsync(
-                new HealthCheckRequest(),
-                deadline: DateTime.UtcNow.Add(CheckTimeout),
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (heartbeatInterval <= TimeSpan.Zero)
+            heartbeatInterval = TimeSpan.FromSeconds(5);
+        using var timer = new PeriodicTimer(heartbeatInterval);
+        Task<bool>? readTask = null;
+        Task<bool>? heartbeatTask = null;
 
-            var serving = response.Status == HealthCheckResponse.Types.ServingStatus.Serving;
-            activity?.SetTag("grpc.health.status", response.Status.ToString());
-            activity?.SetStatus(serving ? ActivityStatusCode.Ok : ActivityStatusCode.Error);
-            return response.Status;
-        }
-        catch (Exception ex)
+        while (!cancellationToken.IsCancellationRequested)
         {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            throw;
-        }
-    }
-
-    private static async Task<string> WatchAsync(Health.HealthClient client, CancellationToken cancellationToken)
-    {
-        using var call = client.Watch(new HealthCheckRequest(), cancellationToken: cancellationToken);
-        await foreach (var update in call.ResponseStream.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-        {
-            if (update.Status != HealthCheckResponse.Types.ServingStatus.Serving)
+            readTask ??= call.ResponseStream.MoveNext(cancellationToken);
+            heartbeatTask ??= timer.WaitForNextTickAsync(cancellationToken).AsTask();
+            var completed = await Task.WhenAny(readTask, heartbeatTask).ConfigureAwait(false);
+            if (completed == readTask)
             {
-                return $"health status changed to {update.Status}";
+                if (!await readTask.ConfigureAwait(false))
+                {
+                    activity?.SetStatus(ActivityStatusCode.Error);
+                    return StatusCode.Unavailable;
+                }
+
+                await source.ReceiveAsync(call.ResponseStream.Current, cancellationToken).ConfigureAwait(false);
+                readTask = null;
+                continue;
             }
+
+            if (!await heartbeatTask.ConfigureAwait(false))
+                return StatusCode.Unavailable;
+            await call.RequestStream.WriteAsync(new ConnectRequest { Heartbeat = source.CreateHeartbeat() }, cancellationToken)
+                .ConfigureAwait(false);
+            heartbeatTask = null;
         }
 
-        return "watch stream ended";
+        return StatusCode.Cancelled;
     }
 
     private void SetState(ConnectionState state)
@@ -197,7 +206,10 @@ public sealed partial class OrchestratorConnection(
     [LoggerMessage(Level = LogLevel.Information, Message = "Orchestrator connection: connected to {Url}")]
     private static partial void LogConnected(ILogger logger, string url);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Orchestrator connection: attempt failed ({FailureType})")]
+    private static partial void LogConnectionFailure(ILogger logger, string failureType);
+
     [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Orchestrator connection: unavailable at {Url} ({Reason}); next retry in {DelaySeconds:0.0} s")]
-    private static partial void LogUnavailable(ILogger logger, string url, string reason, double delaySeconds);
+        Message = "Orchestrator connection: unavailable at {Url} (status {StatusCode}); next retry in {DelaySeconds:0.0} s")]
+    private static partial void LogUnavailable(ILogger logger, string url, StatusCode statusCode, double delaySeconds);
 }
