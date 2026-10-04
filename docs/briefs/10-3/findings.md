@@ -167,3 +167,30 @@ Not checked in this round:
 - That a `TimeProvider` double without a new package can drive both `CancellationTokenSource(TimeSpan, TimeProvider)` and the proxy's timers as E4 and E7 need; nothing was built or run.
 - `artifacts/trials/` (acceptance tests), by role.
 
+## Review of the recut against merged S3, round 8
+
+Reviewed at commit cdfd25c. Stories: 10. Check: ok.
+
+Read: the amendment commit (the baseline paragraph, R7, C4, C5, C6, C7, E6, E7, E18, E20, E21
+and the S3, S4, S7 and S10 notes) and the code merged by #145: `NodeLinkService.cs`,
+`NodeLinkRegistry.cs`, `NodeProxyActor.cs`, `Program.cs` and the names of the tests in
+`NodeLinkHandshakeTests.cs`. The description of `main` in the brief matches the code: the
+receive loop, the `Connected` and final state callbacks, a registry that stops the previous
+actor, the original instance-ID spelling passed on (`NodeLinkService.cs:55`), `TrimEntries` in
+`Program.cs:60` and a default-only `NodeLinkOptions` registration (`Program.cs:38`). No merged
+test asserts a non-canonical instance ID, so C6 changes no committed test.
+
+### Findings
+
+- [ ] S7 (context-gap): C7 binds all three `NodeLinkOptions` values from `Aiakos:NodeLink` and validates only `HelloTimeout`, so `LivenessTimeout=00:00:00`, a negative `HeartbeatInterval` or a heartbeat interval longer than the liveness timeout start the orchestrator; the first two give a `Welcome` that every node rejects as `FailedPrecondition` under R9 and, in S4, a liveness timer armed with a non-positive due time, the third a link that turns `Unknown` between heartbeats. Fix: state in C7 the accepted range of `HeartbeatInterval` and `LivenessTimeout` and their relation with the fixed failure text, and add the cases to E21; or state that these two are not bound from configuration.
+
+Noted, not a finding: the baseline paragraph names `artifacts/trials/10-3-3/review.md` in the
+brief text that implementers receive, a folder they are told not to read; the sentence says its
+observations are not requirements.
+
+## Not checked, round 8
+
+- `artifacts/trials/10-3-3/review.md`, by role; the amendment's account of it was compared with the merged code only.
+- Lead's request for the recut; taken from the author's text.
+- The node side for S7 (`NodeProgram`, message sizes, keepalive) against R12; nothing was built or run.
+
