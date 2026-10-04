@@ -205,4 +205,19 @@ This is `lead`'s and the maintainer's call at approval.
 
 ## Per-story completion resolution
 
-Definition of done now separates S1's absent-constructor baseline, neutral controls, unchanged suites and neutral risk text from S2's diagnosed-boundary E4/R1 proof and fix claim. Author tick records the change pending architect re-review.
+Definition of done now separates S1's absent-constructor baseline, neutral controls, unchanged suites and neutral risk text from S2's diagnosed-boundary E4/R1 proof and fix claim. Author tick records the change.
+
+## Re-review of the two-story seam amendment, round 9
+
+Reviewed at commit f1364c2. Stories: 2. Check: ok.
+
+The finding of round 8 is resolved: the definition of done has separate lines for S1 (the T2
+seam gate, unchanged suites, a `Risks:` line that leaves #103 to 9-1-2) and for S2 (E4
+evidence, R1 diagnosis, the fix claim); `show 9-1 1` prints them.
+
+New findings: None.
+
+Still noted for `lead` and the maintainer: the `impl/senior` route of S1 (round 8).
+
+Not checked in this round: the list of round 8 still applies; nothing was built or run.
+
