@@ -72,4 +72,24 @@ with two evidence routes is consistent in R4, E2, E4 and T1.
 2. R3/E5 supporting stress no longer produces a baseline assessment or consumes a done attempt. R4/E7 give the deterministic gate its own infrastructure final line/exit 2, baseline-only assessment and unchanged done accounting.
 3. QA confirms source-to-observer connection and exact failure boundary in the pre-ready baseline assessment; lead requires it before ready. Later reviewer has only the existing four blocking kinds.
 
-Author ticks record the amendments pending re-review.
+Author ticks record the amendments.
+
+## Re-review of the diagnosis-only amendment, round 4
+
+Reviewed at commit 936d271. Stories: 1. Check: ok.
+
+The three findings of round 3 are resolved: R4 places the diagnosis as read-only work in the
+analysis worktree with its record at `artifacts/diagnoses/9-1-1.md` (checked: the path is
+git-ignored) and the `escalation` line now separates it from the fix; the stress command no
+longer carries baseline or attempt wording and the deterministic gate has its own infrastructure
+result (E7); the check that the test observes the diagnosed boundary is done by `qa` in the
+baseline assessment before ready.
+
+New findings: None.
+
+Noted, not a finding; the brief states it: the diagnosis is a step by the `senior` seat that
+`docs/workflow.md` does not have, routed by `lead` by hand, and it runs in the analysis worktree
+of this slice.
+
+Not checked in this round: nothing was run or diagnosed; the list of round 3 still applies.
+
