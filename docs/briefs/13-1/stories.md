@@ -85,3 +85,11 @@ owns: B16, B19
 outputs: A15, GS2, GS3, GS6, GS7
 tests: T5, T9
 notes: These scripts use SourceSeq 0 or increasing, so no dependency on S9 is needed. GS2/GS3 explicitly seed ready/present idle, Desired Up, StopRequested false and resumable after a completed turn; GS6 starts present/idle/resumable; GS7 starts present/needs-input with matching current launch/native ID. State-unknown-prolonged resolves added here are ignored by earlier row tests per B2.
+
+## S12: Correct input recovery and preserve prompt detail
+goal: A7 recovers unknown activity according to spec 0006 and A2 preserves working detail while clearing the pending request.
+depends: S5
+owns: B23
+outputs: A7-recovery, A2-detail
+tests: T13
+notes: Correct merged S5 behavior without renumbering its rows or stories. B10 governs pending matching, distinct from the unconditional A7 unknown recovery. Existing A7 acceptance expectation is corrected to match the specification. No null-attribute behavior or request-ID normalization is introduced.
