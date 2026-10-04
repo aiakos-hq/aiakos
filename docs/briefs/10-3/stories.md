@@ -17,10 +17,10 @@ notes: Create INodeLinkApplication and INodeLinkSource plus NodeLinkOptions here
 ## S3: Authenticated server handshake
 goal: The gRPC service authenticates the first node message and returns a negotiated Welcome with registered identity.
 depends: S1, S2
-owns: R4, R5
-outputs: E4, E5
+owns: R4, R5, C5
+outputs: E4, E5, E19
 tests: -
-notes: R4 uses R2 authentication and R5 uses the R11 replay callback. Use a slim loopback host with explicit registrations here; production wiring belongs to S7. S4 extends this service with ownership and post-Welcome processing; do not implement those items now.
+notes: R4 uses R2 authentication and R5 uses the R11 replay callback. C5 specifies every slim-host registration, the public registry constructor and host-owned ActorSystem lifetime. S3 creates the minimum registry/proxy support used by handshake; S4 extends it. E19 checks construction and teardown. Use that exact slim loopback host here; production wiring belongs to S7. S4 extends this service with ownership and post-Welcome processing; do not implement those items now.
 
 ## S4: Server link ownership and liveness
 goal: Valid streams are owned by one link-only proxy per node, supersede older streams and track liveness without blocking behind application callbacks.

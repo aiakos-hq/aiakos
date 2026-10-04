@@ -45,7 +45,7 @@ and injected randomness for deterministic tests; production defaults are System 
 ## Public surface (exact names)
 
 The following types are public in the namespaces shown. Later slices and acceptance tests use
-these interfaces. Actor internals and constructor wiring not listed here are implementation details.
+these interfaces. Actor internals and constructor wiring not listed here are implementation details, subject to the explicit slim-host dependency boundary in C5.
 
 ```csharp
 namespace Aiakos.Orchestrator.Link;
@@ -77,6 +77,11 @@ public interface INodeLinkApplication
 }
 public sealed class NodeLinkService : Aiakos.Contracts.Node.V1.NodeLinkService.NodeLinkServiceBase { }
 public sealed class NodeProxyActor : Akka.Actor.ReceiveActor { }
+public sealed class NodeLinkRegistry
+{
+    public NodeLinkRegistry(Akka.Actor.ActorSystem actorSystem, INodeLinkApplication application);
+    // Other registry members remain implementation details.
+}
 
 namespace Aiakos.Node.Link;
 public sealed class NodeReconnectDelay
@@ -140,6 +145,8 @@ C3. The already merged S1 policy becomes stricter under R14. The address fixture
 
 C4. After S7 startup wiring and S9 pure-policy correction exist, route every eligible configured URL string unchanged to NodeLinkEndpointPolicy.Validate before Kestrel binds. Do not trim, rewrite, normalize or duplicate the policy grammar at startup. Eligibility only selects listeners: when GrpcPort is absent all configured strings are eligible; when GrpcPort is set, use Uri.TryCreate with absolute HTTP scheme to read the configured port (including implicit port 80), and select strings whose parsed port equals GrpcPort. A string whose scheme/port cannot be determined is indeterminate and fails with the fixed policy error, rather than silently skipping it. A determinable different-port HTTP health listener is excluded. Never substitute the parsed URI string for the original selected string. A selected address failing Validate stops startup before any listener binds with "NodeLink requires an explicit loopback HTTP endpoint." Preserve R3's additional resolved-endpoint check, TestServer exemption and gRPC-port mapping. This correction is a final integration story depending on S7 and S9.
 
+C5. Close the S3 slim-host dependency boundary without moving production registration out of S7. S3 owns creation of the public NodeLinkRegistry and its constructor shown above; it may supply the minimum registry/proxy support needed for a valid Welcome. Ownership replacement, post-Welcome dispatch and liveness remain S4. The S3 acceptance host registers AddGrpc, logging/options supplied by WebApplication.CreateSlimBuilder, the injected TimeProvider, NodeTokenRegistry, IOptions<NodeLinkOptions>, a fake INodeLinkApplication, an ActorSystem through AddAkka("aiakos-link-acceptance", _ => { }), a singleton NodeLinkRegistry, and NodeLinkService. With exactly these application registrations, NodeLinkService must be constructible and process R4/R5; it may not require Data, migrations, Program, SeatActor or any additional unlisted application service. The registry uses that same ActorSystem and fake application. AddAkka owns ActorSystem startup/shutdown; the test stops and asynchronously disposes its host, with a 30-second external bound, even on assertion failure. No ActorSystem is created or disposed by NodeLinkService or NodeLinkRegistry. Actor/registry internals beyond this constructor and lifetime boundary stay implementation details. The generated gRPC service and the orchestrator implementation coexist: acceptance references to generated clients/bases use the fully qualified Aiakos.Contracts.Node.V1.NodeLinkService name.
+
 ## Expected outputs: exact text
 
 | ID | Input | Expected |
@@ -165,6 +172,8 @@ C4. After S7 startup wiring and S9 pure-policy correction exist, route every eli
 
 | `E17` | IsAllowed on `http://user:pw@127.0.0.1:5180`; `http://example.test@127.0.0.1:5180`; `http://127.0.0.1#@example.test`; `http://127.0.0.1:5180/`; `http://127.0.0.1:5180/path`; `http://127.0.0.1:5180?x=1`; `http://127.0.0.1:5180#x`; ` http://127.0.0.1:5180`; `http://127.0.0.1:5180\n`; `http://[::1%1]:5180`; `http://127.1:5180`; `http://2130706433:5180`; `http://0x7f.0.0.1:5180`; `http://127.0.0.1:0`; `http://127.00.0.1:5180`; `http://127.0.0.1:05180`; null; canonical `http://127.0.0.1:5180`, `http://localhost:5180`, `http://[::1]:5180`, `http://127.2.3.4`, `HTTP://LOCALHOST:5180` | false for every rejected/null input; true for every canonical input; Validate on each rejected input throws "NodeLink requires an explicit loopback HTTP endpoint." |
 | `E18` | production Kestrel configured with each rejected address `http://user:pw@127.0.0.1:5180`; `http://example.test@127.0.0.1:5180`; `http://127.0.0.1#@example.test`; `http://127.0.0.1:5180/`; `http://127.0.0.1:5180/path`; `http://127.0.0.1:5180?x=1`; `http://127.0.0.1:5180#x`; ` http://127.0.0.1:5180`; `http://127.0.0.1:5180\n`; `http://[::1%1]:5180`; `http://127.1:5180`; `http://2130706433:5180`; `http://0x7f.0.0.1:5180`; `http://127.0.0.1:0`; `http://127.00.0.1:5180`; `http://127.0.0.1:05180` (literal trailing LF in the escaped `\n` case), GrpcPort unset so every configured string is eligible; canonical loopback endpoints; TestServer; additionally GrpcPort=5180 with each explicit-5180 rejected address beside canonical non-loopback health URL http://0.0.0.0:5181 | every rejected configuration fails before binding with "NodeLink requires an explicit loopback HTTP endpoint."; canonical loopback starts; TestServer remains exempt; explicit-5180 malformed link URLs fail with the same error, while a canonical loopback 5180 link plus non-loopback 5181 health URL starts; no-port or port-0 URLs are tested with GrpcPort unset, not asserted to be selected under GrpcPort=5180 |
+
+| `E19` | slim HTTP/2 host with exactly the C5 registrations, valid authenticated Hello from E5, then host stop/disposal | host constructs NodeLinkService without missing-service exceptions; Welcome matches E5; host stops and disposes within 30 seconds and its ActorSystem termination completes successfully |
 
 ## Tests
 

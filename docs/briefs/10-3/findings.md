@@ -101,3 +101,7 @@ endpoint stops the host with the NodeLink error. The brief states this result (f
 
 Not checked in this round: what `Uri.TryCreate` returns for each E18 address; nothing was run.
 
+
+## S3 host dependency amendment (review pending)
+
+Lead queue qitem-20261004113038-5f124168 reports context-gap: the acceptance host omitted NodeLinkRegistry/ActorSystem, so implemented S3 could not be constructed. C5/E19 specify the slim-host application dependency set, public registry constructor, host-owned Akka lifetime and explicit generated-service qualification. S3 owns the minimum handshake support; S4 retains its ownership/liveness scope. This is an amendment pending architect and maintainer approval; no third story attempt is authorized by it. Acceptance rewrite/baseline follows approval.

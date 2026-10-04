@@ -36,3 +36,5 @@ C3	change	once	R14
 C4	change	once	R12,R14
 E17	output	once	R14,C3
 E18	output	once	C4,R12
+C5	change	once	R4,R5
+E19	output	once	C5
