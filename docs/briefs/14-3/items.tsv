@@ -42,3 +42,8 @@ RES-parameters	output	once	R13
 RES-errors	output	once	R8
 RES-distinct	output	once	R9,R10
 T5	test	once	R8,R9,R5,G1,G2,G3
+R14	rule	once	R1,R2
+C3	change	once	R14,C1
+PATH-special	output	once	R14,C3
+PATH-unreadable	output	once	R14,C3
+T6	test	once	R14,C3,G1,G2,G3

@@ -2,7 +2,7 @@
 id: 14-3
 title: "#14 slice 3 — file references and the resolved rig"
 issue: 14
-status: approved
+status: draft
 route: impl
 paths: [src/Aiakos.Spec/, tests/Aiakos.Spec.Tests/]
 date: 2026-10-04
@@ -137,6 +137,10 @@ C2. At final assembly change ValidTests.LoadsMinimalRigWithoutDiagnostics and
    LoadsFullRigWithoutDiagnostics from Assert.Null(Rig) to non-null with the resolved assertions
    below. Error results remain null. No other earlier expectation changes except C1.
 
+C3. Harden the already merged C1/R2 implementation as R14 specifies. Special files no longer
+   pass File-kind resolution; unreadable agent.yaml no longer reports file-level AIK1001.
+   This correction is story S6; existing story IDs and their scope remain unchanged.
+
 ## Rules
 
 R1. Resolve rejects empty paths, `/`/`//` absolute, drive forms like `C:/x`, `~/x`, backslashes,
@@ -147,7 +151,8 @@ R1. Resolve rejects empty paths, `/`/`//` absolute, drive forms like `C:/x`, `~/
    components with host case semantics, not prefix. Return canonical relative `/` spelling with
    no leading/trailing slash or dot components; preserve case and Unicode spelling.
 
-R2. Safe missing/wrong-kind entry or inspection/access failure gives AIK3001 at source, Message
+R2. File kind means an ordinary regular file only (R14 adds the explicit special-file checks).
+   Safe missing/wrong-kind entry or inspection/access failure gives AIK3001 at source, Message
    `referenced file or directory not found`, Hint null. Link error wins over missing/type error.
    Integrate agent discovery: check directory then agent.yaml using same source; at most one
    error per reference. Load canonical agent directory once across aliases. Existing invalid
@@ -265,6 +270,19 @@ R13. SeatParameters follows agent-seat order, Seat=id, Rig=name, Node=placement,
    and DeliverAs `file`. No runtime session ID, token, environment, hooks, statusLine,
    apiKeyHelper, tmux settings, executable path or secret value in any record.
 
+R14. Before opening content, File-kind resolution must reject a FIFO/named pipe, Unix socket,
+   character device or block device as wrong kind. Directory kind still accepts only directories.
+   After R1 link checks, each rejected special file returns null and exactly one AIK3001 at
+   ReferenceSource, Message `referenced file or directory not found`, Hint null. Never open,
+   read or wait for a special-file writer. Apply this to agent.yaml discovery and direct helper
+   calls. If an ordinary agent.yaml passes inspection but cannot be read (including Unix mode
+   000 under a non-root user), Load emits exactly one AIK3001 at each referring agent_ref scalar
+   with that same message and null Hint, and no agent-file AIK1001. Cache the failed canonical
+   agent read once but replay the scalar diagnostic for each referring seat. Retain existing
+   agent syntax, UTF-8, envelope and size diagnostics when bytes are readable; retain missing
+   rig/env AIK1001. Any such failure leaves Rig null. Detection must not invoke external programs
+   in production. When file classification or reading is denied, use the same AIK3001.
+
 ## Expected outputs
 
 One test named by each output ID covers all its variants. Formatter text ends with LF; `\n`
@@ -293,6 +311,9 @@ Never commit credential-looking fixture values: concatenate separate fragments a
 | `RES-binding` | full default local + review override other; absent/explicit root; unused known repo binding; external env path | placement impl:local,review:other; root ~/aiakos/seats or explicit verbatim; env repo/secret paths and order preserved; external env replaces only binding, no node path probes |
 | `RES-parameters` | full root /seats/, app branch dev; shared impl; root /; omitted api-key secret list with source bound; sandbox required | review dir /seats/demo/review, projection /seats/demo/review/projection, workdir /seats/demo/review/repos/app, branch aiakos/demo/review, base origin/dev; shared workdir/path /home/dev/app, Branch/BaseRef null; root /demo/impl; key added once with DeliverAs file, existing AIK4012 warning, Rig non-null; sandbox required retained without error |
 | `RES-errors` | minimal: append culture_file: MISSING.md at rig line 12; append guidance: and list item MISSING.md at agent lines 7/8; env rig changed to other; then separate credential-reference/damaged-list variants | Rig null; exactly `rig.yaml:12:15: error AIK3001: referenced file or directory not found\nagents/impl/agent.yaml:8:5: error AIK3001: referenced file or directory not found\nrig.env.yaml:3:6: error AIK5001: rig 'other' does not match rig name 'demo'\n`; secret only AIK4020 at source/no read; damaged list only earlier list diagnostics, independent checks continue |
+
+| `PATH-special` | File helper points to a generated FIFO, Unix-domain socket, /dev/null character device and a block device when available; minimal local agent has FIFO or socket agent.yaml | null helper; exactly one AIK3001 at supplied source (integration rig.yaml:10:16), Message `referenced file or directory not found`, Hint null; null Rig; no content open or wait for a writer |
+| `PATH-unreadable` | minimal agent.yaml mode 000 as non-root; second seat aliases the same canonical directory; unreadable directory inspection | exactly one AIK3001 per agent_ref at its scalar, Message `referenced file or directory not found`, Hint null; no agent-file AIK1001; null Rig |
 
 ## Tests
 
@@ -331,6 +352,17 @@ T5. Load integration tests assert RES-errors and RES-duplicate, including null R
    files on a second Load are re-read: safe text then a runtime credential produces AIK4020.
    No new public assembly record is needed in this story; wire a per-call internal catalog for
    the following assembly story to consume rather than re-reading files.
+
+T6. Cover PATH-special and PATH-unreadable. On Linux generate FIFO with mkfifo and socket with
+   a bound Unix-domain Socket; leave FIFO without a writer and require the child Load probe to
+   terminate within five seconds (kill and fail on timeout). Direct helper probes use supplied
+   source probe.yaml:7:9; agent integration uses rig.yaml:10:16. /dev/null covers character device;
+   test a block device only if one exists and is accessible, otherwise explicitly skip that case.
+   Mode-000 tests run under a non-root user and restore permissions in finally; explicitly skip
+   permission-denial cases under root. Platforms without Unix special files explicitly skip those
+   cases. Assert a regular file still resolves, a directory remains wrong File kind, link rejection
+   still wins, readable malformed agent retains its existing diagnostics, missing rig/env retain
+   AIK1001, and no special file content is opened. Do not introduce a new diagnostic code.
 
 ## Definition of done
 

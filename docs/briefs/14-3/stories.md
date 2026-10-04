@@ -37,3 +37,11 @@ owns: R10, R11, R12, R13, C2
 outputs: RES-content, RES-distinct, RES-defaults, RES-binding, RES-parameters
 tests: T4
 notes: Assemble records from S4's per-call catalog and existing validated YAML; do not implement reference traversal or caching again. C2 changes the two earlier valid-result assertions here. R9's duplicate-name checks are already merged; RES-distinct verifies different agents may share a skill name. Aggregate hashes and generated projection remain later slices.
+
+## S6: Reject special files and preserve agent reference diagnostics
+goal: Shared file references reject nonregular files before opening them and unreadable agents report at each reference scalar.
+depends: S1
+owns: R14, C3
+outputs: PATH-special, PATH-unreadable
+tests: T6
+notes: C3 corrects merged S1 behavior without renumbering approved stories. Uses R1 link precedence and R2 diagnostic text; retain syntax and rig/env diagnostics. S2-S5 do not depend on S6 and may otherwise proceed independently; lead may prioritize this correction ahead of them. No Markdown or skill snapshot implementation belongs here.
