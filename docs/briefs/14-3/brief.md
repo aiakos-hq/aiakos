@@ -137,6 +137,10 @@ C2. At final assembly change ValidTests.LoadsMinimalRigWithoutDiagnostics and
    LoadsFullRigWithoutDiagnostics from Assert.Null(Rig) to non-null with the resolved assertions
    below. Error results remain null. No other earlier expectation changes except C1.
 
+C3. Harden the already merged C1/R2 implementation as R14 specifies. Special files no longer
+   pass File-kind resolution; unreadable agent.yaml no longer reports file-level AIK1001.
+   This correction is story S6; existing story IDs and their scope remain unchanged.
+
 ## Rules
 
 R1. Resolve rejects empty paths, `/`/`//` absolute, drive forms like `C:/x`, `~/x`, backslashes,
@@ -147,7 +151,8 @@ R1. Resolve rejects empty paths, `/`/`//` absolute, drive forms like `C:/x`, `~/
    components with host case semantics, not prefix. Return canonical relative `/` spelling with
    no leading/trailing slash or dot components; preserve case and Unicode spelling.
 
-R2. Safe missing/wrong-kind entry or inspection/access failure gives AIK3001 at source, Message
+R2. File kind means an ordinary regular file only (R14 adds the explicit special-file checks).
+   Safe missing/wrong-kind entry or inspection/access failure gives AIK3001 at source, Message
    `referenced file or directory not found`, Hint null. Link error wins over missing/type error.
    Integrate agent discovery: check directory then agent.yaml using same source; at most one
    error per reference. Load canonical agent directory once across aliases. Existing invalid
@@ -174,6 +179,10 @@ R4. Scan decoded Markdown and valid UTF-8 skill files line by line using the fiv
    and preserved without text scan; SKILL.md must be UTF-8 under R6. Scan before exposing content.
 
 R5. Read recursively includes all regular files, including dotfiles, but not empty directories.
+   R14/C3 adds special-entry rejection in S6 after S3: any FIFO, socket or device encountered
+   inside a skill directory is never opened and gives one AIK3001 at the skill declaration
+   scalar, Message `referenced file or directory not found`, Hint null; no snapshot is returned.
+   Coalesce multiple special entries to one AIK3001 per scalar. R7 cap precedence still applies.
    Never follow nested links; each link error is AIK3002 at original skill scalar with R1 text,
    skip it and continue other safe entries. Coalesce nested path failures within each skill
    declaration: at most one AIK3002 for any number of links/unsafe paths, one AIK3001 for any
@@ -265,6 +274,29 @@ R13. SeatParameters follows agent-seat order, Seat=id, Rig=name, Node=placement,
    and DeliverAs `file`. No runtime session ID, token, environment, hooks, statusLine,
    apiKeyHelper, tmux settings, executable path or secret value in any record.
 
+R14. Before opening content, File-kind resolution must reject a FIFO/named pipe, Unix socket,
+   character device or block device as wrong kind. Directory kind still accepts only directories.
+   After R1 link checks, each rejected special file returns null and exactly one AIK3001 at
+   ReferenceSource, Message `referenced file or directory not found`, Hint null. Never open,
+   read or wait for a special-file writer. Apply this to agent.yaml discovery and direct helper
+   calls. If an ordinary agent.yaml passes inspection but cannot be read (including Unix mode
+   000 under a non-root user), Load emits exactly one AIK3001 at each referring agent_ref scalar
+   with that same message and null Hint, and no agent-file AIK1001. Cache the failed canonical
+   agent read once but replay the scalar diagnostic for each referring seat. Retain existing
+   agent syntax, UTF-8, envelope and size diagnostics when bytes are readable; retain missing
+   rig/env AIK1001. Any such failure leaves Rig null. Classification uses an internal shared helper: on Linux P/Invoke libc statx with AT_FDCWD
+   (-100), AT_SYMLINK_NOFOLLOW (0x100), STATX_TYPE (1) and the canonical absolute path.
+   Declare its fixed 256-byte output buffer; read stx_mask (uint at offset 0) and stx_mode
+   (ushort at offset 28); require STATX_TYPE in the returned mask and classify mode & 0xF000
+   as regular 0x8000 or directory 0x4000. Other types are rejected. Missing libc/statx, an
+   unsuccessful native call or absent type mask gives AIK3001 without opening the entry.
+   Windows uses File.GetAttributes after R1 checks: reject Device, accept Directory only for
+   Directory kind and other non-device/non-directory entries for File kind. Other operating
+   systems report AIK3001 when classification is unsupported. No production subprocess or
+   package is added. S6 also wires this classifier into S3 skill enumeration before metadata
+   length/content reads: special entries use R5 scalar AIK3001 and never open; replay scalar
+   errors under R8 when integrated. When classification or reading is denied, use AIK3001.
+
 ## Expected outputs
 
 One test named by each output ID covers all its variants. Formatter text ends with LF; `\n`
@@ -283,7 +315,7 @@ Never commit credential-looking fixture values: concatenate separate fragments a
 | `SKILL-valid` | build/SKILL.md `---\nname: build\ndescription: Build things\n---\nBody\n`, support binary 00 FF 01, dotfile; BOM/CRLF variant | Directory agents/impl/skills/build, Name build, Description Build things, all files raw and ordinal-path ordered, correct byte counts/raw hashes, no diagnostics |
 | `SKILL-missing` | missing SKILL.md, source agent.yaml:8:5 | null; `agents/impl/agent.yaml:8:5: error AIK3004: skill directory has no SKILL.md\n` |
 | `SKILL-front` | every R6 invalid form; name other in build directory; extra ordinary metadata | invalid `agents/impl/skills/build/SKILL.md:1:1: error AIK3004: invalid skill front matter\n`; mismatch same position/code with `skill name does not match directory name\n`; both null; extra metadata accepted |
-| `SKILL-links` | nested file/directory/dangling symlink, external target credential sentinel; two links in one skill; two unsafe credential-like filenames; failing linked skill declared at list scalars 8:5 and 9:5 | one link or two links: null, exactly one `agents/impl/agent.yaml:8:5: error AIK3002: invalid shared path\n  hint: use a relative / path inside the rig root without symbolic links\n`; two unsafe filenames: one AIK4020 at 8:5, no path echo; same linked skill declared twice: that AIK3002 text at 8:5 then 9:5, no file content diagnostic and no duplicate skill name; no target error/content |
+| `SKILL-links` | nested file/directory/dangling symlink, external target credential sentinel; two links in one skill; two unsafe credential-like filenames; failing linked skill declared at list scalars 8:5 and 9:5; special-entry cases are PATH-special in S6 | one link or two links: null, exactly one `agents/impl/agent.yaml:8:5: error AIK3002: invalid shared path\n  hint: use a relative / path inside the rig root without symbolic links\n`; two unsafe filenames: one AIK4020 at 8:5, no path echo; same linked skill declared twice: that AIK3002 text at 8:5 then 9:5, no file content diagnostic and no duplicate skill name; no target error/content |
 | `SKILL-limits` | 100/101 files, 1048576/1048577 total bytes; SKILL.md or support >262144 within total cap; 3 GiB sparse support file; generated tree with more than 101 entries; 150 regular files plus a nested link, plus an unsafe filename, or with SKILL.md absent (separate cases, entries created in opposite orders) | boundaries/large individual accepted; exceeded null, exactly one `agents/impl/agent.yaml:8:5: error AIK3005: skill exceeds 100 files or 1 MiB\n` and no other skill diagnostic in every mixed/error/order case |
 | `SKILL-secret` | credential in valid UTF-8 support at 2:3; invalid UTF-8 binary; credential-like filename | text null, AIK4020 support-path:2:3 with TEXT-secret message/hint; binary preserved without text scan; unsafe name null, AIK4020 at original skill scalar without path/value echo |
 | `RES-content` | minimal + culture Team CRLF, guidance First LF then Second LF but declarations second/first, build skill; shared-agent alias seat; edit guidance between Loads; delete root after successful Load | non-null/no diagnostics, Culture Team LF, ordered guidance Second LF/First LF, one agent directory agents/impl, complete skill snapshots; next Load sees new hash; old result serializable/readable after deletion |
@@ -293,6 +325,9 @@ Never commit credential-looking fixture values: concatenate separate fragments a
 | `RES-binding` | full default local + review override other; absent/explicit root; unused known repo binding; external env path | placement impl:local,review:other; root ~/aiakos/seats or explicit verbatim; env repo/secret paths and order preserved; external env replaces only binding, no node path probes |
 | `RES-parameters` | full root /seats/, app branch dev; shared impl; root /; omitted api-key secret list with source bound; sandbox required | review dir /seats/demo/review, projection /seats/demo/review/projection, workdir /seats/demo/review/repos/app, branch aiakos/demo/review, base origin/dev; shared workdir/path /home/dev/app, Branch/BaseRef null; root /demo/impl; key added once with DeliverAs file, existing AIK4012 warning, Rig non-null; sandbox required retained without error |
 | `RES-errors` | minimal: append culture_file: MISSING.md at rig line 12; append guidance: and list item MISSING.md at agent lines 7/8; env rig changed to other; then separate credential-reference/damaged-list variants | Rig null; exactly `rig.yaml:12:15: error AIK3001: referenced file or directory not found\nagents/impl/agent.yaml:8:5: error AIK3001: referenced file or directory not found\nrig.env.yaml:3:6: error AIK5001: rig 'other' does not match rig name 'demo'\n`; secret only AIK4020 at source/no read; damaged list only earlier list diagnostics, independent checks continue |
+
+| `PATH-special` | File helper points to a generated FIFO, Unix-domain socket, /dev/null character device and a block device when available; minimal local agent has FIFO or socket agent.yaml | null helper; exactly one AIK3001 at supplied source (integration rig.yaml:10:16), Message `referenced file or directory not found`, Hint null; null Rig; no content open or wait for a writer; skill directory containing FIFO SKILL.md, an ordinary SKILL.md plus socket, or a device entry: null skill result and exactly one AIK3001 at its supplied scalar with the same message and null Hint |
+| `PATH-unreadable` | minimal agent.yaml mode 000 as non-root; second seat aliases the same canonical directory; unreadable directory inspection | exactly one AIK3001 per agent_ref at its scalar, Message `referenced file or directory not found`, Hint null; no agent-file AIK1001; null Rig |
 
 ## Tests
 
@@ -331,6 +366,20 @@ T5. Load integration tests assert RES-errors and RES-duplicate, including null R
    files on a second Load are re-read: safe text then a runtime credential produces AIK4020.
    No new public assembly record is needed in this story; wire a per-call internal catalog for
    the following assembly story to consume rather than re-reading files.
+
+T6. Cover PATH-special and PATH-unreadable. On Linux generate FIFO with mkfifo and socket with
+   a bound Unix-domain Socket; leave FIFO without a writer and run Load on Task.Run, requiring completion within five
+   seconds via Task.WhenAny(loadTask, Task.Delay(TimeSpan.FromSeconds(5))). On timeout, mark
+   the test failed, then open a temporary FIFO writer to release the blocked read for cleanup;
+   never interpret the released result as success. Test both agent.yaml and skill SKILL.md FIFOs.
+   Tests may open the cleanup writer; production must not. No child executable is required. Direct helper probes use supplied
+   source probe.yaml:7:9; agent integration uses rig.yaml:10:16. /dev/null covers character device;
+   test a block device only if one exists and is accessible, otherwise explicitly skip that case.
+   Mode-000 tests run under a non-root user and restore permissions in finally; explicitly skip
+   permission-denial cases under root. Platforms without Unix special files explicitly skip those
+   cases. Assert a regular file still resolves, a directory remains wrong File kind, link rejection
+   still wins, readable malformed agent retains its existing diagnostics, missing rig/env retain
+   AIK1001, and no special file content is opened. Do not introduce a new diagnostic code.
 
 ## Definition of done
 
