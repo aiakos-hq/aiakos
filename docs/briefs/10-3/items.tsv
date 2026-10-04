@@ -18,8 +18,8 @@ E2	output	once	R2,G1
 E3	output	once	R3
 E4	output	once	R4,G1
 E5	output	once	R5
-E6	output	once	R6
-E7	output	once	R7
+E6	output	once	R6,C5
+E7	output	once	R7,C5
 E8	output	once	R8
 E9	output	once	R9,G1
 E10	output	once	R10
