@@ -256,6 +256,10 @@ internal static class SharedSkillReader
         {
             return false;
         }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
 
         if (metadataError || root is not { Kind: YamlNodeKind.Mapping, IsTaggedOrAlias: false })
             return false;
