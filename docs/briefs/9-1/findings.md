@@ -20,4 +20,23 @@ Reviewed at commit ed2f210. Stories: 1. Check: ok.
 1. R1 explicitly keeps TelemetryShutdownService read-only under the maintainer's narrow scope. A diagnosis requiring that file is reported/parked for lead and maintainer scope amendment, with no speculative workaround or completion claim.
 2. R3/E5 separate known infrastructure failures (exit 2, explicit marker and raw trace) from real test failures (exit 1). Baseline infrastructure is not reproduction. Preflight availability before done; if a reached-build run fails, the existing script still counts it and QA reports the count to lead before rerun. This brief does not override the repository's attempt rule.
 
-Ticks reflect author revision; architect re-review pending.
+Ticks reflect author revision.
+
+## Re-review, round 2
+
+Reviewed at commit 5f144e2. Stories: 1. Check: ok.
+
+Both findings of round 1 are resolved by stating the outcome in the brief: R1 keeps
+`TelemetryShutdownService.cs` read-only on purpose and makes a diagnosis there a blocked story
+with the evidence handed to `lead`; R3 and E5 give an infrastructure failure its own final line
+and exit code 2, and say that the attempt count of `tools/story.sh done` is kept and reported.
+
+New findings: None.
+
+Noted, not findings; the brief states both results:
+
+- If the cause is in `TelemetryShutdownService.cs`, this story cannot fix #103: it ends blocked and needs a scope decision by the maintainer.
+- An infrastructure failure after the build still counts as an attempt in `tools/story.sh done`; `lead` decides about the rerun.
+
+Not checked in this round: that the exclusion of `TelemetryShutdownService.cs` is the maintainer's decision (stated by the author); nothing was run.
+
