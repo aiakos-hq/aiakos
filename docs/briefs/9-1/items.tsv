@@ -11,3 +11,4 @@ T1	test	once	R4
 E5	output	once	R3
 R4	rule	once	R1,R2,C1
 E6	output	once	R3
+E7	output	once	R4

@@ -95,13 +95,8 @@ R3. The supporting stress command, separate from gate.sh, runs the entire orches
    application migration failures or exceptions after host startup as infrastructure merely
    to avoid a red test. QA assesses the failure from the runner trace and hands an infrastructure
    report to lead; it is neither a reproduced baseline nor evidence that the fix failed.
-   Baseline infrastructure assessment says exactly `BASELINE: infrastructure failure`.
-   After infrastructure is restored, lead routes a fresh verification; never retry an iteration
-   inside the supporting stress command. tools/story.sh done counts any failed run that reached the build;
-   this brief does not waive/reset that count. If infrastructure interrupts such a run, report
-   the recorded attempt count to lead before a rerun, rather than quietly spending another
-   attempt or modifying the helper. Preflight Docker/Postgres availability before invoking
-   done to avoid known infrastructure failures.
+   Supporting infrastructure results belong only in the supporting output log; do not write
+   a BASELINE assessment or claim a tools/story.sh done attempt for this separate command.
    This command is supporting evidence only: neither a green run nor a statistical failure
    substitutes for R4. QA reports its result separately and routes any failure to lead; it is
    not invoked by tools/story.sh baseline/done and does not decide ready/done. Existing attempt
@@ -128,20 +123,42 @@ R4. Replace reproduce-first acceptance with a deterministic regression selected 
    library exception was reproduced. Keep instrumentation and the actor assertions active.
    State explicitly in Cause:/Evidence: which route applies; for route (b) state
    "Library race not deterministically reproduced; application lifetime boundary verified."
-   Reviewer checks the pinned library source/version and concurrent collection access, the
+   Before ready, QA checks the pinned library source/version and concurrent collection access, the
    real host/factory ownership path, every application start/stop/dispose path reaching that
    operation, that the observed test boundary is the changed production/test-host boundary,
    and that no detached/background operation can reintroduce it. Checking a disconnected
-   helper or an invented fake exception does not qualify. The 200-run result is supplementary,
+   helper or an invented fake exception does not qualify. QA names the diagnosis source
+   lines and the acceptance observer/assertion in baseline-assessment.txt and confirms the
+   baseline failed at that exact boundary. Lead requires that assessment before ready.
+   This proof-contract check happens before the implementation run; it adds no fifth blocking
+   kind to the later diff review. The reviewer afterwards applies docs/workflow.md's four
+   blocking kinds to the already fixed contract. The 200-run result is supplementary,
    not proof of the library fix. If neither route can demonstrate an in-scope boundary, leave
    the cause unknown and route to lead for a further maintainer decision; do not accept a
    source-only assertion, a green stress run or an unrelated workaround as done.
-   Diagnosis precedes test design: the senior supplies a diagnosis-only record with exact
-   source/version evidence and the chosen route to lead; lead returns it to this slice's
-   author to write the deterministic acceptance test before product/test-host behavior changes.
-   QA runs that test on main through baseline and confirms the expected boundary failure;
-   lead then authorizes the implementation run under the existing attempt policy. A diagnosis
-   does not authorize another attempt or waive the retry count.
+   Diagnosis precedes test design and is analysis work, not a premature implementation run.
+   After this amendment is approved, lead queues a read-only diagnosis to senior. Run
+   tools/story.sh analysis 9-1 and inspect source in its analysis worktree, never main;
+   do not run start, edit product/test-host behavior, build, or run product tests in this phase.
+   Source extraction into a temporary directory is permitted. Write the diagnosis record
+   at main-checkout artifacts/diagnoses/9-1-1.md (git-ignored, outside artifacts/trials), with
+   the inspected application commit, resolved versions/source references, competing operations,
+   chosen evidence route, boundary observation, proposed in-scope fix and an explicit unknown
+   section. This read-only phase creates no implementation commit or attempt. Senior hands
+   the record durably to lead; lead and this slice's author and QA may read it. R1's Cause:/
+   Evidence: commit text is written later in the fix commit from the validated diagnosis.
+   Lead routes the record to author to write the deterministic acceptance test before behavior
+   changes; QA runs baseline on main via tools/story.sh and checks the right boundary as above.
+   Only then does lead authorize ready/start under the existing attempt policy. Diagnosis
+   neither authorizes another attempt nor waives the retry count.
+   The deterministic gate classifies a demonstrable Docker/container/Postgres failure before
+   host startup as infrastructure: print exactly "REGRESSION: infrastructure failure", exit 2,
+   preserve raw diagnostics, and write "BASELINE: infrastructure failure" to baseline assessment
+   only on a baseline run. Ambiguous errors, migration failures or exceptions after startup
+   remain failures (exit 1); no infrastructure label hides them. Before invoking done, QA
+   preflights Docker/Postgres. Any failed done run reaching build retains its recorded attempt
+   count, even for infrastructure; report it to lead before any rerun, never retry in the gate
+   or reset helper state. Lead decides resumption after infrastructure restoration.
 
 ## Expected outputs: exact text
 
@@ -152,9 +169,11 @@ R4. Replace reproduce-first acceptance with a deterministic regression selected 
 | `E3` | actor lifecycle test | Name `aiakos`; not terminated after startup; terminated successfully after factory disposal within 30 seconds; earlier orchestrator tests pass |
 | `E4` | identical deterministic R4 test on before and after commits | before: assertion failure at the diagnosed application lifetime boundary or genuine diagnosed exception, with raw trace; after: that test and C1/earlier orchestrator tests pass; final exact line `REGRESSION: pass`; route (b) evidence includes exactly "Library race not deterministically reproduced; application lifetime boundary verified." |
 
-| `E5` | an iteration cannot execute because Docker/container/Postgres infrastructure is demonstrably unavailable | exact line `STRESS: infrastructure failure (iteration <n>)`, exit 2 and raw cause; baseline assessment `BASELINE: infrastructure failure`; no reproduced-race or successful-fix claim, no hidden iteration retry, recorded done attempt count retained and reported to lead |
+| `E5` | an iteration cannot execute because Docker/container/Postgres infrastructure is demonstrably unavailable | exact line `STRESS: infrastructure failure (iteration <n>)`, exit 2 and raw cause; supporting output log only, no baseline assessment or done attempt claimed; no reproduced-race or successful-fix claim, no hidden iteration retry |
 
 | `E6` | separate supporting R3 stress command | 200 successful iterations print exactly `STRESS: pass (200/200)`; failures retain raw trace and are reported separately; stress never establishes or substitutes for deterministic baseline/after acceptance |
+
+| `E7` | deterministic R4 gate cannot execute because Docker/container/Postgres is demonstrably unavailable before host startup | final exact line `REGRESSION: infrastructure failure`, exit 2 and raw cause; baseline-only assessment `BASELINE: infrastructure failure`; no boundary reproduction or fix claim; if done reached build, its recorded attempt count is retained and reported to lead before rerun |
 
 ## Tests
 
