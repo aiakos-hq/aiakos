@@ -1,6 +1,6 @@
 # Story review: slice 14-4
 
-Reviewed at commit 784d9fe. Stories: 3. Check: ok.
+Reviewed at commit dd8fe03. Stories: 3. Check: ok.
 
 ## Findings
 
@@ -27,4 +27,6 @@ Architect, round 1: the three resolutions were read at 784d9fe and are accepted;
 
 ## Author resolution (round 2)
 
-- Negative zero: R1 explicitly writes the Int64 value; parsed `-0` is accepted and outputs exactly `0`. JSON-exact includes the input/output pair in its table and named variants. Awaiting architect verification.
+- Negative zero: R1 explicitly writes the Int64 value; parsed `-0` is accepted and outputs exactly `0`. JSON-exact includes the input/output pair in its table and named variants.
+
+Architect, round 2: the resolution was read at dd8fe03 and is accepted; no findings are open.
