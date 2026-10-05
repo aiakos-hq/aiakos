@@ -1,7 +1,12 @@
 using Aiakos.Spec;
+using System.Text.Json;
 
 namespace Aiakos.Spec.Tests;
 
+[CollectionDefinition("Process environment", DisableParallelization = true)]
+public sealed class ProcessEnvironmentGroup { }
+
+[Collection("Process environment")]
 public sealed class ValidTests
 {
     private static string MinimalRoot => Path.Combine(AppContext.BaseDirectory, "Fixtures", "valid", "minimal");
@@ -11,8 +16,28 @@ public sealed class ValidTests
     {
         var result = RigLoader.Load(MinimalRoot, null);
 
-        Assert.Null(result.Rig);
+        Assert.NotNull(result.Rig);
         Assert.Empty(result.Diagnostics);
+        Assert.Equal("demo", result.Rig.Name);
+        Assert.Equal("", result.Rig.Description);
+        Assert.Null(result.Rig.Culture);
+        Assert.Equal(new ResolvedRepo("app", "https://github.com/example/app.git", "main"), Assert.Single(result.Rig.Repos));
+        var agent = Assert.Single(result.Rig.Agents);
+        Assert.Equal("agents/impl", agent.Directory);
+        Assert.Equal("impl", agent.Name);
+        var seat = Assert.Single(result.Rig.Seats);
+        Assert.Equal("impl", seat.Id);
+        Assert.Equal("Implements issues", seat.Description);
+        Assert.Equal("claude-code", seat.Agent!.Harness);
+        Assert.Equal("shared", seat.Agent.Checkout);
+        Assert.Equal("app", Assert.Single(seat.Agent.Repos));
+        Assert.Equal("app", seat.Agent.WorkdirRepo);
+        Assert.Equal("optional", seat.Agent.Requires.Sandbox);
+        Assert.Equal("subscription", seat.Agent.Requires.Auth);
+        Assert.Empty(seat.Agent.Requires.Secrets);
+        var parameter = Assert.Single(result.Rig.SeatParameters);
+        Assert.Equal("/home/dev/app", parameter.Workdir);
+        Assert.Null(Assert.Single(parameter.Checkouts).BaseRef);
     }
 
     [Fact]
@@ -22,8 +47,154 @@ public sealed class ValidTests
 
         var result = RigLoader.Load(fullRoot, null);
 
-        Assert.Null(result.Rig);
+        Assert.NotNull(result.Rig);
         Assert.Empty(result.Diagnostics);
+        Assert.Equal("app,lib", string.Join(',', result.Rig.Repos.Select(repo => repo.Name)));
+        Assert.Equal("main", result.Rig.Repos[0].DefaultBranch);
+        Assert.Equal("impl,review,pm", string.Join(',', result.Rig.Seats.Select(seat => seat.Id)));
+        Assert.Null(result.Rig.Seats[2].Agent);
+        Assert.Equal("impl,review", string.Join(',', result.Rig.SeatParameters.Select(seat => seat.Seat)));
+        var review = result.Rig.SeatParameters[1];
+        Assert.Equal("~/aiakos/seats/demo/review/repos/app", review.Workdir);
+        Assert.Equal("aiakos/demo/review", Assert.Single(review.Checkouts).Branch);
+        Assert.Equal("origin/main", Assert.Single(review.Checkouts).BaseRef);
+        Assert.Equal("acceptEdits", review.HarnessSettings.PermissionMode);
+        var reviewSeat = result.Rig.Seats[1].Agent!;
+        Assert.Null(reviewSeat.Model);
+        Assert.Equal("api-key", reviewSeat.Requires.Auth);
+        Assert.Equal("anthropic_api_key", Assert.Single(reviewSeat.Requires.Secrets));
+        Assert.Empty(review.HarnessSettings.Permissions.Ask);
+        Assert.Empty(review.HarnessSettings.Permissions.Deny);
+        Assert.Equal("Edit,Bash(dotnet test:*),mcp__github__get_issue", string.Join(',', review.HarnessSettings.Permissions.Allow));
+        Assert.Equal("~/aiakos/seats", result.Rig.Binding.SeatRoot);
+        Assert.Equal("impl:local,review:local", string.Join(',', result.Rig.Binding.Placement.Select(item => $"{item.Seat}:{item.Node}")));
+        Assert.Equal("app:/home/dev/app,lib:~/src/lib", string.Join(',', result.Rig.Binding.Repos.Select(item => $"{item.Name}:{item.Path}")));
+        Assert.Equal("anthropic_api_key:~/.config/aiakos/secrets/anthropic_api_key",
+            string.Join(',', result.Rig.Binding.Secrets.Select(item => $"{item.Name}:{item.File}")));
+        Assert.Equal("/home/dev/app", result.Rig.SeatParameters[0].Workdir);
+        Assert.Equal("~/aiakos/seats/demo/review", review.SeatDir);
+        Assert.Equal("~/aiakos/seats/demo/review/projection", review.ProjectionRoot);
+        Assert.Equal("~/aiakos/seats/demo/review/repos/app", review.Workdir);
+        Assert.Equal("~/.config/aiakos/secrets/anthropic_api_key", Assert.Single(review.Secrets).File);
+        Assert.Equal("file", Assert.Single(review.Secrets).DeliverAs);
+    }
+
+    [Fact]
+    public void ResolvedSnapshotRemainsSerializableAfterInputsAreDeleted()
+    {
+        var root = CopyMinimalRig();
+        try
+        {
+            File.AppendAllText(Path.Combine(root, "rig.yaml"), "culture_file: culture.md\n");
+            File.WriteAllText(Path.Combine(root, "culture.md"), "Team\r\n");
+            var agentPath = Path.Combine(root, "agents", "impl", "agent.yaml");
+            File.AppendAllText(agentPath, "guidance:\n  - second.md\n  - first.md\nskills:\n  - skills/build\n");
+            File.WriteAllText(Path.Combine(root, "agents", "impl", "first.md"), "First\n");
+            var secondPath = Path.Combine(root, "agents", "impl", "second.md");
+            File.WriteAllText(secondPath, "Second\n");
+            var skillDirectory = Path.Combine(root, "agents", "impl", "skills", "build");
+            Directory.CreateDirectory(skillDirectory);
+            File.WriteAllText(Path.Combine(skillDirectory, "SKILL.md"), "---\nname: build\ndescription: builds\n---\n");
+            File.WriteAllBytes(Path.Combine(skillDirectory, ".metadata"), [0, 1, 2]);
+
+            var result = RigLoader.Load(root, null);
+            Assert.NotNull(result.Rig);
+            var json = JsonSerializer.Serialize(result.Rig);
+            var agentSnapshot = Assert.Single(result.Rig.Agents);
+            Assert.Equal("Team\n", System.Text.Encoding.UTF8.GetString(result.Rig.Culture!.Content));
+            Assert.Equal("agents/impl/second.md,agents/impl/first.md",
+                string.Join(',', agentSnapshot.Guidance.Select(file => file.Path)));
+            var skill = Assert.Single(agentSnapshot.Skills);
+            Assert.Equal("build", skill.Name);
+            Assert.Equal(".metadata,SKILL.md", string.Join(',', skill.Files.Select(file => file.Path.Split('/').Last())));
+            var oldSecondHash = agentSnapshot.Guidance[0].Sha256;
+            File.WriteAllText(secondPath, "Changed\n");
+            var changed = RigLoader.Load(root, null);
+            Assert.NotNull(changed.Rig);
+            Assert.NotEqual(oldSecondHash, changed.Rig.Agents[0].Guidance[0].Sha256);
+
+            Directory.Delete(root, recursive: true);
+
+            Assert.Equal("demo", result.Rig.Name);
+            Assert.Equal("Second\n", System.Text.Encoding.UTF8.GetString(result.Rig.Agents[0].Guidance[0].Content));
+            Assert.Contains("agents/impl", json, StringComparison.Ordinal);
+            Assert.DoesNotContain(root, json, StringComparison.Ordinal);
+            Assert.DoesNotContain("YamlNode", json, StringComparison.Ordinal);
+            Assert.DoesNotContain("x-note", json, StringComparison.Ordinal);
+            Assert.DoesNotContain("session_id", json, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AgentsMayResolveSkillsWithTheSameNameIndependently()
+    {
+        var root = CopyMinimalRig();
+        try
+        {
+            File.AppendAllText(Path.Combine(root, "rig.yaml"),
+                "  - id: review\n    agent_ref: local:agents/review\n    harness: claude-code\n");
+            var secondAgent = Path.Combine(root, "agents", "review");
+            Directory.CreateDirectory(Path.Combine(secondAgent, "skills", "build"));
+            File.WriteAllText(Path.Combine(secondAgent, "agent.yaml"),
+                "apiVersion: aiakos.dev/v1\nkind: Agent\nname: review\ndescription: Reviews issues\ndefaults:\n  harness: claude-code\nskills:\n  - skills/build\n");
+            File.WriteAllText(Path.Combine(secondAgent, "skills", "build", "SKILL.md"),
+                "---\nname: build\ndescription: builds\n---\n");
+            var firstSkill = Path.Combine(root, "agents", "impl", "skills", "build");
+            Directory.CreateDirectory(firstSkill);
+            File.WriteAllText(Path.Combine(firstSkill, "SKILL.md"), "---\nname: build\ndescription: builds\n---\n");
+            File.AppendAllText(Path.Combine(root, "agents", "impl", "agent.yaml"), "skills:\n  - skills/build\n");
+
+            var result = RigLoader.Load(root, null);
+
+            Assert.Empty(result.Diagnostics);
+            Assert.NotNull(result.Rig);
+            Assert.Equal(2, result.Rig.Agents.Count);
+            Assert.All(result.Rig.Agents, agent => Assert.Equal("build", Assert.Single(agent.Skills).Name));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LoadDoesNotDependOnPathOrReadBoundSecretSources()
+    {
+        var root = CopyMinimalRig();
+        var sentinel = string.Concat("runtime-", "sentinel-", Guid.NewGuid().ToString("N"));
+        var secretFile = Path.Combine(root, "secret-source.txt");
+        var nodeSecretPath = OperatingSystem.IsWindows()
+            ? "/" + Path.GetRelativePath(Path.GetPathRoot(secretFile)!, secretFile).Replace('\\', '/')
+            : secretFile.Replace('\\', '/');
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        try
+        {
+            File.WriteAllText(secretFile, sentinel);
+            File.AppendAllText(Path.Combine(root, "rig.yaml"),
+                "    requires:\n      auth: api-key\n      secrets: [anthropic_api_key]\n");
+            File.AppendAllText(Path.Combine(root, "rig.env.yaml"),
+                $"secrets:\n  anthropic_api_key:\n    file: {nodeSecretPath}\n");
+            var normal = RigLoader.Load(root, null);
+            Assert.NotNull(normal.Rig);
+            var normalJson = JsonSerializer.Serialize(normal.Rig);
+
+            Environment.SetEnvironmentVariable("PATH", "");
+            var pathless = RigLoader.Load(root, null);
+
+            Assert.NotNull(pathless.Rig);
+            Assert.Equal(normalJson, JsonSerializer.Serialize(pathless.Rig));
+            Assert.DoesNotContain(sentinel, JsonSerializer.Serialize(pathless.Rig), StringComparison.Ordinal);
+            Assert.Equal(nodeSecretPath, Assert.Single(pathless.Rig.Binding.Secrets).File);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
