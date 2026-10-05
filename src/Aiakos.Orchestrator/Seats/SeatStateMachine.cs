@@ -174,11 +174,12 @@ public static class SeatStateMachine
 
     private static SeatStep ReconcileInventory(SeatState state, SeatInventoryEntry inventory, DateTimeOffset now)
     {
-        SeatStep result = inventory.Lifecycle switch
+        SeatStep result = state.KnownSession == SessionValue.Absent
+            ? Unchanged(state)
+            : inventory.Lifecycle switch
         {
             SessionLifecycle.Launching => ApplySession(state, SessionValue.Starting, null, "S15", now),
-            SessionLifecycle.Running => ApplySession(state, SessionValue.Present, null, "S15", now,
-                ActivityValue.Unknown, SeatVocabulary.ActivityReasonObservationGap, "R10"),
+            SessionLifecycle.Running => ApplySession(state, SessionValue.Present, null, "S15", now),
             SessionLifecycle.Exited => ApplySession(state, SessionValue.Exited, null, "S15", now),
             _ => ApplySession(state, SessionValue.Unknown, SeatVocabulary.SessionReasonOrphanOrRunning, "S15", now)
         };

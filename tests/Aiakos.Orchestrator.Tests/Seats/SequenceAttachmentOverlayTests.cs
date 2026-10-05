@@ -243,6 +243,19 @@ public sealed class SequenceAttachmentOverlayTests
     }
 
     [Fact]
+    public void S15PreservesAbsentSessionDespiteMatchingInventory()
+    {
+        var state = State(SessionValue.Absent);
+        var step = Apply(state, new NodeAttached(OtherNodeId,
+            new SeatInventoryEntry(LaunchId, SessionLifecycle.Running, 8)));
+
+        Assert.Equal(SessionValue.Absent, step.State.KnownSession);
+        Assert.Contains(step.Findings, finding => finding.Kind == SeatVocabulary.FindingInventoryMismatch && !finding.Open);
+        Assert.Contains(step.Findings, finding => finding.Kind == SeatVocabulary.FindingObservationGap && finding.Open);
+        SeatAssert.Invariants(step);
+    }
+
+    [Fact]
     public void NodeAttachWithNoPreviousInstanceAdoptsIdAndIgnoresInventory()
     {
         var state = State() with { NodeInstanceId = null };
