@@ -249,7 +249,10 @@ public static class SeatStateMachine
         var result = Combine(pipeline, bodyResult);
         if (result.State.Overlay is not null && result.State.CatchUpSeq is { } catchUpSeq &&
             result.State.NextSeq > catchUpSeq)
-            result = Combine(result, ClearOverlay(result.State, now));
+        {
+            var disposition = result.Disposition;
+            result = Combine(result, ClearOverlay(result.State, now)) with { Disposition = disposition };
+        }
         return result;
     }
 
