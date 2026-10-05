@@ -165,15 +165,23 @@ internal static class SharedReferencePaths
                 return false;
             }
 
-            var isDirectory = (attributes & FileAttributes.Directory) != 0;
-            if (index < components.Length - 1 && !isDirectory)
+            if (!SharedFileClassifier.TryClassify(currentPath, out var entryKind) ||
+                entryKind == SharedEntryKind.Other)
+            {
+                AddMissing(source, diagnostics);
+                return false;
+            }
+
+            if (index < components.Length - 1 && entryKind != SharedEntryKind.Directory)
             {
                 AddMissing(source, diagnostics);
                 return false;
             }
 
             if (index == components.Length - 1 &&
-                (kind == SharedReferenceKind.Directory) != isDirectory)
+                (kind == SharedReferenceKind.Directory
+                    ? entryKind != SharedEntryKind.Directory
+                    : entryKind != SharedEntryKind.RegularFile))
             {
                 AddMissing(source, diagnostics);
                 return false;

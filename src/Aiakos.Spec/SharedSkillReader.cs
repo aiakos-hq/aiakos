@@ -28,6 +28,7 @@ internal static class SharedSkillReader
         var unsafeNames = new List<(string Path, string Kind)>();
         var fileCount = 0;
         long metadataBytes = 0;
+        var specialSkillFileRejected = false;
 
         while (directoryStack.TryPop(out var current))
         {
@@ -75,11 +76,20 @@ internal static class SharedSkillReader
                         continue;
                     }
 
+                    var isDirectory = (attributes & FileAttributes.Directory) != 0;
+                    var isReparsePoint = (attributes & FileAttributes.ReparsePoint) != 0;
                     if (credentialKind is not null)
                     {
                         unsafeNames.Add((canonicalRelative, credentialKind));
-                        if ((attributes & FileAttributes.Directory) == 0 && (attributes & FileAttributes.ReparsePoint) == 0)
+                        if (!isDirectory && !isReparsePoint)
                         {
+                            if (!SharedFileClassifier.TryClassify(entryPath, out var unsafeEntryKind) ||
+                                unsafeEntryKind != SharedEntryKind.RegularFile)
+                            {
+                                discoveredDiagnostics.Add(MissingDiagnostic(source));
+                                continue;
+                            }
+
                             fileCount++;
                             if (fileCount > MaximumFiles)
                                 return TooLarge(source, diagnostics);
@@ -95,14 +105,15 @@ internal static class SharedSkillReader
                         continue;
                     }
 
-                    var isDirectory = (attributes & FileAttributes.Directory) != 0;
-                    var isReparsePoint = (attributes & FileAttributes.ReparsePoint) != 0;
                     var pathDiagnostics = new List<Diagnostic>();
                     var checkedPath = SharedReferencePaths.Resolve(rigRoot, directory.Path, canonicalRelative,
                         isDirectory ? SharedReferenceKind.Directory : SharedReferenceKind.File, source, pathDiagnostics);
                     if (checkedPath is null)
                     {
                         discoveredDiagnostics.AddRange(pathDiagnostics);
+                        if (canonicalRelative == "SKILL.md" &&
+                            pathDiagnostics.Any(static diagnostic => diagnostic.Code == "AIK3001"))
+                            specialSkillFileRejected = true;
                         continue;
                     }
 
@@ -195,7 +206,7 @@ internal static class SharedSkillReader
             resolvedFiles.Add(new EmbeddedFile(entry.Path.Path, $"sha256:{hash}", fileBytes));
         }
 
-        if (skillFile is null)
+        if (skillFile is null && !specialSkillFileRejected)
             localDiagnostics.Add(new Diagnostic(Severity.Error, "AIK3004", source.File, source.Line, source.Column,
                 "skill directory has no SKILL.md", null));
 
