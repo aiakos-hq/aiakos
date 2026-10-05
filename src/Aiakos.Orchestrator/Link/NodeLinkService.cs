@@ -143,18 +143,39 @@ public sealed class NodeLinkService(
         }
         async Task waitForCallback(Task callbackTask, NodeLinkSession current)
         {
-            while (!callbackTask.IsCompleted)
+            async Task endAsSuperseded()
             {
+                _ = callbackTask.ContinueWith(static task => _ = task.Exception, TaskContinuationOptions.OnlyOnFaulted);
+                await writeGoodbye(GoodbyeReason.Superseded, "Node link superseded.").ConfigureAwait(false);
+                throw Failure(StatusCode.Aborted, "Node link superseded.");
+            }
+
+            while (true)
+            {
+                // Supersession is authoritative even when cancellation completes the callback
+                // task at the same time and wins Task.WhenAny's tie.
+                if (current.Superseded.IsCompleted)
+                    await endAsSuperseded().ConfigureAwait(false);
+
+                if (callbackTask.IsCompleted)
+                {
+                    try
+                    {
+                        await callbackTask.ConfigureAwait(false);
+                        return;
+                    }
+                    catch (Exception) when (current.Superseded.IsCompleted)
+                    {
+                        await endAsSuperseded().ConfigureAwait(false);
+                    }
+                }
+
                 var activeLiveness = livenessTask;
                 var completed = await Task.WhenAny(callbackTask,
                     activeLiveness ?? Task.Delay(Timeout.InfiniteTimeSpan, context.CancellationToken),
                     current.Superseded, shutdownTask).ConfigureAwait(false);
-                if (completed == current.Superseded)
-                {
-                    _ = callbackTask.ContinueWith(static task => _ = task.Exception, TaskContinuationOptions.OnlyOnFaulted);
-                    await writeGoodbye(GoodbyeReason.Superseded, "Node link superseded.").ConfigureAwait(false);
-                    throw Failure(StatusCode.Aborted, "Node link superseded.");
-                }
+                if (current.Superseded.IsCompleted)
+                    await endAsSuperseded().ConfigureAwait(false);
                 if (completed == shutdownTask)
                 {
                     _ = callbackTask.ContinueWith(static task => _ = task.Exception, TaskContinuationOptions.OnlyOnFaulted);
@@ -179,7 +200,6 @@ public sealed class NodeLinkService(
                     }
                 }
             }
-            await callbackTask.ConfigureAwait(false);
         }
 
         try
