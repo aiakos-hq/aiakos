@@ -67,8 +67,9 @@ New properties default null on manually constructed/unfinalized records, preserv
 14-3 constructors. Load always fills them on success once the integration story is merged.
 The helpers are introduced by their owning stories, never stubbed by another. CanonicalJson
 accepts JSON objects, arrays, strings, booleans, null and integer numbers in signed Int64 range;
-its caller produces only that subset with unique fixed schema keys. No general JSON-number
-standard or external input validation API is requested. Create receives a valid assembled rig.
+its caller produces only that subset with unique fixed schema keys. Unsupported inputs have
+the exact R1 failure contract below; no general JSON-number standard is requested. Create
+receives a valid assembled rig.
 
 ## General rules
 
@@ -81,8 +82,22 @@ G1. Preserve every earlier diagnostic, order, redaction, error-result null and w
 
 C1. Successful Load returns the same resolved content/parameters as 14-3 plus the new populated
    fields from R8. Earlier valid result tests stay valid; error results remain null. Update a
-   prior serialization golden only for these declared added properties, if one exists; never
-   alter an earlier expected axis, path, diagnostic or content byte.
+   prior serialization golden only for these declared added properties; never alter an earlier
+   expected axis, path, diagnostic or content byte. Before changing any whole-result golden,
+   read the merged 14-3-5 tests. If they compare only fields or same-run serialization, retain
+   those assertions without inventing a whole-result golden. If they compare a checked-in full
+   resolved.json, extend that golden using the R2–R4 mapping of its already-reviewed values:
+   commit the corresponding shared.json and binding.json canonical text as reviewable expected
+   assets, calculate their SHA-256 independently using sha256sum or Python hashlib (not Create,
+   Write or a production hash helper), and paste those literal hashes into the golden. Construct
+   expected Canonical from those exact two JSON texts, their R5 combined object, the literal
+   hashes, and the existing embedded files' bytes grouped/sorted by their known hashes (R6).
+   ToolVersion is asserted separately against assembly Version.ToString; in a whole-result
+   golden use the placeholder `<assembly-version>` and replace only that expected field with
+   the current assembly version in the test before comparison. No other runtime-derived expected
+   field is allowed. Record the independent command and resulting full-fixture hashes in the
+   commit body. The minimal hashes below remain fixed; no new full-fixture golden is required
+   if the predecessor has none.
 
 ## Rules
 
@@ -93,10 +108,24 @@ R1. CanonicalJson.Write returns compact JSON without BOM or trailing newline, en
    double quote and backslash become `\"` and `\\`; use `\b`, `\t`, `\n`, `\f`, `\r` for those
    controls and lowercase four-hex `\u00xx` for the remaining U+0000–001F. All other Unicode
    scalars, including non-ASCII, `<`, `>`, `&`, `/` and U+2028, appear literally. No HTML escaping.
-   NFC acts on metadata/path strings only, never EmbeddedFile.Content or its Sha256. To keep
-   canonicalization total for strings, replace an isolated UTF-16 surrogate with U+FFFD before
-   NFC (a valid surrogate pair is unchanged). This specifies encoding of malformed string data,
-   adds no loader diagnostic, and changes no snapshot content.
+   NFC acts on metadata/path strings only, never EmbeddedFile.Content or its Sha256. A valid
+   surrogate pair is one Unicode scalar. Unsupported input anywhere in the tree throws exactly
+   `new ArgumentException("unsupported canonical JSON value")`, with no parameter name or
+   inner exception (Message exactly `unsupported canonical JSON value`). Unsupported means
+   Undefined (including default(JsonElement)), a number whose raw JSON spelling is not
+   `-?(0|[1-9][0-9]*)` or is outside signed Int64, a string/property name containing an isolated
+   surrogate, or duplicate property names after NFC normalization. Check each object for
+   normalized-key collisions before writing it. Malformed strings can arrive as parsed JSON
+   escapes such as `"\ud800"`: if JsonElement.GetString or JsonProperty.Name throws
+   InvalidOperationException decoding it, translate that failure to the stated ArgumentException;
+   do not implement a raw-text string decoder. This is the internal helper's declared rejection
+   contract, not an additional loader diagnostic. Production mapping uses fixed valid keys.
+   `JSON-exact` unsupported variants (each tested independently): `default(JsonElement)`;
+   parsed `1.5`, `1.0`, `1e0`, `9223372036854775808`; parsed `{"a":1,"a":2}`;
+   parsed `{"é":1,"e\u0301":2}` (NFC-key collision); parsed `"\ud800"` and
+   `{"\ud800":1}` (isolated surrogate value/key). All have the same exact exception above.
+   The valid non-BMP input is parsed `"\ud83d\ude00"`, output exactly `"😀"`.
+   These helper tests do not create or change YAML diagnostics.
 
 R2. Map the shared tree with exactly the keys/values in the following schema. Every listed key
    is present, including nulls and empty arrays. Property order in this schema is explanatory;
@@ -175,7 +204,7 @@ One committed xUnit test per output ID (hyphens removed from C# method names), a
 
 | ID | Input/variants | Exact expected output |
 |---|---|---|
-| `JSON-exact` | JSON tree `{"z":null,"s":"e\u0301<&/","b":true,"a":[2,1]}`; controls/quote/backslash; nested reordered properties; non-BMP pair; isolated surrogate | `{"a":[2,1],"b":true,"s":"é<&/","z":null}`; specified short/control escapes, literal non-BMP character, U+FFFD for isolated surrogate; no BOM/newline/whitespace outside strings |
+| `JSON-exact` | JSON tree `{"z":null,"s":"e\u0301<&/","b":true,"a":[2,1]}`; controls/quote/backslash; nested reordered properties; non-BMP pair; unsupported variants listed below | `{"a":[2,1],"b":true,"s":"é<&/","z":null}`; specified short/control escapes, literal non-BMP character; unsupported variants throw ArgumentException with Message `unsupported canonical JSON value`; no BOM/newline/whitespace outside strings |
 | `CAN-shared` | resolved minimal fixture below; full fixture with culture/guidance/binary skill, human pm | exact minimal SharedJson below; full JSON has exactly R2 keys including null human agent, descriptors with path/hash/byte count and no Content/base64; snapshots unchanged |
 | `CAN-order` | permute seats, agents, workspace repos, seat repos, secrets, skills and files with explicit workdir_repo; reverse guidance or permission order; NFC colliding path spelling with differing file descriptors | unordered permutations identical SharedJson; reversed distinct guidance/permissions different SharedJson; normalization ties sorted by canonical element JSON; input arrays unchanged |
 | `CAN-binding` | minimal fixture; shuffled binding declarations; changed node/path/root/secret source; unused known repo binding | exact minimal BindingJson below; permutations identical, each changed binding value changes BindingJson; shared tree unchanged; node path tilde/trailing slash/case preserved apart from NFC |
