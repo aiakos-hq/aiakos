@@ -8,8 +8,6 @@ public enum Severity
 
 public sealed record Diagnostic(Severity Severity, string Code, string File, int Line, int Column, string Message, string? Hint);
 
-public sealed record ResolvedRig;
-
 public sealed record LoadResult(ResolvedRig? Rig, IReadOnlyList<Diagnostic> Diagnostics);
 
 public static class DiagnosticFormatter
