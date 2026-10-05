@@ -128,7 +128,8 @@ public sealed class NodeLinkHandshakeTests
     {
         var app = new RecordingApplication();
         using var actorSystem = ActorSystem.Create("node-link-empty-hello-test");
-        await using var server = await StartServerAsync(app, actorSystem);
+        await using var server = await StartServerAsync(app, actorSystem,
+            helloTimeout: completeRequestStream ? null : TimeSpan.FromMilliseconds(100));
         using var channel = GrpcChannel.ForAddress(ServerAddress(server));
         var client = new Aiakos.Contracts.Node.V1.NodeLinkService.NodeLinkServiceClient(channel);
         var call = client.Connect(new Metadata { { "authorization", "Bearer node-secret" } },
@@ -209,7 +210,8 @@ public sealed class NodeLinkHandshakeTests
         NodeInstanceId = "b1fc5444-96b2-42fc-a7d4-6e6e0d71d908",
     };
 
-    private static async Task<WebApplication> StartServerAsync(RecordingApplication application, ActorSystem actorSystem)
+    private static async Task<WebApplication> StartServerAsync(RecordingApplication application, ActorSystem actorSystem,
+        TimeSpan? helloTimeout = null)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
@@ -221,7 +223,9 @@ public sealed class NodeLinkHandshakeTests
             Id = "opaque-node", Name = "friendly-node", Token = "node-secret",
         }]));
         builder.Services.AddSingleton<INodeLinkApplication>(application);
-        builder.Services.Configure<NodeLinkOptions>(options => options.HelloTimeout = TimeSpan.FromMilliseconds(100));
+        // Only the silent-client test needs a short deadline; validation tests use the normal timeout.
+        if (helloTimeout is { } timeout)
+            builder.Services.Configure<NodeLinkOptions>(options => options.HelloTimeout = timeout);
         builder.Services.AddSingleton(actorSystem);
         builder.Services.AddSingleton<NodeLinkRegistry>();
         builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
