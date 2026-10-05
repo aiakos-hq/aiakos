@@ -26,6 +26,9 @@
 #   tools/story.sh next [<route>]         the ready story to take next
 #   tools/story.sh start <issue>          worktree + branch from origin/main, story copied in,
 #                                         label ready -> in-progress
+#                                         For an issue labelled type/chore or type/bug that is
+#                                         not a story: no brief, no acceptance tests; the gate
+#                                         of "done" is the build and every existing test
 #   tools/story.sh start <issue> --retry  sends a story back to its implementer: same worktree,
 #                                         main merged in, story text and issue body written
 #                                         again from the brief, label -> in-progress
@@ -210,13 +213,23 @@ issue_of() {
     --json number,title,state --jq ".[] | select(.title | startswith(\"$1: \")) | \"\(.number) \(.state)\"" | head -n 1
 }
 
-# Sets: number title body labels story slice n slug branch worktree trial parent route
+# Sets: number title body labels kind story slice n slug branch worktree trial parent route origin
+# kind is "story", or "chore" for an issue labelled type/chore or type/bug that has no brief.
 load_issue() {
   number="${1:-}"
   [[ "$number" =~ ^[0-9]+$ ]] || die "give the story issue number"
   title="$(gh issue view "$number" --repo "$REPO" --json title --jq .title)"
   body="$(gh issue view "$number" --repo "$REPO" --json body --jq .body | tr -d '\r')"
   labels="$(gh issue view "$number" --repo "$REPO" --json labels --jq '[.labels[].name] | join(" ")')"
+  if ! [[ "$title" =~ ^[0-9]+-[0-9]+(-[0-9]+)?:[[:space:]] ]] && { has_label type/chore || has_label type/bug; }; then
+    kind=chore; story="chore-$number"; slice=""; n=""; parent=""; route="impl/senior"; origin="chore"
+    slug="$(slug_of "$title")"
+    if has_label type/bug; then branch="fix/$number-$slug"; else branch="chore/$number-$slug"; fi
+    worktree="$main_root/.claude/worktrees/chore-$number"
+    trial="$main_root/artifacts/trials/chore-$number"
+    return
+  fi
+  kind=story
   # "<slice>-<n>: <title>", or "<slice>: <title>" for a slice that was started before stories.
   [[ "$title" =~ ^([0-9]+-[0-9]+(-[0-9]+)?):[[:space:]]*(.+)$ ]] \
     || die "title of #$number must be '<story id>: <title>', found '$title'"
@@ -236,6 +249,7 @@ load_issue() {
     if has_label "$candidate"; then route="$(norm_route "$candidate")"; fi
   done
   [ -n "$route" ] || die "#$number has no routing label (impl or impl/senior)"
+  origin="part of #$parent"
 }
 
 # Label changes on the story issue. AIAKOS_NO_WRITE=1 prints them instead (for trying a command out).
@@ -385,18 +399,30 @@ cmd_ready() {
   fi
 }
 
+# Chores and bugs that are ready: issues labelled ready with type/chore or type/bug and no story title.
+ready_chores() {
+  gh issue list --repo "$REPO" --state open --label ready --limit 100 --json number,title,labels \
+    --jq '.[] | select((.title | test("^[0-9]+-[0-9]+(-[0-9]+)?: ") | not) and ([.labels[].name] | any(. == "type/chore" or . == "type/bug"))) | "#\(.number)\timpl/senior\t\(.title)"'
+}
+
 cmd_next() {
-  local want="${1:-}" route_label
+  local want="${1:-}" route_label chores
   for route_label in $ROUTES $LEGACY_ROUTES; do
     [ -z "$want" ] || [ "$want" = "$(norm_route "$route_label")" ] || continue
     gh issue list --repo "$REPO" --state open --label ready --label "$route_label" --limit 100 --json number,title \
       --jq ".[] | select(.title | test(\"^[0-9]+-[0-9]+-[0-9]+: \")) | \"\(.title | split(\":\")[0])\t#\(.number)\t$route_label\t\(.title)\""
   done | sort -t- -k1,1n -k2,2n -k3,3n > "${TMPDIR:-/tmp}/story-next.$$" || true
-  if [ ! -s "${TMPDIR:-/tmp}/story-next.$$" ]; then echo "no story is ready"; rm -f "${TMPDIR:-/tmp}/story-next.$$"; return; fi
-  echo "next:"
-  head -n 1 "${TMPDIR:-/tmp}/story-next.$$" | cut -f2-
-  if [ "$(wc -l < "${TMPDIR:-/tmp}/story-next.$$")" -gt 1 ]; then echo; echo "also ready:"; tail -n +2 "${TMPDIR:-/tmp}/story-next.$$" | cut -f2-; fi
+  if [ ! -s "${TMPDIR:-/tmp}/story-next.$$" ]; then echo "no story is ready"
+  else
+    echo "next:"
+    head -n 1 "${TMPDIR:-/tmp}/story-next.$$" | cut -f2-
+    if [ "$(wc -l < "${TMPDIR:-/tmp}/story-next.$$")" -gt 1 ]; then echo; echo "also ready:"; tail -n +2 "${TMPDIR:-/tmp}/story-next.$$" | cut -f2-; fi
+  fi
   rm -f "${TMPDIR:-/tmp}/story-next.$$"
+  if [ -z "$want" ] || [ "$want" = "impl/senior" ]; then
+    chores="$(ready_chores || true)"
+    if [ -n "$chores" ]; then echo; echo "chores and bugs ready (for the senior seat):"; printf '%s\n' "$chores"; fi
+  fi
 }
 
 # Removes every state label the issue has and sets one.
@@ -437,16 +463,21 @@ cmd_start() {
   has_label ready || die "#$number is not labelled 'ready' (labels: $labels)"
   [ ! -e "$worktree" ] || die "worktree already exists: $worktree (to send the story back to its implementer: start $number --retry)"
   if git show-ref --verify --quiet "refs/heads/$branch"; then die "branch already exists: $branch"; fi
-  [ -f "$trial/gate.sh" ] || die "no acceptance gate: $trial/gate.sh"
+  if [ "$kind" = "story" ]; then [ -f "$trial/gate.sh" ] || die "no acceptance gate: $trial/gate.sh"; else mkdir -p "$trial"; fi
   git fetch --quiet origin main
   git worktree add --quiet -b "$branch" "$worktree" origin/main
   mkdir -p "$worktree/artifacts/briefs"
-  printf '%s\n' "$body" > "$worktree/artifacts/briefs/$story.md"
+  if [ "$kind" = "chore" ]; then printf '# #%s: %s\n\n' "$number" "$title" > "$worktree/artifacts/briefs/$story.md"; fi
+  printf '%s\n' "$body" >> "$worktree/artifacts/briefs/$story.md"
   relabel ready in-progress
-  echo "story    $story (#$number, part of #$parent, $route)"
+  echo "story    $story (#$number, $origin, $route)"
   echo "branch   $branch"
   echo "worktree $(native "$worktree")"
   echo "label    in-progress"
+  if [ "$kind" = "chore" ]; then
+    print_task "Do what the issue in artifacts/briefs/$story.md asks, and nothing more. There is no brief and no acceptance test: the gate is the build with zero warnings and every existing test. A bug fix adds a test that fails without the fix. Run build and tests until green. One commit."
+    return
+  fi
   print_task "Implement the story at artifacts/briefs/$story.md. Follow it exactly. Run build and tests until green. One commit."
 }
 
@@ -494,7 +525,7 @@ start_retry() {
     reason="${reason}The last gate output is in artifacts/briefs/$story-$(basename "$last"). "
   fi
   set_state in-progress
-  echo "story    $story (#$number, part of #$parent, $route), retry"
+  echo "story    $story (#$number, $origin, $route), retry"
   echo "branch   $branch (origin/main merged in)"
   echo "worktree $(native "$worktree")"
   echo "label    in-progress"
@@ -506,7 +537,7 @@ start_retry() {
 cmd_done() {
   load_issue "${1:-}"
   [ -d "$worktree" ] || die "no worktree for $story: $worktree"
-  [ -f "$trial/gate.sh" ] || die "no acceptance gate: $trial/gate.sh"
+  if [ "$kind" = "story" ]; then [ -f "$trial/gate.sh" ] || die "no acceptance gate: $trial/gate.sh"; else mkdir -p "$trial"; fi
   local run failed attempt log paths path file bad="" ok=1 infrastructure=0 build_log
   # The file number counts every run; the attempt counts only runs that can use up the retry.
   run=$(( $(find "$trial" -maxdepth 1 -name 'gate-*.txt' | wc -l) + 1 ))
@@ -552,7 +583,14 @@ cmd_done() {
       fi
       rm -f "$build_log"
     fi
-    if [ "$ok" -eq 1 ]; then
+    if [ "$ok" -eq 1 ] && [ "$kind" = "chore" ]; then
+      # A chore or a bug has no acceptance tests: every existing test is its gate.
+      echo "== tests (dotnet test -c Release --no-build)"
+      if ! (cd "$worktree" && dotnet test -c Release --no-build 2>&1 | tail -n 40); then echo "FAIL: tests"; ok=0; fi
+      if [ -n "$(git -C "$worktree" status --porcelain)" ]; then
+        echo "FAIL: the tests left files behind in the worktree:"; git -C "$worktree" status --short; ok=0
+      fi
+    elif [ "$ok" -eq 1 ]; then
       echo "== acceptance (gate.sh)"
       if ! (cd "$worktree" && STORY="$story" TRIAL="$trial" bash "$trial/gate.sh" 2>&1); then echo "FAIL: acceptance"; ok=0; fi
       if [ -n "$(git -C "$worktree" status --porcelain)" ]; then
@@ -628,7 +666,9 @@ cmd_pr() {
   pr_title="$(git -C "$worktree" log --reverse --format=%s origin/main..HEAD | head -n 1)"
   body_file="$(mktemp)"
   {
-    if [ -f "$trial/pr-body.md" ]; then cat "$trial/pr-body.md"; else echo "Story $story: ${title#*: }"; fi
+    if [ -f "$trial/pr-body.md" ]; then cat "$trial/pr-body.md"
+    elif [ "$kind" = "chore" ]; then echo "$title (#$number). No brief: gated by the build and every existing test."
+    else echo "Story $story: ${title#*: }"; fi
     echo
     if [ -n "$partial" ]; then
       echo "## Partial"
@@ -644,7 +684,7 @@ cmd_pr() {
     grep -E '^(Gate for|== |GATE:|Test run summary|  (total|failed|succeeded|skipped):|    [0-9]+ (Warning|Error))' "$last" || true
     echo '```'
     if [ -f "$trial/review.md" ]; then echo; echo "Review: $(head -n 1 "$trial/review.md")"; else echo; echo "Review: read by the maintainer."; fi
-    printf '\nCloses #%s. Part of #%s.\n' "$number" "$parent"
+    if [ "$kind" = "chore" ]; then printf '\nCloses #%s.\n' "$number"; else printf '\nCloses #%s. Part of #%s.\n' "$number" "$parent"; fi
   } > "$body_file"
   git -C "$worktree" push --quiet -u origin "$branch"
   if [ -n "$partial" ]; then
@@ -838,5 +878,5 @@ case "${1:-}" in
   done)       cmd_done "${2:-}" ;;
   pr)         cmd_pr "${2:-}" "${3:-}" "${4:-}" ;;
   cleanup)    cmd_cleanup "${2:-}" ;;
-  *)          sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *)          sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

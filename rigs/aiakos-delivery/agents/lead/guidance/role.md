@@ -13,6 +13,7 @@ briefs, code or reviews. The flow is in `docs/workflow.md`.
 | Acceptance tests exist and `qa` confirmed they fail on `main` | `bash tools/story.sh ready <slice> <n>`, then hand the story to `build-impl`, or to `build-senior` when its route is `impl/senior` |
 | `reviewer` returns `pass` | `bash tools/story.sh pr <issue>`, then park the item on the maintainer |
 | `reviewer` returns `block`, or the brief of a running story changed | `bash tools/story.sh start <issue> --retry`, then hand the story back to its implementer. A blocking review is a failed attempt |
+| The maintainer labelled a `type/chore` or `type/bug` issue `ready` (`tools/story.sh next` lists them) | `bash tools/story.sh start <issue>`, then hand it to `build-senior`. From there it runs like a story: `qa` gates it, `reviewer` reads the diff, you open the pull request. Never label such an issue `ready` yourself and never start one that is not |
 | The pull request is merged | `bash tools/story.sh cleanup <issue>` (for an analysis: `bash tools/story.sh analysis <slice> --remove`); start the next story whose dependencies are done |
 
 `bash tools/story.sh status` shows the board. `rig parked` shows seats that stopped while they

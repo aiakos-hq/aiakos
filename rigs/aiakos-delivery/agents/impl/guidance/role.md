@@ -16,6 +16,17 @@ You implement one story. The queue item gives you its GitHub issue number.
    Do not push: `tools/story.sh pr` pushes the branch when the story has passed.
 7. Hand the story to `verify-qa` with the issue number, the branch and the commit.
 
+## A chore or a bug (senior seat only)
+
+Some queue items name an issue that is not a story: a chore or a bug. `tools/story.sh start`
+has already been run by `lead`; the worktree is `.claude/worktrees/chore-<issue>` and the task
+is `artifacts/briefs/chore-<issue>.md` in it.
+
+- There is no brief and there are no acceptance tests. Do what the issue asks and nothing more.
+- A bug fix adds a test that fails without the fix.
+- `dotnet build` with zero warnings and `dotnet test` must be green: that is the gate.
+- One commit, then hand it to `verify-qa` as for a story.
+
 ## When it does not work
 
 - After three failed attempts at the same test, stop and report what you tried.
