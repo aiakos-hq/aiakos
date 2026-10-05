@@ -7,6 +7,7 @@ namespace Aiakos.Spec;
 public static class RigLoader
 {
     private const int MaximumFileBytes = 262144;
+    private const string MissingReferenceMessage = "referenced file or directory not found";
 
     public static LoadResult Load(string rigRoot, string? envPath)
     {
@@ -17,6 +18,7 @@ public static class RigLoader
         var rigDocument = new SemanticDocument(rigNode, GetDisplayPath(root, rigPath), rigParsed);
 
         var agentsByDirectory = new Dictionary<string, SemanticDocument>(PathComparer());
+        var unreadableAgents = new HashSet<string>(PathComparer());
         var agentDocuments = new List<SemanticDocument>();
         var seatAgents = new Dictionary<YamlNode, SemanticDocument>();
         if (rigNode is { Kind: YamlNodeKind.Mapping })
@@ -62,10 +64,18 @@ public static class RigLoader
                         if (agentFile is null) continue;
 
                         var agentDisplayPath = agentFile.Path;
-                        var agentNode = LoadFile(agentFile.AbsolutePath, agentDisplayPath, RigFileKind.Agent, diagnostics, out var agentParsed);
+                        var agentNode = LoadFile(agentFile.AbsolutePath, agentDisplayPath, RigFileKind.Agent,
+                            diagnostics, out var agentParsed, source, out var unreadable);
+                        if (unreadable)
+                            unreadableAgents.Add(agentDirectory.AbsolutePath);
                         agentDocument = new SemanticDocument(agentNode, agentDisplayPath, agentParsed);
                         agentsByDirectory.Add(agentDirectory.AbsolutePath, agentDocument);
                         agentDocuments.Add(agentDocument);
+                    }
+                    else if (unreadableAgents.Contains(agentDirectory.AbsolutePath))
+                    {
+                        diagnostics.Add(new Diagnostic(Severity.Error, "AIK3001", source.File, source.Line,
+                            source.Column, MissingReferenceMessage, null));
                     }
 
                     seatAgents[seat] = agentDocument;
@@ -85,8 +95,13 @@ public static class RigLoader
     }
 
     private static YamlNode? LoadFile(string path, string displayPath, RigFileKind kind, List<Diagnostic> allDiagnostics, out bool parsed)
+        => LoadFile(path, displayPath, kind, allDiagnostics, out parsed, null, out _);
+
+    private static YamlNode? LoadFile(string path, string displayPath, RigFileKind kind,
+        List<Diagnostic> allDiagnostics, out bool parsed, ReferenceSource? readFailureSource, out bool unreadable)
     {
         parsed = false;
+        unreadable = false;
         byte[] bytes;
         try
         {
@@ -94,37 +109,44 @@ public static class RigLoader
         }
         catch (FileNotFoundException)
         {
-            allDiagnostics.Add(new Diagnostic(Severity.Error, "AIK1001", displayPath, 1, 1, "file not found", null));
+            unreadable = true;
+            allDiagnostics.Add(ReadFailureDiagnostic(displayPath, readFailureSource));
             return null;
         }
         catch (DirectoryNotFoundException)
         {
-            allDiagnostics.Add(new Diagnostic(Severity.Error, "AIK1001", displayPath, 1, 1, "file not found", null));
+            unreadable = true;
+            allDiagnostics.Add(ReadFailureDiagnostic(displayPath, readFailureSource));
             return null;
         }
         catch (IOException)
         {
-            allDiagnostics.Add(new Diagnostic(Severity.Error, "AIK1001", displayPath, 1, 1, "file not found", null));
+            unreadable = true;
+            allDiagnostics.Add(ReadFailureDiagnostic(displayPath, readFailureSource));
             return null;
         }
         catch (UnauthorizedAccessException)
         {
-            allDiagnostics.Add(new Diagnostic(Severity.Error, "AIK1001", displayPath, 1, 1, "file not found", null));
+            unreadable = true;
+            allDiagnostics.Add(ReadFailureDiagnostic(displayPath, readFailureSource));
             return null;
         }
         catch (ArgumentException)
         {
-            allDiagnostics.Add(new Diagnostic(Severity.Error, "AIK1001", displayPath, 1, 1, "file not found", null));
+            unreadable = true;
+            allDiagnostics.Add(ReadFailureDiagnostic(displayPath, readFailureSource));
             return null;
         }
         catch (NotSupportedException)
         {
-            allDiagnostics.Add(new Diagnostic(Severity.Error, "AIK1001", displayPath, 1, 1, "file not found", null));
+            unreadable = true;
+            allDiagnostics.Add(ReadFailureDiagnostic(displayPath, readFailureSource));
             return null;
         }
         catch (System.Security.SecurityException)
         {
-            allDiagnostics.Add(new Diagnostic(Severity.Error, "AIK1001", displayPath, 1, 1, "file not found", null));
+            unreadable = true;
+            allDiagnostics.Add(ReadFailureDiagnostic(displayPath, readFailureSource));
             return null;
         }
 
@@ -175,6 +197,12 @@ public static class RigLoader
         allDiagnostics.AddRange(forbiddenDiagnostics.Concat(validationDiagnostics).OrderBy(diagnostic => diagnostic.Line).ThenBy(diagnostic => diagnostic.Column));
         return document;
     }
+
+    private static Diagnostic ReadFailureDiagnostic(string displayPath, ReferenceSource? referenceSource) =>
+        referenceSource is { } source
+            ? new Diagnostic(Severity.Error, "AIK3001", source.File, source.Line, source.Column,
+                MissingReferenceMessage, null)
+            : new Diagnostic(Severity.Error, "AIK1001", displayPath, 1, 1, "file not found", null);
 
     private static IEnumerable<YamlNode> Values(YamlNode? mapping, string key)
     {
