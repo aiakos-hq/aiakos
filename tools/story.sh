@@ -9,6 +9,10 @@
 #                                         do there
 #   tools/story.sh split-done <slice>     checks the stories.md written there and copies it in
 #   tools/story.sh show <slice> <n>       prints story <n> as an implementer will get it
+#   tools/story.sh analysis-pr <slice> [--look "<reason>"]
+#                                         the one pull request of a slice's analysis: checks the
+#                                         split and the review, sets status approved and the
+#                                         index row; the maintainer's merge is the approval
 #   tools/story.sh analysis <slice> [--remove]
 #                                         a worktree and branch for the analysis of one slice
 #
@@ -686,6 +690,99 @@ cmd_analysis() {
   echo "Work on docs/briefs/$slice/ there. After the merge: tools/story.sh analysis $slice --remove"
 }
 
+# The index row of a slice in docs/briefs/README.md: status, story count, no open findings.
+# Adds the row when the slice has none.
+index_row() {
+  local readme="$1" slice="$2" brief="$3" stories="$4" count title issue route row
+  count="$(grep -cE '^## S[0-9]+:' "$stories")"
+  if grep -qE "^\| \[$slice " "$readme"; then
+    awk -v slice="$slice" -v count="$count" 'BEGIN { FS = OFS = "|" }
+      index($0, "| [" slice " ") == 1 { $5 = " approved "; $6 = " [" count "](" slice "/stories.md) "; $7 = " " }
+      { print }' "$readme" > "$readme.new" && mv "$readme.new" "$readme"
+  else
+    title="$(front "$brief" title)"; issue="$(front "$brief" issue)"; route="$(norm_route "$(front "$brief" route)")"
+    row="| [$slice $title]($slice/brief.md) | #$issue | \`$route\` | approved | [$count]($slice/stories.md) | | |"
+    awk -v row="$row" 'NR == FNR { if ($0 ~ /^\| \[[0-9]+-[0-9]+ /) last = FNR; next }
+      { print } FNR == last { print row }' "$readme" "$readme" > "$readme.new" && mv "$readme.new" "$readme"
+  fi
+}
+
+# Opens the one pull request of a slice's analysis: checks the split and the architect's review,
+# sets the status and the index row, and says whether the maintainer needs to read it or can
+# merge it as routine. The maintainer's merge is the approval. Run it in the analysis worktree.
+cmd_analysis_pr() {
+  local slice="${1:-}" look="" branch_name reviewed file open title issue subject body_file url
+  is_slice "$slice" || die "usage: analysis-pr <slice> [--look \"<why the maintainer should read it>\"]"
+  if [ "${2:-}" = "--look" ]; then look="${3:-}"; [ -n "$look" ] || die "--look needs the reason"
+  elif [ -n "${2:-}" ]; then die "unknown option for analysis-pr: $2"; fi
+  dir="$here/docs/briefs/$slice"
+  [ -f "$dir/brief.md" ] && [ -f "$dir/items.tsv" ] && [ -f "$dir/stories.md" ] || die "docs/briefs/$slice needs brief.md, items.tsv and stories.md"
+  branch_name="$(git -C "$here" rev-parse --abbrev-ref HEAD)"
+  [ "$branch_name" != "main" ] && [ "$branch_name" != "HEAD" ] || die "run this on the slice's branch (tools/story.sh analysis $slice), not on $branch_name"
+  [ -z "$(git -C "$here" status --porcelain)" ] || die "uncommitted changes in $(native "$here"): commit them first"
+  run_check "$dir" > /dev/null || die "the story check fails (tools/story.sh check $slice)"
+
+  # The architect's review: no open finding, and nothing but bookkeeping changed after it.
+  [ -f "$dir/findings.md" ] || die "no docs/briefs/$slice/findings.md: the architect has not reviewed this slice"
+  open="$(grep -c '^- \[ \]' "$dir/findings.md" || true)"
+  [ "$open" -eq 0 ] || die "docs/briefs/$slice/findings.md has $open open finding(s)"
+  reviewed="$(grep -oE 'Reviewed at commit [0-9a-f]{7,40}' "$dir/findings.md" | tail -n 1 | cut -d' ' -f4)"
+  [ -n "$reviewed" ] || die "findings.md has no 'Reviewed at commit <sha>' line"
+  git -C "$here" merge-base --is-ancestor "$reviewed" HEAD 2>/dev/null || die "findings.md names commit $reviewed, which is not on this branch"
+  for file in $(git -C "$here" diff --name-only "$reviewed" HEAD); do
+    case "$file" in
+      "docs/briefs/$slice/findings.md"|docs/briefs/README.md) ;;
+      "docs/briefs/$slice/brief.md")
+        if git -C "$here" diff -U0 "$reviewed" HEAD -- "$file" | grep -E '^[+-][^+-]' | grep -vqE '^[+-]status:'; then
+          die "brief.md changed after the architect's review at $reviewed: hand the slice back to the architect"
+        fi ;;
+      *) die "$file changed after the architect's review at $reviewed: hand the slice back to the architect" ;;
+    esac
+  done
+
+  # What makes this more than routine for the maintainer.
+  git -C "$here" fetch --quiet origin main
+  for file in $(git -C "$here" diff --name-only origin/main...HEAD); do
+    case "$file" in "docs/briefs/$slice/"*|docs/briefs/README.md) ;; *) look="${look:+$look; }it changes $file, outside the brief" ;; esac
+  done
+  if grep -qE '^route:[[:space:]]*impl/senior' "$dir/stories.md" || [ "$(front "$dir/brief.md" route)" = "impl/senior" ]; then
+    look="${look:+$look; }a story is escalated to impl/senior"
+  fi
+
+  title="$(front "$dir/brief.md" title)"; issue="$(front "$dir/brief.md" issue)"
+  subject="docs(briefs): brief $slice, $title (#$issue)"
+  echo "slice    $slice: $title (part of #$issue)"
+  echo "review   no open finding; reviewed at $reviewed"
+  echo "stories  $(grep -cE '^## S[0-9]+:' "$dir/stories.md")"
+  if [ -n "$look" ]; then echo "for the maintainer: READ IT: $look"; else echo "for the maintainer: routine (brief only, reviewed by the architect)"; fi
+  if [ "${AIAKOS_NO_WRITE:-}" = "1" ]; then echo "dry run: would set status approved, update the index row, commit, push and open the pull request"; return; fi
+
+  awk 'NR == 1 && /^---/ { infront = 1; print; next } infront && /^---/ { infront = 0 } infront && /^status:/ { sub(/^status:[[:space:]]*[a-z]+/, "status: approved") } { print }' "$dir/brief.md" > "$dir/brief.md.new" && mv "$dir/brief.md.new" "$dir/brief.md"
+  index_row "$here/docs/briefs/README.md" "$slice" "$dir/brief.md" "$dir/stories.md"
+  if [ -n "$(git -C "$here" status --porcelain)" ]; then
+    git -C "$here" add "docs/briefs/$slice/brief.md" docs/briefs/README.md
+    git -C "$here" commit --quiet -m "$subject"
+  fi
+  git -C "$here" push --quiet -u origin "$branch_name"
+  body_file="$(mktemp)"
+  {
+    if [ -n "$look" ]; then echo "**For the maintainer: read this one.** $look."
+    else echo "**For the maintainer: routine.** Only the brief of slice $slice changes, and the architect reviewed it."; fi
+    echo
+    echo "Analysis of slice $slice: $title. Part of #$issue. Merging this is the approval; the status is already \`approved\` in the brief, so no second pull request follows."
+    echo
+    echo '```text'
+    run_check "$dir"
+    echo '```'
+    echo
+    echo "Story review: no open finding, reviewed at \`$reviewed\` (\`docs/briefs/$slice/findings.md\`)."
+  } > "$body_file"
+  url="$(gh pr create --repo "$REPO" --base main --head "$branch_name" --title "$subject" --body-file "$body_file")"
+  rm -f "$body_file"
+  echo "pr       $url"
+  echo "Park this on the maintainer with the link. After the merge: tools/story.sh analysis $slice --remove"
+}
+
 # Runs a story's acceptance gate against main, in a worktree that is removed again. The gate
 # must fail there; "ready" asks for that. Whether it fails for the right reason is for QA to read.
 cmd_baseline() {
@@ -736,9 +833,10 @@ case "${1:-}" in
   next)       cmd_next "${2:-}" ;;
   start)      cmd_start "${2:-}" "${3:-}" ;;
   analysis)   cmd_analysis "${2:-}" "${3:-}" ;;
+  analysis-pr) cmd_analysis_pr "${2:-}" "${3:-}" "${4:-}" ;;
   baseline)   cmd_baseline "${2:-}" "${3:-}" ;;
   done)       cmd_done "${2:-}" ;;
   pr)         cmd_pr "${2:-}" "${3:-}" "${4:-}" ;;
   cleanup)    cmd_cleanup "${2:-}" ;;
-  *)          sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *)          sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
