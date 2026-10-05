@@ -104,7 +104,8 @@ C1. Successful Load returns the same resolved content/parameters as 14-3 plus th
 R1. CanonicalJson.Write returns compact JSON without BOM or trailing newline, encoded as UTF-8
    when hashed. Sort object property names by StringComparer.Ordinal after NFC normalization;
    recursively NFC-normalize keys and string values. Preserve array order. Null is `null`, bool
-   is `true`/`false`, integers use invariant decimal without leading zero/plus. String escaping:
+   is `true`/`false`, integers use their Int64 value in invariant decimal without leading
+   zero/plus; parsed `-0` is accepted and writes exactly `0`. String escaping:
    double quote and backslash become `\"` and `\\`; use `\b`, `\t`, `\n`, `\f`, `\r` for those
    controls and lowercase four-hex `\u00xx` for the remaining U+0000–001F. All other Unicode
    scalars, including non-ASCII, `<`, `>`, `&`, `/` and U+2028, appear literally. No HTML escaping.
@@ -124,6 +125,7 @@ R1. CanonicalJson.Write returns compact JSON without BOM or trailing newline, en
    parsed `1.5`, `1.0`, `1e0`, `9223372036854775808`; parsed `{"a":1,"a":2}`;
    parsed `{"é":1,"e\u0301":2}` (NFC-key collision); parsed `"\ud800"` and
    `{"\ud800":1}` (isolated surrogate value/key). All have the same exact exception above.
+   The valid negative-zero input is parsed `-0`, output exactly `0`.
    The valid non-BMP input is parsed `"\ud83d\ude00"`, output exactly `"😀"`.
    These helper tests do not create or change YAML diagnostics.
 
@@ -204,7 +206,7 @@ One committed xUnit test per output ID (hyphens removed from C# method names), a
 
 | ID | Input/variants | Exact expected output |
 |---|---|---|
-| `JSON-exact` | JSON tree `{"z":null,"s":"e\u0301<&/","b":true,"a":[2,1]}`; controls/quote/backslash; nested reordered properties; non-BMP pair; unsupported variants listed below | `{"a":[2,1],"b":true,"s":"é<&/","z":null}`; specified short/control escapes, literal non-BMP character; unsupported variants throw ArgumentException with Message `unsupported canonical JSON value`; no BOM/newline/whitespace outside strings |
+| `JSON-exact` | JSON tree `{"z":null,"s":"e\u0301<&/","b":true,"a":[2,1]}`; controls/quote/backslash; nested reordered properties; non-BMP pair; parsed `-0`; unsupported variants listed below | `{"a":[2,1],"b":true,"s":"é<&/","z":null}`; specified short/control escapes, literal non-BMP character; `-0` writes `0`; unsupported variants throw ArgumentException with Message `unsupported canonical JSON value`; no BOM/newline/whitespace outside strings |
 | `CAN-shared` | resolved minimal fixture below; full fixture with culture/guidance/binary skill, human pm | exact minimal SharedJson below; full JSON has exactly R2 keys including null human agent, descriptors with path/hash/byte count and no Content/base64; snapshots unchanged |
 | `CAN-order` | permute seats, agents, workspace repos, seat repos, secrets, skills and files with explicit workdir_repo; reverse guidance or permission order; NFC colliding path spelling with differing file descriptors | unordered permutations identical SharedJson; reversed distinct guidance/permissions different SharedJson; normalization ties sorted by canonical element JSON; input arrays unchanged |
 | `CAN-binding` | minimal fixture; shuffled binding declarations; changed node/path/root/secret source; unused known repo binding | exact minimal BindingJson below; permutations identical, each changed binding value changes BindingJson; shared tree unchanged; node path tilde/trailing slash/case preserved apart from NFC |
