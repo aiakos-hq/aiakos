@@ -4,7 +4,7 @@ Reviewed at commit b689012. Stories: 6. Check: ok.
 
 ## Findings
 
-- [ ] S6 (judgment-gap): after a harness exits at once, R14 leaves a labelled dead pane and a `starting` entry with null handle fields, and R19 then answers every later start with `NotFound` because that entry cannot match SessionId/PaneId/PanePid, so the seat cannot be started again in this slice although R14's error says Retryable=true and spec 0004 R13/R32 treat a `starting` entry matched by session name as managed and replace the dead pane. Fix: give R19 and E19 the exact result for a dead target whose entry is `starting` with the same launch label (removal, and whether `PaneExited` is published and with which PaneStartTime), and ask `lead` if the start time of a never-identified pane needs a maintainer decision.
+- [x] S6 (judgment-gap): after a harness exits at once, R14 leaves a labelled dead pane and a `starting` entry with null handle fields, and R19 then answers every later start with `NotFound` because that entry cannot match SessionId/PaneId/PanePid, so the seat cannot be started again in this slice although R14's error says Retryable=true and spec 0004 R13/R32 treat a `starting` entry matched by session name as managed and replace the dead pane. Fix: give R19 and E19 the exact result for a dead target whose entry is `starting` with the same launch label (removal, and whether `PaneExited` is published and with which PaneStartTime), and ask `lead` if the start time of a never-identified pane needs a maintainer decision.
 - [x] S6 (judgment-gap): R19 writes `Reported=true` before calling `publish`, so when the callback throws the start fails with the pane kept, and the retry finds `Reported=true`, publishes nothing and removes the pane: the exit is never reported. Fix: state in R19 and E19 that a failed publication leaves or restores `Reported=false` (or that the flag is written only after `publish` returns).
 - [x] S3 (judgment-gap): R9 and E9 fix camelCase property names for the registry file, while spec 0004 "Registry entry" gives snake_case (`seat_id`, `pane_start_time`, `observed_at`) for this durable format that 11-5 reconciliation reads. Fix: change R9 and E9 to the spec's snake_case names, listed exactly.
 - [x] S2 (context-gap): R8 does not say whether the six `set-option -g` calls are issued when `show-environment -g` answers no-server, and a scripted runner needs one result or seven. Fix: state in R8 and E8 the exact command sequence for the no-server case.
@@ -22,4 +22,10 @@ Reviewed at commit b689012. Stories: 6. Check: ok.
 - S2 (six rules, six outputs) was judged to fit one run; no split was asked for.
 - 11-1 code was read only for the record shapes in `SessionHost.cs` and `TmuxNames.cs`.
 
-Author revision: findings 2–9 addressed in R5–R9/R16–R19/E5–E9/E16–E19 and T6–T8, with attach and diagnostics separated from lifecycle. Finding 1 awaits lead decision qitem-20261005215150-8202e4fc: whether an unidentifiable failed starting launch may be removed without an event, or whether the shared handle needs a nullable start time. No unknown identity value was invented.
+Author revision: findings 2–9 addressed in R5–R9/R16–R19/E5–E9/E16–E19 and T6–T8, with attach and diagnostics separated from lifecycle. The initially pending finding 1 was subsequently resolved by the maintainer decision recorded below. No unknown identity value was invented.
+
+Finding 1 resolution: maintainer decision 2026-10-06 via lead qitem-20261005215420-064ab307 narrows
+spec R13. R19/E19 replace a verified matching dead starting launch with no returned handle without
+an event/guessed start time; registry recovery sidecar preserves full prior identity and exit
+until replacement running is committed. Spec R13 and Changes after acceptance amended in the
+same analysis. R9/E9 include the sidecar's persistent format/API; T3/T6 guard it.

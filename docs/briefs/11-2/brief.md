@@ -94,6 +94,9 @@ public interface ISessionRegistry
     Task<IReadOnlyList<RegistryEntry>> ReadAllAsync(CancellationToken ct);
     Task WriteAsync(RegistryEntry entry, CancellationToken ct);
     Task DeleteAsync(string sessionName, CancellationToken ct);
+    Task<IReadOnlyList<RegistryEntry>> ReadRecoveryAsync(string sessionName, CancellationToken ct);
+    Task WriteRecoveryAsync(RegistryEntry entry, CancellationToken ct);
+    Task DeleteRecoveryAsync(string sessionName, CancellationToken ct);
 }
 public sealed class SessionRegistry : ISessionRegistry { public SessionRegistry(string home); }
 public interface IProcessSnapshot
@@ -298,6 +301,14 @@ R9. SessionRegistry rejects a non-absolute Home with ArgumentException("Invalid 
     (FileStream.Flush(true)), then File.Move(overwrite:true). Final file stays 0600. The older file
     remains readable until rename. On failure remove that invocation's temporary file if possible,
     keep the previous committed file; never delete the previous entry as recovery.
+    Recovery methods use the same validation/atomic-write/mode/serialization rules at
+    <SessionName>.recovery (JSON array of full RegistryEntry objects). ReadRecoveryAsync returns
+    the ordered entries, or [] only when absent. WriteRecoveryAsync atomically appends an entry
+    unless that LaunchId is already recorded; never overwrite earlier recovery evidence on a
+    failed replacement's next attempt. Use the same per-session write lock for primary/recovery
+    operations. This sidecar retains failed launches' identity/exit evidence while the primary
+    .json is replaced by new attempts. ReadAllAsync
+    ignores .recovery files; deleting a primary entry does not delete its recovery sidecar.
 
 R10. ReadAsync returns null only for an absent file; malformed JSON or IO errors throw
     SessionHostException(TmuxFailed,"Session registry operation failed.",true), never return
@@ -399,7 +410,12 @@ R18. TmuxSessionStarter checks availability, caller cancellation, LaunchValidato
 R19. After listing and the alive/foreign checks, perform R13 orphan checking. A managed dead
     target needs a matching registry entry (same SessionId/PaneId/PanePid/launch label) before
     removal; absence/mismatch -> NotFound,"Session was not found.",false, no removal/new entry.
-    Read its exit code/signal as nullable integers: empty stays null, never zero. If Exit.Reported
+    Exception: a matching State="starting" entry with SessionId/PaneId/PanePid/PaneStartTime all
+    null proves no handle was returned (R20 commits running before returning). Match its Schema,
+    Instance, SeatId, SeatAddress, LaunchId, Harness and SessionName to the dead target's labels/name;
+    do not require its absent handle fields or invent a start time. This case is recoverable.
+    For an ordinary entry with a recorded handle, read its exit code/signal as nullable integers:
+    empty stays null, never zero. If Exit.Reported
     is not already true, write that exit with injected ObservedAt and Reported=false, then call
     publish(PaneExited(old handle,ObservedAt,code,signal)) before removal. Only after publish returns
     successfully write the same exit with Reported=true. If publish throws, convert to
@@ -408,12 +424,25 @@ R19. After listing and the alive/foreign checks, perform R13 orphan checking. A 
     before returning, and a throw means it did not accept the event. Persisted reported=true
     deduplicates successful publication on a normal retry/process restart;
     atomic persistence plus external event delivery is not a transactional outbox in this slice.
-    Reverify PID/launch/dead=1 using R17's display command immediately before
+    For the exceptional matching starting entry with no returned handle, write its Exit code/signal/
+    ObservedAt with Reported=false, and do not call publish or construct a SessionHandle. Retain this
+    full failed-launch entry using WriteRecoveryAsync before any removal. Then reverify and remove
+    only the matching dead pane, as below. The failed StartAsync already reported TmuxFailed.
+    Preserve the recovery sidecar across primary deletion/new starting writes and every failed
+    replacement; delete it only after the replacement's running entry is durably committed.
+    Maintainer decision 2026-10-06: this narrowly exempts such failed starting launches from
+    spec 0004 R13's PaneExited requirement. SessionHandle.PaneStartTime remains non-nullable and
+    no merged 11-1 code changes. The spec amendment is included in this analysis PR.
+    Reverify PID equals the just-listed target PID, launch equals the matched registry LaunchId,
+    and dead=1 using R17's display command immediately before
     ["kill-session","-t","="+SessionName]; refusal leaves the existing registry/session untouched.
     On successful removal delete that registry entry, then R11 starts the new launch.
 
 R20. On an absent/removed target, write R11 starting -> R15–R17 CreateAsync -> R11 running,
-    in order, then return the handle. A failure stops this sequence at that point and releases
+    in order, then delete any recovery sidecar for this session name and return the handle.
+    If recovery cleanup fails, propagate the registry error and keep the new running pane/entry;
+    never delete/kill the new pane. Recovery entries are evidence, not other managed panes.
+    A failure stops this sequence at that point and releases
     the lifecycle lock; never remove a possibly live pane to make retry succeed. A second start
     finds a live pane even after a prior label/registry failure and refuses it. Production caller
     supplies publish, not an implicit noop. No fake delivery, stop, list/adopt/watch APIs are added.
@@ -455,7 +484,7 @@ paths/socket and a harmless test executable. Exact error triples below are (Code
 | `E6` | tmux 3.4, 3.6, 4.0, 3.3a, next-3.7, master, garbage, missing binary; two Initialize calls | accepted 3.4/3.6/4.0 have Available/session-host.tmux; 3.3a has Unavailable/"tmux 3.3a < 3.4"/[]; unparseable has null Version and fixed R6 reason; missing has fixed R5 reason; only one -V invocation, no socket/config flags in version command; no new-session/input; subsequent client RunAsync throws Unavailable |
 | `E7` | initialization and scripted RunAsync; semicolon data and load-buffer stdin | exact R7 config bytes/prefix; no user config; every data suffix ';' gets one inserted backslash and round-trips including literal '\\;'; standalone ';' data is escaped; separate args unchanged otherwise; non-load stdin refused with ArgumentException; load stdin uses 5s+2s/MiB; configuration failure Unavailable with fixed R7 reason |
 | `E8` | no server; existing server with allowed variables plus AIAKOS_NODE_TOKEN, OTEL_X, DOTNET_X and unsafe LC_ALL; failing unset | no-server sequence exactly -V then prefixed show-environment -g, no other calls or server creation; forbidden globals removed with names-only logs; six options applied in order; prior sessions untouched; failed unset stops initialization and Available is not advertised |
-| `E9` | registry write/read/update; malformed name; simulated crash before rename | directory 0700/file 0600, exact R9 snake_case schema and Attributes round-trip; null handle fields starting then real fields running; no argv/env; invalid name ArgumentException("Invalid registry session name."); failed write preserves previous committed bytes |
+| `E9` | registry write/read/update; malformed name; simulated crash before rename | directory 0700/file 0600, exact R9 snake_case schema and Attributes round-trip; recovery array round-trips full old entries with identical modes/atomicity; repeated same LaunchId is not appended, different failed attempts preserve earlier entries, absent ReadRecoveryAsync returns []; it is excluded from ReadAllAsync; primary delete does not delete recovery; null handle fields starting then real fields running; no argv/env; invalid name ArgumentException("Invalid registry session name."); failed write preserves previous committed bytes |
 | `E10` | absent/corrupt registry file; .tmp leftover; repeated delete; concurrent writes and cancellation before rename | absent read null; corrupt read TmuxFailed/"Session registry operation failed."/true; sorted .json entries only; delete absent succeeds; no torn committed file; canceled pre-rename write preserves older entry |
 | `E11` | successful/failed start with recording registry | starting committed before new-session, running committed only after labels; CreatedAt/Attributes preserved; failures after starting retain it and do not stop/remove panes |
 | `E12` | fake proc with foreign UID, vanished pid, comm containing parentheses/spaces, invalid cmdline UTF8 and matching-UID malformed stat | only own effective UID; exact fields 4/6/22; sorted PIDs; argv NUL-split with U+FFFD; no environ read; transient disappearance skipped; matching-user parse failure TmuxFailed/"Process snapshot could not be read."/true |
@@ -465,18 +494,19 @@ paths/socket and a harmless test executable. Exact error triples below are (Code
 | `E16` | response $1 TAB %2 TAB 1234; failure in each label write | exact sequence verify/schema, verify/instance, verify/seat-id, verify/seat-address, verify/launch, verify/harness, verify/remain-on-exit (14 calls); handle (seat-1,launch-1,demo_impl,$1,%2,1234,9876,false); failure stops subsequent commands and preserves pane/starting |
 | `E17` | post-create verification mismatch, immediate dead new pane | mismatched PID/nonempty launch NotFound/"Session was not found."/false before mutation; matching PID and allowed empty launch permit labels; immediate dead pane stays as evidence |
 | `E18` | invalid spec; SeatId/LaunchId/Harness containing TAB/LF/CR/NUL; live existing target; malformed listing; foreign dead target; two same-seat/different-seat starts | validator's existing first error unchanged and no mutation; after valid validator result, those named label fields reject TAB/LF/CR/NUL with InvalidArgument/"Launch labels contain a forbidden character."/false before mutation; live target AlreadyRunning/"A live session already exists for SeatId."/false and running launch_id, no kill; malformed listing fixed R18 failure; foreign dead target NotFound; same seat serializes, different seats overlap |
-| `E19` | matching managed dead target with status 7, empty signal, exit.reported=false/true; registry mismatch; failed publication; stale reverify | PaneExited(7,null) published once before dead removal (none if reported); old registry deleted after successful remove; no false 0 for unknown exit; mismatched registry/stale PID or launch/dead refuses deletion; publication failure fixed R19 error, Reported=false and no removal; retry publishes, then persists Reported=true before removal |
+| `E19` | matching managed dead target with status 7, empty signal, exit.reported=false/true; matching starting entry with all handle fields null/no returned handle; registry mismatch; failed publication; stale reverify | PaneExited(7,null) published once before dead removal (none if reported); old registry deleted after successful remove; no false 0 for unknown exit; mismatched registry/stale PID or launch/dead refuses deletion; publication failure fixed R19 error, Reported=false and no removal; retry publishes, then persists Reported=true before removal; matching unreturned starting launch stores exit (7,null) and full old identity in .recovery before verified dead removal, emits no PaneExited and invents no PaneStartTime; new launch succeeds; recovery evidence remains across failed replacement and is removed only after replacement running commit; mismatched starting labels refuse removal |
 | `E20` | empty-target start, injected failure/cancellation at registry/create/labels/running-write stages, retry after uncertain start | ordered R20 stages; no subsequent action on failure; retained uncertain entry/pane; locks released, retry refuses an existing live pane; no automatic input/kill/retry; supplied event callback used |
 | `E21` | default/true/false attach for demo_impl, invalid name, unavailable client | exactly [tmux,-L,aiakos-test,attach-session,-r,=demo_impl], without -r for false; invalid name NotFound; unavailable throws Unavailable; no process/input/mutation |
 | `E22` | ActivityListener/MeterListener and log capture with argv/env/attributes/stdout/stderr sentinels; success/failure/version cases | exact R22 spans/instruments and bounded tags; current outcomes/availability observed; no sentinel values, raw commands or error messages in diagnostics; registry has Attributes but no argv/environment; disposing runner/client components leaves existing harness alive |
 
-## Analysis context gap
+## Analysis decision
 
-context-gap: spec 0004 requires a pane handle start time and immediate-exit evidence, but a
-process reaped before /proc inspection cannot supply that start time. R14 reports this explicitly
-and preserves the dead pane/starting registry for later reconciliation; T5 requires retained
-evidence, not a fabricated successful handle. The architect must review this boundary; no
-process-lifetime guarantee or readiness wait is being assumed.
+context-gap resolved by maintainer decision 2026-10-06 (lead handoff
+qitem-20261005215420-064ab307): a dead matching starting launch for which no handle was ever
+returned may be replaced without PaneExited. R14 still fails honestly when /proc start time is
+unobservable; R19/E19 now allow recovery, retaining old identity/exit evidence in the registry
+until verified removal and durable replacement. The non-nullable 11-1 handle is unchanged.
+Spec 0004 R13 and Changes after acceptance are amended in this same analysis PR.
 
 The data-suffix escape in R7 follows tmux's argv parser (it removes the single backslash before
 an ending semicolon): [tmux 3.4 cmd_parse_from_arguments](https://github.com/tmux/tmux/blob/3.4/cmd-parse.y#L1015).

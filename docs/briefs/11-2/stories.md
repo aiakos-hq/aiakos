@@ -20,7 +20,7 @@ depends: -
 owns: R9, R10
 outputs: E9, E10
 tests: T3
-notes: Reuses merged 11-1 RegistryEntry records. Direct-write tests cover starting/running records; start ordering R11/E11 belongs to S6. This store owns no watcher or process.
+notes: Reuses merged 11-1 RegistryEntry records. Direct-write tests cover starting/running records; start ordering R11/E11 belongs to S6. R9 recovery array retains full failed-launch evidence across replacement attempts; it is not a watcher or another managed listing. This store owns no watcher or process.
 
 ## S4: Process snapshots and orphan checks
 goal: Same-user process snapshots provide exact identities and helpers exclude live managed trees before checking orphan predicates.
@@ -44,7 +44,7 @@ depends: S2, S3, S4, S5
 owns: R11, R18, R19, R20
 outputs: E11, E18, E19, E20
 tests: T6
-notes: Composes merged validators with registry, snapshots and CreateAsync. Add integrated E11/E13/E14 ordering assertions. R19 publishes through the supplied callback and persists exit.reported; no watcher/outbox is assumed. The starter remains a start component, not a partial ISessionHost implementation; final node registration/reconciliation belongs to 11-5. Immediate-exit starttime and publication atomicity boundaries are explicit in the brief for architect review.
+notes: Composes merged validators with registry, snapshots and CreateAsync. Add integrated E11/E13/E14 ordering assertions. R19 publishes through the supplied callback and persists exit.reported; no watcher/outbox is assumed. The starter remains a start component, not a partial ISessionHost implementation; final node registration/reconciliation belongs to 11-5. R19 applies maintainer decision 2026-10-06 to dead starting launches without a returned handle; no event or invented start time, and recovery evidence lasts until durable replacement. Publication atomicity stays explicit for architect review.
 
 ## S7: Read-only attach commands
 goal: A started pane has an exact read-only attach command, with an explicit writable variant and no mutation.
