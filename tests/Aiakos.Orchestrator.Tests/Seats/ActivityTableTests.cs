@@ -315,7 +315,7 @@ public sealed class ActivityTableTests
     }
 
     private static SeatStep Apply(SeatState state, HarnessEventKind kind, IReadOnlyDictionary<string, string> attributes) =>
-        SeatStateMachine.Apply(state, new EventReceived(NodeId, 1, 0, LaunchId,
+        SeatStateMachine.Apply(state, new EventReceived(NodeId, state.NextSeq, 0, LaunchId,
             new HarnessBody(kind, "native-1", attributes)), Profile, Now);
 
     private static void AssertNewActivity(HarnessEventKind kind, ActivityValue initial, ActivityValue expected,

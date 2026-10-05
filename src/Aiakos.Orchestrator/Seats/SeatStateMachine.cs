@@ -15,7 +15,17 @@ public static class SeatStateMachine
         ArgumentNullException.ThrowIfNull(profile);
 
         if (input is EventReceived received)
-            return ApplyEvent(state, received, profile, now);
+            return ApplySequencedEvent(state, received, profile, now);
+
+        if (input is NodeAttached attached)
+            return AttachNode(state, attached, now) with { Disposition = null };
+
+        if (input is NodeLinkLost)
+            return ApplyOverlay(state, SeatOverlay.NodeLinkLost, SeatVocabulary.SessionReasonNodeLinkLost, now);
+
+        if (input is OrchestratorRestarted)
+            return ApplyOverlay(state, SeatOverlay.OrchestratorRestarted,
+                SeatVocabulary.SessionReasonOrchestratorRestarted, now);
 
         if (input is CommandDispatchFailed dispatchFailed)
         {
@@ -41,7 +51,209 @@ public static class SeatStateMachine
         return Unchanged(state);
     }
 
-    private static SeatStep ApplyEvent(SeatState state, EventReceived input, IHarnessStateProfile profile,
+    private static SeatStep ApplyObservationGap(SeatState state, DateTimeOffset now)
+    {
+        var step = Unchanged(state);
+        if (state.KnownSession == SessionValue.Present)
+            step = SetActivity(step.State, ActivityValue.Unknown, null,
+                SeatVocabulary.ActivityReasonObservationGap, state.PendingInputRequest, now, "A16");
+
+        if (step.State.Resumability == ResumabilityValue.FreshOnly)
+            step = SetResumability(step, ResumabilityValue.Unknown,
+                SeatVocabulary.ResumabilityReasonObservationGap, "U6", now);
+
+        var effects = step.State.Launch is not null && step.State.KnownSession is
+            SessionValue.Starting or SessionValue.Present or SessionValue.Unknown
+            ? new SeatEffect[] { new RequestCapture(step.State.Launch.LaunchId) }
+            : NoEffects;
+        return step with
+        {
+            Findings = [.. step.Findings, new FindingChange(SeatVocabulary.FindingObservationGap, true)],
+            Effects = [.. step.Effects, .. effects]
+        };
+    }
+
+    private static SeatStep ApplyOverlay(SeatState state, SeatOverlay overlay, string reason, DateTimeOffset now)
+    {
+        if (state.KnownSession is SessionValue.Absent or SessionValue.Exited)
+            return Unchanged(state);
+
+        var replacingOverlay = state.Overlay is not null;
+        var sessionChanged = state.Session != SessionValue.Unknown || state.SessionReason != reason;
+        var activityChanged = state.Activity != ActivityValue.Unknown || state.ActivityReason != reason ||
+            state.ActivityDetail is not null;
+        var next = state with
+        {
+            Overlay = overlay,
+            Session = SessionValue.Unknown,
+            SessionReason = reason,
+            SessionSince = !replacingOverlay && sessionChanged ? now : state.SessionSince,
+            Activity = ActivityValue.Unknown,
+            ActivityDetail = null,
+            ActivityReason = reason,
+            ActivitySince = !replacingOverlay && activityChanged ? now : state.ActivitySince
+        };
+        var transitions = new List<SeatTransition>();
+        if (sessionChanged)
+            transitions.Add(new SeatTransition("session", true, SeatVocabulary.ToStored(state.Session),
+                SeatVocabulary.ToStored(SessionValue.Unknown), reason, "R16"));
+        if (activityChanged)
+            transitions.Add(new SeatTransition("activity", true, SeatVocabulary.ToStored(state.Activity),
+                SeatVocabulary.ToStored(ActivityValue.Unknown), reason, "R16"));
+        return new SeatStep(next, null, null, transitions, NoFindings, NoEffects);
+    }
+
+    private static SeatStep ClearOverlay(SeatState state, DateTimeOffset now)
+    {
+        if (state.Overlay is null)
+            return Unchanged(state);
+
+        var sessionChanged = state.Session != state.KnownSession || state.SessionReason != state.KnownSessionReason;
+        var activityChanged = state.Activity != state.KnownActivity || state.ActivityReason != state.KnownActivityReason;
+        var next = state with
+        {
+            Overlay = null,
+            CatchUpSeq = null,
+            Session = state.KnownSession,
+            SessionReason = state.KnownSessionReason,
+            SessionSince = sessionChanged ? now : state.SessionSince,
+            Activity = state.KnownActivity,
+            ActivityDetail = state.KnownActivityDetail,
+            ActivityReason = state.KnownActivityReason,
+            ActivitySince = activityChanged ? now : state.ActivitySince
+        };
+        var transitions = new List<SeatTransition>();
+        if (sessionChanged)
+            transitions.Add(new SeatTransition("session", true, SeatVocabulary.ToStored(state.Session),
+                SeatVocabulary.ToStored(state.KnownSession), state.KnownSessionReason, "R17"));
+        if (activityChanged)
+            transitions.Add(new SeatTransition("activity", true, SeatVocabulary.ToStored(state.Activity),
+                SeatVocabulary.ToStored(state.KnownActivity), state.KnownActivityReason, "R17"));
+        return new SeatStep(next, null, null, transitions, NoFindings, NoEffects);
+    }
+
+    private static SeatStep AttachNode(SeatState state, NodeAttached input, DateTimeOffset now)
+    {
+        var result = Unchanged(state) with
+        {
+            Findings = [new FindingChange(SeatVocabulary.FindingNodeNotConnected, false)]
+        };
+        if (state.NodeInstanceId is null || state.NodeInstanceId == input.NodeInstanceId)
+        {
+            var attached = result.State with { NodeInstanceId = input.NodeInstanceId };
+            if (attached.Overlay is not null)
+            {
+                var catchUpSeq = input.Inventory?.LastSeq ?? 0;
+                attached = attached with { CatchUpSeq = catchUpSeq };
+                result = result with { State = attached };
+                if (attached.NextSeq > catchUpSeq)
+                    result = Combine(result, ClearOverlay(attached, now));
+                return result;
+            }
+            return result with { State = attached with { CatchUpSeq = null } };
+        }
+
+        var next = result.State with
+        {
+            NodeInstanceId = input.NodeInstanceId,
+            NextSeq = 1,
+            CatchUpSeq = null
+        };
+        result = result with { State = next };
+        if (next.Overlay is not null)
+            result = Combine(result, ClearOverlay(next, now));
+
+        var hasCurrentInventory = input.Inventory is not null && next.Launch is not null &&
+            input.Inventory.LaunchId == next.Launch.LaunchId;
+        var inventoryResult = hasCurrentInventory
+            ? ReconcileInventory(result.State, input.Inventory!, now)
+            : ReconcileMissingInventory(result.State, now);
+        result = Combine(result, inventoryResult);
+        return Combine(result, ApplyObservationGap(result.State, now));
+    }
+
+    private static SeatStep ReconcileInventory(SeatState state, SeatInventoryEntry inventory, DateTimeOffset now)
+    {
+        SeatStep result = state.KnownSession == SessionValue.Absent
+            ? Unchanged(state)
+            : inventory.Lifecycle switch
+        {
+            SessionLifecycle.Launching => ApplySession(state, SessionValue.Starting, null, "S15", now),
+            SessionLifecycle.Running => ApplySession(state, SessionValue.Present, null, "S15", now),
+            SessionLifecycle.Exited => ApplySession(state, SessionValue.Exited, null, "S15", now),
+            _ => ApplySession(state, SessionValue.Unknown, SeatVocabulary.SessionReasonOrphanOrRunning, "S15", now)
+        };
+        if (inventory.Lifecycle == SessionLifecycle.Launching)
+            result = result with { State = result.State with { ReadinessSeen = false } };
+        var findings = new List<FindingChange>(result.Findings);
+        if (inventory.Lifecycle == SessionLifecycle.Exited && state.KnownSession != SessionValue.Exited &&
+            state.Desired == SeatDesired.Up && state.Launch?.StopRequested != true)
+            findings.Add(new FindingChange(SeatVocabulary.FindingUnexpectedExit, true));
+        findings.Add(new FindingChange(SeatVocabulary.FindingInventoryMismatch, false));
+        return result with { Findings = findings };
+    }
+
+    private static SeatStep ReconcileMissingInventory(SeatState state, DateTimeOffset now)
+    {
+        if (state.KnownSession is SessionValue.Starting or SessionValue.Present or SessionValue.Unknown)
+        {
+            var step = ApplySession(state, SessionValue.Unknown, SeatVocabulary.SessionReasonInventoryMissing,
+                "S16", now);
+            return WithFindings(step, Open(SeatVocabulary.FindingInventoryMismatch));
+        }
+        return Unchanged(state);
+    }
+
+    private static SeatStep Combine(SeatStep earlier, SeatStep later) => later with
+    {
+        Transitions = [.. earlier.Transitions, .. later.Transitions],
+        Findings = [.. earlier.Findings, .. later.Findings],
+        Effects = [.. earlier.Effects, .. later.Effects]
+    };
+
+    private static SeatStep ApplySequencedEvent(SeatState state, EventReceived input,
+        IHarnessStateProfile profile, DateTimeOffset now)
+    {
+        var pipeline = Unchanged(state);
+        var gapApplied = false;
+        if (state.NodeInstanceId != input.NodeInstanceId)
+        {
+            if (state.NodeInstanceId is not null)
+            {
+                pipeline = Combine(pipeline, ApplyObservationGap(pipeline.State, now));
+                gapApplied = true;
+            }
+            pipeline = pipeline with
+            {
+                State = pipeline.State with { NodeInstanceId = input.NodeInstanceId, NextSeq = 1 }
+            };
+        }
+
+        if (input.Seq < pipeline.State.NextSeq)
+            return pipeline with { Disposition = EventDisposition.Duplicate };
+
+        if (input.Seq > pipeline.State.NextSeq && !gapApplied)
+        {
+            pipeline = Combine(pipeline, ApplyObservationGap(pipeline.State, now));
+            gapApplied = true;
+        }
+
+        pipeline = pipeline with { State = pipeline.State with { NextSeq = input.Seq + 1 } };
+        if (input.Body is ObservationGapBody && !gapApplied)
+        {
+            pipeline = Combine(pipeline, ApplyObservationGap(pipeline.State, now));
+            gapApplied = true;
+        }
+
+        var bodyResult = ApplyEventBody(pipeline.State, input, profile, now);
+        var result = Combine(pipeline, bodyResult);
+        if (result.State.Overlay is not null && result.State.CatchUpSeq is { } catchUpSeq &&
+            result.State.NextSeq > catchUpSeq)
+            result = Combine(result, ClearOverlay(result.State, now));
+        return result;
+    }
+
+    private static SeatStep ApplyEventBody(SeatState state, EventReceived input, IHarnessStateProfile profile,
         DateTimeOffset now)
     {
         var isCurrentLaunch = state.Launch is not null && input.LaunchId == state.Launch.LaunchId;
