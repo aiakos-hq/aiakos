@@ -46,7 +46,7 @@ rig up aiakos-delivery --existing        # every other start: the same rig resum
 | `lead` | Claude Code | Runs `tools/story.sh`, creates sub-issues, opens pull requests, owns closure |
 | `author`, `author2` | Codex | Write the brief, the item list and the acceptance tests; split the brief. Two seats, so two slices can be analysed at once; a slice stays with one author |
 | `architect` | Claude Code (Opus) | Checks the brief and the split; attacks them before they are approved |
-| `impl` | Codex | Implements one story in its own worktree |
+| `impl`, `impl2` | Codex | Implement one story each, in its own worktree. Two stories run at the same time only when neither depends on the other |
 | `senior` | Codex, stronger model | Implements a story that was escalated |
 | `qa` | Codex | Runs the gate and probes the behaviour |
 | `reviewer` | Claude Code | Reads the diff once |
