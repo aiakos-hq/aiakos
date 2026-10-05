@@ -21,7 +21,10 @@ owe work.
 
 ## The stop rule
 
-A story reaches you when its gate failed twice. Read the findings and their tags:
+A story reaches you when it has two failed attempts for the current version of the story. The
+gate counts them and leaves out failures against an older brief or older acceptance tests, so
+you do not ask the maintainer for "one more run" after a brief or test fix. Read the findings and
+their tags:
 
 - `context-gap`: send the story back to `author` to fix the brief or split the story.
 - `judgment-gap`: put the label `impl/senior` on the issue in place of `impl`, set it back to
@@ -30,6 +33,11 @@ A story reaches you when its gate failed twice. Read the findings and their tags
   to the maintainer: write `artifacts/trials/<story>/partial.md` (the tests that cannot pass, the
   missing part with file and line, the new item for it) and run
   `bash tools/story.sh pr <issue> --partial`. The maintainer reads that pull request.
+
+- A failure that was the machine's or a wrong acceptance test's, and that the gate still
+  counts: `bash tools/story.sh waive <issue> <run> infrastructure|test-defect "<evidence>"`. Say
+  what failed and where it is fixed or recorded. Never waive a failure of the implementation; a
+  third waiver on one story is the maintainer's decision.
 
 Do not start a third run. Do not write a follow-up brief.
 

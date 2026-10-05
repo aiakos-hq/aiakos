@@ -177,6 +177,21 @@ story goes to `lead`: the same crash every time is a broken machine or a change 
 compiler, and rerunning does not fix either.
 Compiler errors, warnings treated as errors and acceptance test failures still count.
 
+**A failure counts only against what it was judged by.** Every gate run records a version: a
+hash of the story text (from the brief on `main`) and of the acceptance tests (`gate.sh` and the
+test sources in `artifacts/trials/<story>/`). When the brief is amended or an acceptance test is
+fixed, the version changes and earlier failures stop counting, because they may have been the
+brief's or the tests' and not the implementer's. A blocking review carries the version of the
+gate run it followed. Nobody has to authorise "one more run" for this; the gate says how many
+earlier failures it left out.
+
+**Waiving a run.** For a failure that was not the implementer's and that the version does not
+catch, `lead` runs `tools/story.sh waive <issue> <run> <kind> "<evidence>"`. There are two kinds:
+`infrastructure` (the machine, or a flaky test the change did not touch) and `test-defect` (the
+acceptance test was wrong). A failure of the implementation cannot be waived. The waiver is a
+file next to the gate log and a comment on the issue, and `status` lists it. A story can have
+two; a third is the maintainer's decision.
+
 **Sending a story back:** `tools/story.sh start <issue> --retry` is the only way. It keeps the
 worktree and branch, merges `main` in, writes the story text again from the brief on `main`
 (and updates the issue body), and sets `in-progress`. When `main` does not merge cleanly, merge
@@ -242,6 +257,12 @@ checkout. `gate.sh` there copies them into the worktree, runs them and removes t
 implementer works in its own worktree and is told not to read that folder; all seats share one
 file system, so this is a convention and not a barrier.
 
+Because they are not in the repository, acceptance tests guard a story only until it is merged.
+Whatever must stay true afterwards needs a test that the implementer commits: a `T` item in the
+brief. A brief for a bug fix always has one, for the bug itself. When a merged story turns out to
+be guarded only by its acceptance tests, the reviewer names that as a backlog item and the
+author ports the tests into the repository in a follow-up.
+
 Each story has its own worktree, and so has the analysis of each slice
 (`tools/story.sh analysis <slice>`). `baseline` uses a worktree that it removes again. No seat
 builds or commits in the main checkout, and no seat creates a worktree by hand.
@@ -270,6 +291,7 @@ bash tools/story.sh ready <slice> <n> [--dry-run]
 bash tools/story.sh next [<route>]
 bash tools/story.sh start <issue> [--retry]
 bash tools/story.sh done <issue>
+bash tools/story.sh waive <issue> <run> infrastructure|test-defect "<evidence>"
 bash tools/story.sh pr <issue> [--maintainer-reviewed]
 bash tools/story.sh cleanup <issue>
 ```
