@@ -16,6 +16,133 @@ public sealed class ResumabilityTableTests
 
     [Theory]
     [InlineData(ResumabilityValue.None, ResumabilityValue.None, null, false)]
+    [InlineData(ResumabilityValue.FreshOnly, ResumabilityValue.Resumable, null, false)]
+    [InlineData(ResumabilityValue.Resumable, ResumabilityValue.Resumable, null, false)]
+    [InlineData(ResumabilityValue.Lost, ResumabilityValue.Unknown, SeatVocabulary.ResumabilityReasonContradictingEvidence, true)]
+    [InlineData(ResumabilityValue.Unknown, ResumabilityValue.Resumable, null, false)]
+    public void U2MatchingConversationEvidenceUpdatesResumability(ResumabilityValue initial,
+        ResumabilityValue expected, string? expectedReason, bool opensSourcesDisagree)
+    {
+        var state = State(SessionValue.Present, initial);
+        var step = Apply(state, HarnessReadinessTests.Harness(HarnessEventKind.PromptSubmitted, "native-1",
+            HarnessReadinessTests.Attrs()));
+
+        Assert.Equal(expected, step.State.Resumability);
+        Assert.Equal(expectedReason, step.State.ResumabilityReason);
+        Assert.Equal(opensSourcesDisagree, step.Findings.Any(finding =>
+            finding.Kind == SeatVocabulary.FindingSourcesDisagree && finding.Open));
+        if (initial != expected)
+            Assert.Equal("U2", Assert.Single(step.Transitions, transition => transition.Axis == "resumability").Rule);
+        SeatAssert.Invariants(step);
+    }
+
+    [Fact]
+    public void U2EvidenceForAnotherNativeSessionDoesNotChangeResumability()
+    {
+        var state = State(SessionValue.Present, ResumabilityValue.FreshOnly);
+        var step = Apply(state, HarnessReadinessTests.Harness(HarnessEventKind.PromptSubmitted, "native-other",
+            HarnessReadinessTests.Attrs()));
+
+        Assert.Equal(ResumabilityValue.FreshOnly, step.State.Resumability);
+        Assert.DoesNotContain(step.Transitions, transition => transition.Axis == "resumability");
+        SeatAssert.Invariants(step);
+    }
+
+    [Fact]
+    public void U2UsesTheSuppliedHarnessProfileToRecognizeEvidence()
+    {
+        var state = State(SessionValue.Present, ResumabilityValue.FreshOnly);
+        var input = HarnessReadinessTests.Harness(HarnessEventKind.SessionStarted, "native-1",
+            HarnessReadinessTests.Attrs());
+        var step = SeatStateMachine.Apply(state, input, new OpenCodeLike(), Now);
+
+        Assert.Equal(ResumabilityValue.Resumable, step.State.Resumability);
+        Assert.Contains(step.Transitions, transition => transition.Axis == "resumability" && transition.Rule == "U2");
+        SeatAssert.Invariants(step);
+    }
+
+    [Fact]
+    public void U3ReadyResumeMakesUnknownResumabilityResumable()
+    {
+        var state = State(SessionValue.Starting, ResumabilityValue.Unknown) with
+        {
+            Launch = new CurrentLaunch(LaunchId, LaunchMode.Resume, false, false),
+        };
+        var step = Apply(state, new EventReceived(NodeId, 1, 0, LaunchId,
+            new LaunchResultBody(LaunchOutcome.Ready, "", null)));
+
+        Assert.Equal(ResumabilityValue.Resumable, step.State.Resumability);
+        Assert.Null(step.State.ResumabilityReason);
+        Assert.Contains(step.Transitions, transition => transition.Axis == "resumability" && transition.Rule == "U3");
+        SeatAssert.Invariants(step);
+    }
+
+    [Fact]
+    public void U3ReadyFreshLaunchDoesNotChangeUnknownResumability()
+    {
+        var state = State(SessionValue.Starting, ResumabilityValue.Unknown);
+        var step = Apply(state, new EventReceived(NodeId, 1, 0, LaunchId,
+            new LaunchResultBody(LaunchOutcome.Ready, "", null)));
+
+        Assert.Equal(ResumabilityValue.Unknown, step.State.Resumability);
+        Assert.Equal(state.ResumabilityReason, step.State.ResumabilityReason);
+        Assert.DoesNotContain(step.Transitions, transition => transition.Axis == "resumability");
+        SeatAssert.Invariants(step);
+    }
+
+    [Theory]
+    [InlineData(ResumabilityValue.Resumable, ResumabilityValue.Lost)]
+    [InlineData(ResumabilityValue.Unknown, ResumabilityValue.Lost)]
+    [InlineData(ResumabilityValue.Lost, ResumabilityValue.Lost)]
+    public void U4MissingResumeSessionMarksResumabilityLost(ResumabilityValue initial, ResumabilityValue expected)
+    {
+        var state = State(SessionValue.Present, initial) with
+        {
+            Launch = new CurrentLaunch(LaunchId, LaunchMode.Resume, false, false),
+        };
+        var step = Apply(state, new EventReceived(NodeId, 1, 0, LaunchId,
+            new LaunchResultBody(LaunchOutcome.Failed, SeatVocabulary.LaunchReasonResumeSessionNotFound, null)));
+
+        Assert.Equal(expected, step.State.Resumability);
+        Assert.Null(step.State.ResumabilityReason);
+        Assert.Equal(initial == ResumabilityValue.Resumable, step.Findings.Any(finding =>
+            finding.Kind == SeatVocabulary.FindingResumeLost && finding.Open));
+        SeatAssert.Invariants(step);
+    }
+
+    [Fact]
+    public void U5FailedFreshRelaunchThatReusedIdMakesFreshOnlyUnknown()
+    {
+        var state = State(SessionValue.Starting, ResumabilityValue.FreshOnly) with
+        {
+            Launch = new CurrentLaunch(LaunchId, LaunchMode.Fresh, true, false),
+        };
+        var step = Apply(state, new EventReceived(NodeId, 1, 0, LaunchId,
+            new LaunchResultBody(LaunchOutcome.Failed, "OTHER_FAILURE", null)));
+
+        Assert.Equal(ResumabilityValue.Unknown, step.State.Resumability);
+        Assert.Equal(SeatVocabulary.ResumabilityReasonFreshRelaunchFailed, step.State.ResumabilityReason);
+        Assert.Contains(step.Findings, finding => finding.Kind == SeatVocabulary.FindingLaunchFailed && finding.Open);
+        SeatAssert.Invariants(step);
+    }
+
+    [Fact]
+    public void U17bOtherFailedResumeReasonLeavesResumabilityUnchangedAndOpensLaunchFailed()
+    {
+        var state = State(SessionValue.Starting, ResumabilityValue.FreshOnly) with
+        {
+            Launch = new CurrentLaunch(LaunchId, LaunchMode.Resume, false, false),
+        };
+        var step = Apply(state, new EventReceived(NodeId, 1, 0, LaunchId,
+            new LaunchResultBody(LaunchOutcome.Failed, "OTHER_FAILURE", null)));
+
+        Assert.Equal(ResumabilityValue.FreshOnly, step.State.Resumability);
+        Assert.Contains(step.Findings, finding => finding.Kind == SeatVocabulary.FindingLaunchFailed && finding.Open);
+        SeatAssert.Invariants(step);
+    }
+
+    [Theory]
+    [InlineData(ResumabilityValue.None, ResumabilityValue.None, null, false)]
     [InlineData(ResumabilityValue.FreshOnly, ResumabilityValue.Unknown, SeatVocabulary.ResumabilityReasonSessionIdMismatch, true)]
     [InlineData(ResumabilityValue.Resumable, ResumabilityValue.Unknown, SeatVocabulary.ResumabilityReasonSessionIdMismatch, true)]
     [InlineData(ResumabilityValue.Lost, ResumabilityValue.Unknown, SeatVocabulary.ResumabilityReasonSessionIdMismatch, true)]

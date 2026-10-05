@@ -10,6 +10,56 @@ public sealed class GoldenScriptTests
     private static readonly Guid NodeId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 
     [Fact]
+    public void GS1PermissionTurnMovesThroughReadinessToolsInputAndCompaction()
+    {
+        var profile = new ClaudeLike();
+        var state = SeatState.Initial(Now) with
+        {
+            Session = SessionValue.Starting,
+            KnownSession = SessionValue.Starting,
+            SessionReason = null,
+            KnownSessionReason = null,
+            Activity = ActivityValue.Unknown,
+            KnownActivity = ActivityValue.Unknown,
+            ActivityReason = SeatVocabulary.ActivityReasonNotReady,
+            KnownActivityReason = SeatVocabulary.ActivityReasonNotReady,
+            Resumability = ResumabilityValue.FreshOnly,
+            Desired = SeatDesired.Up,
+            Launch = new CurrentLaunch(LaunchId, LaunchMode.Fresh, false, false),
+            NativeSessionId = "native-1",
+            NodeInstanceId = NodeId,
+        };
+
+        var script = new (HarnessEventKind Kind, IReadOnlyDictionary<string, string> Attributes,
+            SessionValue Session, ActivityValue Activity, string? Detail, ResumabilityValue Resumability)[]
+        {
+            (HarnessEventKind.SessionStarted, new Dictionary<string, string> { ["source"] = "startup" }, SessionValue.Present, ActivityValue.Idle, null, ResumabilityValue.FreshOnly),
+            (HarnessEventKind.PromptSubmitted, new Dictionary<string, string>(), SessionValue.Present, ActivityValue.Working, null, ResumabilityValue.Resumable),
+            (HarnessEventKind.ToolStarted, new Dictionary<string, string> { ["tool_name"] = "Bash", ["tool_use_id"] = "t1" }, SessionValue.Present, ActivityValue.Working, "tool:Bash", ResumabilityValue.Resumable),
+            (HarnessEventKind.InputRequested, new Dictionary<string, string> { ["request_id"] = "t1" }, SessionValue.Present, ActivityValue.NeedsInput, null, ResumabilityValue.Resumable),
+            (HarnessEventKind.Other, new Dictionary<string, string>(), SessionValue.Present, ActivityValue.NeedsInput, null, ResumabilityValue.Resumable),
+            (HarnessEventKind.ToolFinished, new Dictionary<string, string> { ["tool_use_id"] = "t1" }, SessionValue.Present, ActivityValue.Working, null, ResumabilityValue.Resumable),
+            (HarnessEventKind.TurnEnded, new Dictionary<string, string>(), SessionValue.Present, ActivityValue.Idle, null, ResumabilityValue.Resumable),
+            (HarnessEventKind.CompactionStarted, new Dictionary<string, string>(), SessionValue.Present, ActivityValue.Working, SeatVocabulary.ActivityDetailCompacting, ResumabilityValue.Resumable),
+            (HarnessEventKind.Compacted, new Dictionary<string, string>(), SessionValue.Present, ActivityValue.Idle, null, ResumabilityValue.Resumable),
+        };
+
+        long sourceSeq = 0;
+        foreach (var entry in script)
+        {
+            var step = SeatStateMachine.Apply(state,
+                new EventReceived(NodeId, state.NextSeq, sourceSeq++, LaunchId,
+                    new HarnessBody(entry.Kind, "native-1", entry.Attributes)), profile, Now);
+            Assert.Equal(entry.Session, step.State.KnownSession);
+            Assert.Equal(entry.Activity, step.State.KnownActivity);
+            Assert.Equal(entry.Detail, step.State.KnownActivityDetail);
+            Assert.Equal(entry.Resumability, step.State.Resumability);
+            SeatAssert.Invariants(step);
+            state = step.State;
+        }
+    }
+
+    [Fact]
     public void GS4TurnFailureResolvesDeliveryUnconfirmedAndNextTurnEndResolvesTurnFailure()
     {
         var state = State(ActivityValue.Idle);
