@@ -224,6 +224,12 @@ change to one of them be traced to the parts of this spec that depend on it.
 - **R13** A start for a seat whose session exists: if the pane is alive, throw `AlreadyRunning`
   with the running launch ID (spec 0002 R20: never kill a running seat to satisfy a start); if the
   pane is dead, emit its `PaneExited` event if not yet emitted, remove the session, and continue.
+  Narrow exception (maintainer decision 2026-10-06): when a matching `starting` launch has never
+  returned a handle and the pane's process start time was never recorded, recovery may remove
+  the verified dead pane and replace it without a `PaneExited` event. Do not fabricate a
+  `PaneStartTime` or change the handle's type to nullable. Keep the failed launch's identity
+  and exit evidence in the registry until verified removal and durable replacement; a failed
+  replacement retains that evidence. The failed start already reports `TmuxFailed`.
   If the driver supplied an `IOrphanProbe` and a matching process runs outside every live managed
   pane, throw `OrphanDetected` with the PIDs (spike 0005 F4). The probe runs at start only (D11).
   `StartAsync` returns after the pane
@@ -975,3 +981,9 @@ The design decisions this spec makes rather than asks about are recorded in ADRs
   - **RK5 owner.** Keeping WSL alive is done by the released instance host, which keeps the node's
     `wsl.exe` attached ([ADR 0034](../adr/0034-released-instance-host.md)); the check is tracked
     together with spec 0007 RK2.
+
+- **2026-10-06 — slice 11-2 analysis, maintainer decision:** R13 narrowly permits replacement
+  without `PaneExited` for a verified dead matching `starting` launch that never returned a
+  handle and has no recorded pane process start time. The failed start reports `TmuxFailed`;
+  old launch identity/exit evidence remains in the registry until replacement succeeds.
+  `SessionHandle.PaneStartTime` stays non-nullable and the 11-1 interface is unchanged.
