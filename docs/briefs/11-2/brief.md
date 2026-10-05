@@ -2,7 +2,7 @@
 id: 11-2
 title: "#11 slice 2 — tmux runner and start"
 issue: 11
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Node/Sessions/, src/Aiakos.Core/TmuxNames.cs, tests/Aiakos.Node.Testing/, tests/Aiakos.Node.Tests/Sessions/]
 date: 2026-10-06
