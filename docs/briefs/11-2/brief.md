@@ -193,14 +193,17 @@ R2. The runner admits at most maxConcurrency active clients (default 8). Waiters
     or timeout <=0 or timeout > TimeSpan.FromMilliseconds(4294967294) is
     ArgumentOutOfRangeException before launching anything.
 
-R23. If a successfully started child exits or closes stdin before all request.Stdin bytes have
-    been written, a broken-pipe/EPIPE failure of the stdin write means the child stopped accepting
-    input. Drop the unwritten remainder, close the runner's stdin stream, keep draining stdout
-    and stderr, and await that child's exit. Return Exited with its actual exit code and exact
-    retained streams/truncation flags under R1; do not throw the stdin IOException, expose its
-    OS message, kill the child, retry or start another process. This early-closure case is the
-    exception to R1/R2's normal full-stdin guarantee. Other IO failures are not reclassified by
-    this rule. R2 timeout and caller cancellation remain authoritative while waiting/draining:
+R23. After a child has started successfully, treat any IOException raised by writing,
+    flushing or closing its redirected stdin as the child having stopped accepting input.
+    This includes broken-pipe/EPIPE; use the exception type, without inspecting OS message text,
+    HResult or errno. Drop the unwritten remainder, close the runner's stdin stream (an
+    IOException from this close is treated the same way), keep draining stdout and stderr,
+    and await that child's exit. Return Exited with its actual exit code and exact retained
+    streams/truncation flags under R1; do not throw the stdin IOException, expose its OS
+    message, kill the child, retry or start another process. This early-closure case is the
+    exception to R1/R2's normal full-stdin guarantee. This classification applies only to
+    stdin write/flush/close IOExceptions, not stdout/stderr IO or process-start failures.
+    R2 timeout and caller cancellation remain authoritative while waiting/draining:
     return TimedOut on timeout or throw cancellation, respectively, even after stdin closed.
 
 R3. TmuxClient snapshots nodeEnvironment and options at construction. Client environment contains only present
@@ -509,7 +512,7 @@ paths/socket and a harmless test executable. Exact error triples below are (Code
 | `E21` | default/true/false attach for demo_impl, invalid name, unavailable client | exactly [tmux,-L,aiakos-test,attach-session,-r,=demo_impl], without -r for false; invalid name NotFound; unavailable throws Unavailable; no process/input/mutation |
 | `E22` | ActivityListener/MeterListener and log capture with argv/env/attributes/stdout/stderr sentinels; success/failure/version cases | exact R22 spans/instruments and bounded tags; current outcomes/availability observed; no sentinel values, raw commands or error messages in diagnostics; registry has Attributes but no argv/environment; disposing runner/client components leaves existing harness alive |
 
-| `E23` | child exits without reading 8 MiB stdin; child closes stdin, stays alive briefly, writes stdout/stderr and exits 3 | early-exit child returns Exited with its actual exit code; closed-stdin child returns Exited/3 with exact stdout/stderr and false truncation flags; unwritten stdin is dropped, no broken-pipe exception or OS text, no child kill/retry; a subsequent request succeeds |
+| `E23` | child exits without reading 8 MiB stdin; child closes stdin, stays alive briefly, writes stdout/stderr and exits 3 | early-exit child returns Exited with its actual exit code; closed-stdin child returns Exited/3 with exact stdout/stderr and false truncation flags; unwritten stdin is dropped, stdin write/flush/close IOException is treated as early closure without inspecting message/HResult/errno, no stdin IOException or OS text, no child kill/retry; a subsequent request succeeds |
 
 ## Analysis decision
 
