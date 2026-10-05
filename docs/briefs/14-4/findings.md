@@ -1,12 +1,13 @@
 # Story review: slice 14-4
 
-Reviewed at commit f0a9a9e. Stories: 3. Check: ok.
+Reviewed at commit 784d9fe. Stories: 3. Check: ok.
 
 ## Findings
 
 - [x] S1 (context-gap): R1 and `JSON-exact` require U+FFFD for an isolated surrogate, but a `JsonElement` can only hold one as an escape in parsed text (`"\ud800"`), and `GetString()` and `JsonProperty.Name` throw `InvalidOperationException` on it (run on .NET 10), so the implementer must decide between decoding `GetRawText()` by hand and an untestable rule. Fix: state in R1 that the value arrives as a `\uXXXX` escape and that Write decodes the raw text itself, with the exact input in `JSON-exact`, or remove the surrogate clause and variant.
 - [x] S1 (context-gap): the brief gives no result for `CanonicalJson.Write` on input outside its subset (a non-integer or out-of-range number such as `1.5`, a `default(JsonElement)`, an object with duplicate or NFC-colliding keys such as `{"a":1,"a":2}`), and an exception on any input blocks a story at the gate. Fix: add to R1 the exact behaviour for each (the exception type and message, or the defined output) and a `JSON-exact` variant for it.
 - [x] S3 (context-gap): C1 leaves "if one exists" open and gives no expected values for an earlier serialization golden of the full fixture (14-3 T4, spec AC1 `resolved.json`), which after R8 would contain that fixture's hashes, `Canonical` and `ToolVersion`, while R7 forbids taking expected hashes from the implementation. Fix: say in C1 how those expected values are obtained (for example a checked-in canonical JSON whose SHA-256 is computed outside the implementation) or state that no earlier test compares the added properties.
+- [ ] S1 (context-gap): R1 now accepts the spelling `-0` (it matches `-?(0|[1-9][0-9]*)`) but gives no output for it, and writing the Int64 value gives `0` while writing the raw spelling gives `-0`. Fix: state the output for `-0` in R1 (or make it unsupported) and add it as a `JSON-exact` variant.
 
 ## Not checked
 
@@ -22,4 +23,4 @@ Reviewed at commit f0a9a9e. Stories: 3. Check: ok.
 - Second finding: R1 rejects Undefined, noninteger lexical numbers, Int64 overflow, malformed surrogate strings/keys, duplicate and NFC-colliding keys with ArgumentException and exact message; JSON-exact names each variant.
 - Third finding: C1 now names the predecessor-test inspection and independent golden derivation procedure, reviewed canonical JSON assets, independent sha256sum/hashlib, literal expected hashes, content-map derivation and a single assembly-version placeholder. Earlier field-only tests remain field-only; no new full golden is inferred.
 
-Architect must verify these resolutions and update the Reviewed at commit line.
+Architect, round 1: the three resolutions were read at 784d9fe and are accepted; one new finding above comes from the changed R1.
