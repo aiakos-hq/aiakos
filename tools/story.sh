@@ -954,5 +954,5 @@ case "${1:-}" in
   done)       cmd_done "${2:-}" ;;
   pr)         cmd_pr "${2:-}" "${3:-}" "${4:-}" ;;
   cleanup)    cmd_cleanup "${2:-}" ;;
-  *)          sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *)          awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2 ;;
 esac
