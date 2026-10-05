@@ -838,5 +838,5 @@ case "${1:-}" in
   done)       cmd_done "${2:-}" ;;
   pr)         cmd_pr "${2:-}" "${3:-}" "${4:-}" ;;
   cleanup)    cmd_cleanup "${2:-}" ;;
-  *)          sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *)          sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
