@@ -21,7 +21,7 @@ public sealed class GoldenTests
         var actual = DiagnosticFormatter.Format(result.Diagnostics);
         var expected = File.ReadAllText(Path.Combine(fixture, "expected", "diagnostics.txt"));
 
-        Assert.Null(result.Rig);
+        Assert.Equal(result.Diagnostics.Any(item => item.Severity == Severity.Error), result.Rig is null);
         if (fixtureName == "AIK1002-syntax")
         {
             Assert.Matches(new Regex("^rig.yaml:\\d+:\\d+: error AIK1002: YAML syntax error: .+\\n$", RegexOptions.CultureInvariant), actual);
