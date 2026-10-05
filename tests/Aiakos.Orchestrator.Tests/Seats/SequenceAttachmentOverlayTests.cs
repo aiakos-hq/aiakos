@@ -215,6 +215,7 @@ public sealed class SequenceAttachmentOverlayTests
         var state = State() with { ReadinessSeen = true };
         var step = Apply(state, new NodeAttached(OtherNodeId,
             new SeatInventoryEntry(LaunchId, lifecycle, 8)));
+        Assert.Null(step.Disposition);
 
         Assert.Equal(expectedSession, step.State.KnownSession);
         Assert.Equal(expectedActivity, step.State.KnownActivity);
@@ -234,6 +235,7 @@ public sealed class SequenceAttachmentOverlayTests
         var state = State(SessionValue.Present);
         var step = Apply(state, new NodeAttached(NodeId,
             new SeatInventoryEntry(OtherLaunchId, SessionLifecycle.Exited, 4)));
+        Assert.Null(step.Disposition);
 
         Assert.Equal(state.KnownSession, step.State.KnownSession);
         Assert.Equal(state.KnownActivity, step.State.KnownActivity);
@@ -248,6 +250,7 @@ public sealed class SequenceAttachmentOverlayTests
         var state = State(SessionValue.Absent);
         var step = Apply(state, new NodeAttached(OtherNodeId,
             new SeatInventoryEntry(LaunchId, SessionLifecycle.Running, 8)));
+        Assert.Null(step.Disposition);
 
         Assert.Equal(SessionValue.Absent, step.State.KnownSession);
         Assert.Contains(step.Findings, finding => finding.Kind == SeatVocabulary.FindingInventoryMismatch && !finding.Open);
@@ -261,6 +264,7 @@ public sealed class SequenceAttachmentOverlayTests
         var state = State() with { NodeInstanceId = null };
         var step = Apply(state, new NodeAttached(OtherNodeId,
             new SeatInventoryEntry(LaunchId, SessionLifecycle.Exited, 8)));
+        Assert.Null(step.Disposition);
 
         Assert.Equal(OtherNodeId, step.State.NodeInstanceId);
         Assert.Equal(state.KnownSession, step.State.KnownSession);
@@ -281,6 +285,7 @@ public sealed class SequenceAttachmentOverlayTests
     {
         var step = Apply(State(initial), new NodeAttached(OtherNodeId,
             new SeatInventoryEntry(OtherLaunchId, SessionLifecycle.Running, 8)));
+        Assert.Null(step.Disposition);
 
         Assert.Equal(expected, step.State.KnownSession);
         Assert.Equal(expectedReason, step.State.KnownSessionReason);
@@ -294,6 +299,7 @@ public sealed class SequenceAttachmentOverlayTests
     public void S16MissingInventoryUsesTheSameReconciliation()
     {
         var step = Apply(State(SessionValue.Present), new NodeAttached(OtherNodeId, null));
+        Assert.Null(step.Disposition);
 
         Assert.Equal(SessionValue.Unknown, step.State.KnownSession);
         Assert.Equal(SeatVocabulary.SessionReasonInventoryMissing, step.State.KnownSessionReason);
@@ -317,6 +323,7 @@ public sealed class SequenceAttachmentOverlayTests
         };
         var attached = Apply(state, new NodeAttached(NodeId,
             new SeatInventoryEntry(LaunchId, SessionLifecycle.Exited, 2)));
+        Assert.Null(attached.Disposition);
 
         Assert.Equal(SeatOverlay.NodeLinkLost, attached.State.Overlay);
         Assert.Equal(2, attached.State.CatchUpSeq);
@@ -346,6 +353,7 @@ public sealed class SequenceAttachmentOverlayTests
         };
         var step = Apply(state, new NodeAttached(NodeId,
             new SeatInventoryEntry(OtherLaunchId, SessionLifecycle.Exited, 3)));
+        Assert.Null(step.Disposition);
 
         Assert.Null(step.State.Overlay);
         Assert.Null(step.State.CatchUpSeq);

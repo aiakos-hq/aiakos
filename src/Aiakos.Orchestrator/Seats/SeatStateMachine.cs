@@ -18,7 +18,7 @@ public static class SeatStateMachine
             return ApplySequencedEvent(state, received, profile, now);
 
         if (input is NodeAttached attached)
-            return AttachNode(state, attached, now);
+            return AttachNode(state, attached, now) with { Disposition = null };
 
         if (input is NodeLinkLost)
             return ApplyOverlay(state, SeatOverlay.NodeLinkLost, SeatVocabulary.SessionReasonNodeLinkLost, now);
