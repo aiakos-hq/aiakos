@@ -77,17 +77,11 @@ public static class RigLoader
         var envDisplayPath = envPath is null ? GetDisplayPath(root, actualEnvPath) : GetEnvDisplayPath(root, envPath);
         var envNode = LoadFile(actualEnvPath, envDisplayPath, RigFileKind.RigEnv, diagnostics, out var envParsed);
         var envDocument = new SemanticDocument(envNode, envDisplayPath, envParsed);
-        var allDiagnostics = new SemanticValidator(rigDocument, agentDocuments, seatAgents, envDocument, diagnostics).Validate();
-
-        var fileOrder = new[] { rigDocument.File }.Concat(agentDocuments.Select(document => document.File)).Append(envDocument.File)
-            .Distinct(StringComparer.Ordinal).Select((file, index) => (file, index)).ToDictionary(item => item.file, item => item.index, StringComparer.Ordinal);
-        var ordered = allDiagnostics
-            .OrderBy(diagnostic => fileOrder.GetValueOrDefault(diagnostic.File, int.MaxValue))
-            .ThenBy(diagnostic => diagnostic.Line)
-            .ThenBy(diagnostic => diagnostic.Column)
-            .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
-            .ToArray();
-        return new LoadResult(null, ordered);
+        var semanticDiagnostics = new SemanticValidator(rigDocument, agentDocuments, seatAgents, envDocument, diagnostics).Validate();
+        var environmentDiagnostics = semanticDiagnostics.Where(item => item.File == envDocument.File).ToArray();
+        var references = LoadReferenceIntegration.Load(root, rigDocument, agentDocuments, semanticDiagnostics,
+            environmentDiagnostics, envDocument.File);
+        return new LoadResult(null, references.Diagnostics);
     }
 
     private static YamlNode? LoadFile(string path, string displayPath, RigFileKind kind, List<Diagnostic> allDiagnostics, out bool parsed)
