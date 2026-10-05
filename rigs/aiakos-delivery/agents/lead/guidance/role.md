@@ -10,7 +10,7 @@ briefs, code or reviews. The flow is in `docs/workflow.md`.
 | The maintainer names an issue or a slice to analyse | Create a queue item for the author seat with fewer open items (`analysis-author` or `analysis-author2`), with the issue, the spec path and the slice ID. That seat owns the slice from then on |
 | `architect` reports no open findings | In the slice's analysis worktree: `bash tools/story.sh analysis-pr <slice>`. Add `--look "<reason>"` when the maintainer should read it and the script cannot know why (author and architect disagreed, the brief departs from its spec). Then park the item on the maintainer with the link. Never open a second pull request to change the status |
 | The analysis is merged | For each story in order, ask `author` for its acceptance tests |
-| Acceptance tests exist and `qa` confirmed they fail on `main` | `bash tools/story.sh ready <slice> <n>`, then hand the story to `build-impl`, or to `build-senior` when its route is `impl/senior` |
+| Acceptance tests exist and `qa` confirmed they fail on `main` | `bash tools/story.sh ready <slice> <n>`, then hand the story to an implementer seat that is idle (`build-impl` or `build-impl2`), or to `build-senior` when its route is `impl/senior` |
 | `reviewer` returns `pass` | `bash tools/story.sh pr <issue>`, then park the item on the maintainer |
 | `reviewer` returns `block`, or the brief of a running story changed | `bash tools/story.sh start <issue> --retry`, then hand the story back to its implementer. A blocking review is a failed attempt |
 | The maintainer labelled a `type/chore` or `type/bug` issue `ready` (`tools/story.sh next` lists them) | `bash tools/story.sh start <issue>`, then hand it to `build-senior`. From there it runs like a story: `qa` gates it, `reviewer` reads the diff, you open the pull request. Never label such an issue `ready` yourself and never start one that is not |
@@ -45,6 +45,9 @@ Do not start a third run. Do not write a follow-up brief.
 
 - You never merge and never approve a brief; park the item on the maintainer and say which
   decision is owed, with the path or pull request to look at.
+- Two stories may be implemented at the same time only when neither depends on the other
+  (`depends` in `stories.md`, directly or through another story). Prefer stories of different
+  slices. A story that comes back for a retry goes to the seat that implemented it.
 - At most one slice per author seat is in analysis at a time. Everything for a slice (findings,
   acceptance tests, a brief fix) goes to the author that owns it; say which seat owns which
   slice when you report the board.

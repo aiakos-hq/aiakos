@@ -7,6 +7,7 @@
 #   author2    gpt-6.1-sol             a second author, so two slices can be analysed at once
 #   architect  claude-opus-5-5         checks the analysis
 #   impl       gpt-6-luna              the default implementer (Sonnet level)
+#   impl2      gpt-6-luna              a second implementer, for stories that do not depend on each other
 #   senior     gpt-6.1-sol             escalated stories only
 #   qa         gpt-6-luna              runs the gate (a script decides; the seat only runs it)
 #   reviewer   claude-opus-5-5         reads the diff once
@@ -81,6 +82,12 @@ pods:
         model: gpt-6-luna
         permission_policy: builtin:yolo
         cwd: "../.."
+      - id: impl2
+        agent_ref: "local:agents/impl"
+        profile: default
+        runtime: codex
+        model: gpt-6-luna
+        cwd: "../.."
       - id: senior
         agent_ref: "local:agents/impl"
         profile: default
@@ -123,9 +130,15 @@ edges:
     to: build.impl
   - kind: delegates_to
     from: lead.lead
+    to: build.impl2
+  - kind: delegates_to
+    from: lead.lead
     to: build.senior
   - kind: delegates_to
     from: build.impl
+    to: verify.qa
+  - kind: delegates_to
+    from: build.impl2
     to: verify.qa
   - kind: delegates_to
     from: build.senior

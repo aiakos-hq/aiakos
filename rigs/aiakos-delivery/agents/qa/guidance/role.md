@@ -26,7 +26,7 @@ When an implementer hands you a story:
    - gate passed: hand the story to `verify-reviewer` with the gate output;
    - a process check failed before the build: hand it back to the implementer; this is not an
      attempt;
-   - gate failed, first attempt: hand it back to the implementer with the failing tests;
+   - gate failed, first attempt: hand it back to the implementer seat that handed it to you, with the failing tests;
    - gate failed, second attempt: hand it to `lead-lead`. Tag each failure `context-gap` or
      `judgment-gap`.
 
