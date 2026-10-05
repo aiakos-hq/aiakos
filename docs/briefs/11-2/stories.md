@@ -1,9 +1,9 @@
 ## S1: Bounded process runner
 goal: Child clients run with separate arguments and explicit environments, bounded IO, concurrency, timeout and cancellation.
 depends: -
-owns: R1, R2
-outputs: E1, E2
-tests: T1
+owns: R1, R2, R23
+outputs: E1, E2, E23
+tests: T1, T9
 notes: FakeProcessRunner records requests without launching a process. G1/G2 and T0 apply; ProcessRunner timeout/cancellation kills only its own client.
 
 ## S2: Private tmux client initialization
