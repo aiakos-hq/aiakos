@@ -67,7 +67,7 @@ Credentials and the OpenRig state (`~/.openrig`) stay on the machine.
 | 2. Split | `author` | `tools/story.sh split <slice>`: sorts the items into stories, IDs only | `stories.md` |
 | 3. Check | Script | `tools/story.sh check <slice>`: traceability and size | Pass or a list of errors |
 | 4. Story review | `architect` | Reads the brief and the split once; looks for ties the script cannot see and for a story that is too large | `findings.md` |
-| 5. Approval | Maintainer | Findings are resolved by commits; `lead` opens the pull request; the maintainer merges it | The analysis is on `main` |
+| 5. Approval | `lead`, then the maintainer | Findings are resolved by commits. `lead` runs `tools/story.sh analysis-pr <slice>`: it checks the split and the review, sets the status and the index row, and opens one pull request, marked "routine" or "read this one". The maintainer merges it | The analysis is on `main`, `approved` |
 | 6. Acceptance | `author`, then `qa` | `author` writes the story's acceptance tests and `gate.sh`; `qa` runs `tools/story.sh baseline <slice> <n>` and reads why they fail on `main` | `artifacts/trials/<story>/` (local), with `main-before.txt` |
 | 7. Ready | `lead` | `tools/story.sh ready <slice> <n>`: checks the definition of ready and creates the sub-issue | A GitHub issue labelled `ready` |
 | 8. Run | `impl` (or `senior`) | `tools/story.sh start <issue>`, then implements in the worktree | One commit on a local branch |
@@ -231,6 +231,7 @@ bash tools/story.sh split <slice>
 bash tools/story.sh split-done <slice>
 bash tools/story.sh show <slice> <n>
 bash tools/story.sh analysis <slice> [--remove]
+bash tools/story.sh analysis-pr <slice> [--look "<reason>"]
 bash tools/story.sh status
 bash tools/story.sh baseline <slice> <n>
 bash tools/story.sh ready <slice> <n> [--dry-run]

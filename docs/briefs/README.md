@@ -16,8 +16,10 @@ Each slice has a folder:
 
 Status in a brief's header:
 
-- `draft`: written, waiting for the maintainer's approval. Its stories cannot become ready.
-- `approved`: its stories can become ready, one by one.
+- `draft`: being written, reviewed or amended. Its stories cannot become ready.
+- `approved`: the architect reviewed it with no open finding and its pull request is merged. Its
+  stories can become ready, one by one. `tools/story.sh analysis-pr` sets this in the same pull
+  request as the brief, so the merge is the approval and no second pull request follows.
 - `implemented`: all its stories are merged.
 - `superseded`: replaced; kept only when something still refers to it.
 
@@ -56,4 +58,5 @@ the new gate.
 | #15 CLI and released instance | 15-1 skeleton and dry run, 15-2 local API, 15-3 client commands, 15-4 instance host, 15-5 release |
 | #16 aiakos-dev rig, M1 acceptance | 16-1 rig files, 16-2 pin and rig-compat, 16-3 acceptance run |
 
-Update the index in the same pull request that adds a brief, splits it or changes its status.
+`tools/story.sh analysis-pr` updates the row of its slice (status, story count, findings). Change
+other rows by hand in the pull request that causes the change.
