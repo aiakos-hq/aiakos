@@ -147,7 +147,13 @@ public sealed partial class OrchestratorConnection(
             ConnectTimeout = TimeSpan.FromSeconds(5),
         };
 
-        return GrpcChannel.ForAddress(address, new GrpcChannelOptions { HttpHandler = handler, DisposeHttpClient = true });
+        return GrpcChannel.ForAddress(address, new GrpcChannelOptions
+        {
+            HttpHandler = handler,
+            DisposeHttpClient = true,
+            MaxReceiveMessageSize = 4194304,
+            MaxSendMessageSize = 4194304,
+        });
     }
 
     private static bool ValidWelcome(Welcome welcome) =>
