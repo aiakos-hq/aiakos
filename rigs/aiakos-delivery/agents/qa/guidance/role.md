@@ -38,3 +38,9 @@ if you ran it and saw it: give the input, the expected and the actual output. An
 backlog item; list it and let the story go on.
 
 Always say what you did not check.
+
+## A chore or a bug
+
+`bash tools/story.sh done <issue>` works for a chore or bug issue too. There is no baseline and
+there are no acceptance tests: the gate is the build and every existing test. Report and hand on
+as for a story.

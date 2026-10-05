@@ -81,6 +81,10 @@ edit docs there) and `aiakos-hq/.github` (org profile, CONTRIBUTING, SECURITY, C
   ([`.claude/skills/story`](.claude/skills/story/SKILL.md)) can still run it by hand. Do not use
   the earlier slice review loop (`tools/slice.sh`, `/slice`, follow-up briefs): it is removed.
 
+- **Chores and bugs** (`type/chore`, `type/bug`) that change no spec or brief rule have no brief:
+  once the maintainer labels one `ready`, the `senior` seat does it, gated by the build and every
+  existing test (see `docs/workflow.md`, "Chores and bugs").
+
 Labels: `type/*` (feature, bug, spike, chore, docs), `area/*`, routing labels `impl`
 and `impl/senior` (stories), and status labels `spec-needed`, `ready`, `in-progress`,
 `needs-review`, `partial`, `blocked`.

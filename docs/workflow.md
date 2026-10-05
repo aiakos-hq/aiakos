@@ -47,7 +47,7 @@ rig up aiakos-delivery --existing        # every other start: the same rig resum
 | `author`, `author2` | Codex | Write the brief, the item list and the acceptance tests; split the brief. Two seats, so two slices can be analysed at once; a slice stays with one author |
 | `architect` | Claude Code (Opus) | Checks the brief and the split; attacks them before they are approved |
 | `impl` | Codex | Implements one story in its own worktree |
-| `senior` | Codex, stronger model | Implements a story that was escalated |
+| `senior` | Codex, stronger model | Implements a story that was escalated, and every chore and bug (see "Chores and bugs") |
 | `qa` | Codex | Runs the gate and probes the behaviour |
 | `reviewer` | Claude Code | Reads the diff once |
 
@@ -187,6 +187,29 @@ split; a `judgment-gap` escalates it to the `senior` seat. There are no follow-u
 - The spec amendment and the docs are merged (see `CLAUDE.md`, "Definition of done").
 - The pull request states which risks from [`risks.md`](risks.md) it checks or closes.
 - Backlog items raised along the way are done or have their own issue.
+
+## Chores and bugs
+
+Some work is not a story: a flaky test, a fix to `tools/story.sh`, a small bug. It has an issue
+but no brief and no acceptance tests, so it takes a shorter path, always on the `senior` seat.
+
+An issue may take this path when all of these hold:
+
+- it is labelled `type/chore` or `type/bug`, and its title is not a story title;
+- it changes no rule of a spec or of a brief (that is a story, or a brief amendment);
+- the maintainer labelled it `ready`. Nobody else does: with no acceptance tests written before
+  the run, that label is the decision that the issue text is enough to work from.
+
+| Step | Who | What happens |
+|---|---|---|
+| Start | `lead` | `tools/story.sh start <issue>`: a worktree and a branch (`chore/…` or `fix/…`), the issue text copied in. Hands it to `build-senior` |
+| Run | `senior` | Does what the issue asks and nothing more. A bug fix adds a test that fails without the fix. One commit |
+| Gate | `qa` | `tools/story.sh done <issue>`: the same process checks, the build with zero warnings, then every existing test (`dotnet test`) in place of acceptance tests |
+| Diff read | `reviewer` | As for a story, with the issue text as the story text. A bug fix without a test for it is a backlog item to raise, named in the verdict |
+| Pull request | `lead`, then the maintainer | `tools/story.sh pr <issue>`; the maintainer merges; `cleanup` |
+
+The four blocking kinds, the one retry and `start <issue> --retry` apply as for a story.
+`tools/story.sh next` lists ready chores and bugs under the ready stories.
 
 ## Files of a slice
 

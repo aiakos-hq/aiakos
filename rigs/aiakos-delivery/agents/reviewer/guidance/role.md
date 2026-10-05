@@ -45,3 +45,9 @@ Story <id>, commit <sha>. Gate: pass.
 ```
 
 Write `None.` under a heading that has nothing. Hand the story to `lead-lead` with the verdict.
+
+## A chore or a bug
+
+The same read, with the issue text (`artifacts/briefs/chore-<issue>.md` in the worktree) as the
+story text. For a bug fix, look for a test that fails without the fix; when there is none, say so
+under "Backlog items". It does not block.
