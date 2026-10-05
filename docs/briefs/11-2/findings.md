@@ -1,6 +1,6 @@
 # Story review: slice 11-2
 
-Reviewed at commit b689012. Stories: 6. Check: ok.
+Reviewed at commit ff264aa. Stories: 8. Check: ok.
 
 ## Findings
 
@@ -21,6 +21,8 @@ Reviewed at commit b689012. Stories: 6. Check: ok.
 - Acceptance tests are written before the code, so variants that need an internal seam (unsupported OS in E5, crash before rename in E9) can only be held by the permanent T items; I did not check that this is enough.
 - S2 (six rules, six outputs) was judged to fit one run; no split was asked for.
 - 11-1 code was read only for the record shapes in `SessionHost.cs` and `TmuxNames.cs`.
+- A dead pane whose labels were only partly written (a label command failed, then the harness died) still gets `NotFound` from R18 and waits for 11-5 reconciliation; spec 0004 R32 would call it managed by its `starting` entry. Not raised: it needs two failures and nothing is removed or lost.
+- Whether `tools/story.sh analysis-pr` accepts the spec 0004 edit that this branch carries beside the brief.
 
 Author revision: findings 2–9 addressed in R5–R9/R16–R19/E5–E9/E16–E19 and T6–T8, with attach and diagnostics separated from lifecycle. The initially pending finding 1 was subsequently resolved by the maintainer decision recorded below. No unknown identity value was invented.
 
@@ -29,3 +31,5 @@ spec R13. R19/E19 replace a verified matching dead starting launch with no retur
 an event/guessed start time; registry recovery sidecar preserves full prior identity and exit
 until replacement running is committed. Spec R13 and Changes after acceptance amended in the
 same analysis. R9/E9 include the sidecar's persistent format/API; T3/T6 guard it.
+
+Architect, round 1: the diff 9e04218..ff264aa was read, including the spec 0004 R13 amendment, and the nine resolutions are accepted; no findings are open. The maintainer decision was read in lead's qitem-20261005215420-064ab307 and the brief and spec text match it.
