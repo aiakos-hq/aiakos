@@ -74,6 +74,110 @@ public sealed class ActivityTableTests
     }
 
     [Fact]
+    public void A8CompactionStartedRemembersAndMarksApplicableActivityCompacting()
+    {
+        AssertNewActivity(HarnessEventKind.CompactionStarted, ActivityValue.Idle, ActivityValue.Working,
+            detail: SeatVocabulary.ActivityDetailCompacting, remembered: ActivityValue.Idle, rule: "A8");
+        AssertNewActivity(HarnessEventKind.CompactionStarted, ActivityValue.Working, ActivityValue.Working,
+            detail: SeatVocabulary.ActivityDetailCompacting, remembered: ActivityValue.Working, rule: "A8");
+        AssertNewActivity(HarnessEventKind.CompactionStarted, ActivityValue.NeedsInput, ActivityValue.NeedsInput,
+            pending: "request", detail: null, remembered: null);
+        AssertNewActivity(HarnessEventKind.CompactionStarted, ActivityValue.Unknown, ActivityValue.Working,
+            detail: SeatVocabulary.ActivityDetailCompacting, remembered: ActivityValue.Unknown, rule: "A8");
+    }
+
+    [Fact]
+    public void A9CompactedRestoresRememberedActivityOnlyForCompactingWork()
+    {
+        AssertCompacted(ActivityValue.Idle, ActivityValue.Idle, null, null, null, applies: false);
+        AssertCompacted(ActivityValue.Working, ActivityValue.Idle, ActivityValue.Idle, null, null, "A9");
+        AssertCompacted(ActivityValue.Working, ActivityValue.Working, ActivityValue.Working, null, null);
+        AssertCompacted(ActivityValue.Working, ActivityValue.NeedsInput, ActivityValue.NeedsInput, null, null, "A9");
+        AssertCompacted(ActivityValue.Working, ActivityValue.Unknown, ActivityValue.Unknown,
+            SeatVocabulary.ActivityReasonObservationGap, null, "A9");
+        AssertCompacted(ActivityValue.NeedsInput, ActivityValue.Idle, null, null, "request", applies: false);
+        AssertCompacted(ActivityValue.Unknown, ActivityValue.Idle, null, null, null, applies: false);
+        AssertCompacted(ActivityValue.Working, ActivityValue.Idle, null, null, null,
+            applies: false, detail: "tool:search");
+    }
+
+    [Fact]
+    public void A10TurnEndedMovesActiveAndUnknownActivityToIdleAndResolvesTurnFailure()
+    {
+        AssertNewActivity(HarnessEventKind.TurnEnded, ActivityValue.Idle, ActivityValue.Idle,
+            pending: "request", resolveFinding: SeatVocabulary.FindingTurnFailed);
+        AssertNewActivity(HarnessEventKind.TurnEnded, ActivityValue.Working, ActivityValue.Idle,
+            resolveFinding: SeatVocabulary.FindingTurnFailed, rule: "A10");
+        AssertNewActivity(HarnessEventKind.TurnEnded, ActivityValue.NeedsInput, ActivityValue.Idle,
+            pending: "request", resolveFinding: SeatVocabulary.FindingTurnFailed, rule: "A10");
+        AssertNewActivity(HarnessEventKind.TurnEnded, ActivityValue.Unknown, ActivityValue.Idle,
+            resolveFinding: SeatVocabulary.FindingTurnFailed, rule: "A10");
+    }
+
+    [Fact]
+    public void A11TurnFailedMovesActivityToIdleAndOpensTurnFailure()
+    {
+        AssertNewActivity(HarnessEventKind.TurnFailed, ActivityValue.Idle, ActivityValue.Idle,
+            pending: "request", openFinding: SeatVocabulary.FindingTurnFailed);
+        AssertNewActivity(HarnessEventKind.TurnFailed, ActivityValue.Working, ActivityValue.Idle,
+            openFinding: SeatVocabulary.FindingTurnFailed, rule: "A11");
+        AssertNewActivity(HarnessEventKind.TurnFailed, ActivityValue.NeedsInput, ActivityValue.Idle,
+            pending: "request", openFinding: SeatVocabulary.FindingTurnFailed, rule: "A11");
+        AssertNewActivity(HarnessEventKind.TurnFailed, ActivityValue.Unknown, ActivityValue.Idle,
+            openFinding: SeatVocabulary.FindingTurnFailed, rule: "A11");
+    }
+
+    [Fact]
+    public void A12RetryingMarksApplicableActivityRetryingAndKeepsNeedsInputSticky()
+    {
+        AssertNewActivity(HarnessEventKind.Retrying, ActivityValue.Idle, ActivityValue.Working,
+            detail: SeatVocabulary.ActivityDetailRetrying, rule: "A12");
+        AssertNewActivity(HarnessEventKind.Retrying, ActivityValue.Working, ActivityValue.Working,
+            detail: SeatVocabulary.ActivityDetailRetrying, rule: "A12");
+        AssertNewActivity(HarnessEventKind.Retrying, ActivityValue.NeedsInput, ActivityValue.NeedsInput,
+            pending: "request", detail: null);
+        AssertNewActivity(HarnessEventKind.Retrying, ActivityValue.Unknown, ActivityValue.Working,
+            detail: SeatVocabulary.ActivityDetailRetrying, rule: "A12");
+    }
+
+    [Fact]
+    public void ActivityRowsA8ThroughA12AreInertUntilSessionReadiness()
+    {
+        foreach (var session in new[] { SessionValue.Starting, SessionValue.Unknown })
+        foreach (var kind in new[]
+                 {
+                     HarnessEventKind.CompactionStarted, HarnessEventKind.Compacted, HarnessEventKind.TurnEnded,
+                     HarnessEventKind.TurnFailed, HarnessEventKind.Retrying
+                 })
+        {
+            var state = State(ActivityValue.Unknown, "request") with
+            {
+                Session = session,
+                KnownSession = session,
+                SessionReason = session == SessionValue.Starting ? "starting" : "unknown",
+                KnownSessionReason = session == SessionValue.Starting ? "starting" : "unknown",
+                ActivityReason = session == SessionValue.Starting
+                    ? SeatVocabulary.ActivityReasonNotReady
+                    : SeatVocabulary.ActivityReasonSessionUnknown,
+                KnownActivityReason = session == SessionValue.Starting
+                    ? SeatVocabulary.ActivityReasonNotReady
+                    : SeatVocabulary.ActivityReasonSessionUnknown
+            };
+
+            var step = Apply(state, kind, new Dictionary<string, string>());
+
+            Assert.Equal(state.KnownActivity, step.State.KnownActivity);
+            Assert.Equal(state.KnownActivityDetail, step.State.KnownActivityDetail);
+            Assert.Equal(state.PendingInputRequest, step.State.PendingInputRequest);
+            Assert.Equal(EventDisposition.Applied, step.Disposition);
+            Assert.Empty(step.Transitions);
+            Assert.DoesNotContain(step.Findings, finding => finding.Open);
+            Assert.Empty(step.Effects);
+            SeatAssert.Invariants(step);
+        }
+    }
+
+    [Fact]
     public void GS8ParallelToolFinishesResolveWildcardInputButKeepIdentifiedInputOpen()
     {
         var wildcard = State(ActivityValue.Idle);
@@ -210,6 +314,70 @@ public sealed class ActivityTableTests
     private static SeatStep Apply(SeatState state, HarnessEventKind kind, IReadOnlyDictionary<string, string> attributes) =>
         SeatStateMachine.Apply(state, new EventReceived(NodeId, 1, 0, LaunchId,
             new HarnessBody(kind, "native-1", attributes)), Profile, Now);
+
+    private static void AssertNewActivity(HarnessEventKind kind, ActivityValue initial, ActivityValue expected,
+        string? pending = null, string? detail = null, ActivityValue? remembered = null, string? rule = null,
+        string? openFinding = null, string? resolveFinding = null)
+    {
+        var state = State(initial, pending) with { PreCompactionActivity = remembered };
+        var step = Apply(state, kind, new Dictionary<string, string>());
+        var expectedReason = expected == ActivityValue.Unknown ? state.KnownActivityReason : null;
+
+        Assert.Equal(expected, step.State.KnownActivity);
+        Assert.Equal(expectedReason, step.State.KnownActivityReason);
+        Assert.Equal(detail, step.State.KnownActivityDetail);
+        Assert.Equal(kind is HarnessEventKind.TurnEnded or HarnessEventKind.TurnFailed or HarnessEventKind.PromptSubmitted
+            ? null
+            : pending, step.State.PendingInputRequest);
+        Assert.Equal(remembered, step.State.PreCompactionActivity);
+        Assert.Equal(EventDisposition.Applied, step.Disposition);
+        Assert.Equal(Now, step.State.LastEventAt);
+        Assert.Contains(step.Findings, finding => finding.Kind == SeatVocabulary.FindingActivityStale && !finding.Open);
+        if (openFinding is not null)
+            Assert.Contains(step.Findings, finding => finding.Kind == openFinding && finding.Open);
+        if (resolveFinding is not null)
+            Assert.Contains(step.Findings, finding => finding.Kind == resolveFinding && !finding.Open);
+        Assert.DoesNotContain(step.Findings, finding => finding.Open && finding.Kind != openFinding);
+        Assert.Empty(step.Effects);
+        var changed = initial != expected || state.KnownActivityReason != expectedReason;
+        if (rule is null || !changed)
+            Assert.DoesNotContain(step.Transitions, transition => transition.Axis == "activity");
+        else
+            Assert.Contains(step.Transitions, transition => transition.Axis == "activity" && transition.Rule == rule);
+        Assert.Equal(changed ? Now : Now.AddMinutes(-1), step.State.ActivitySince);
+        SeatAssert.Invariants(step);
+    }
+
+    private static void AssertCompacted(ActivityValue initial, ActivityValue? remembered, ActivityValue? expected,
+        string? expectedReason, string? pending, string? rule = null, bool applies = true, string? detail = null)
+    {
+        detail ??= applies && initial == ActivityValue.Working
+            ? SeatVocabulary.ActivityDetailCompacting
+            : null;
+        var state = State(initial, pending) with
+        {
+            KnownActivityDetail = detail,
+            ActivityDetail = detail,
+            PreCompactionActivity = remembered
+        };
+        var step = Apply(state, HarnessEventKind.Compacted, new Dictionary<string, string>());
+
+        Assert.Equal(expected ?? initial, step.State.KnownActivity);
+        Assert.Equal(expectedReason ?? (expected is null ? state.KnownActivityReason : null), step.State.KnownActivityReason);
+        Assert.Equal(expected is null ? detail : null, step.State.KnownActivityDetail);
+        Assert.Equal(pending, step.State.PendingInputRequest);
+        Assert.Equal(applies ? null : remembered, step.State.PreCompactionActivity);
+        Assert.Equal(EventDisposition.Applied, step.Disposition);
+        Assert.Contains(step.Findings, finding => finding.Kind == SeatVocabulary.FindingActivityStale && !finding.Open);
+        if (rule is null)
+            Assert.DoesNotContain(step.Transitions, transition => transition.Axis == "activity");
+        else
+            Assert.Contains(step.Transitions, transition => transition.Axis == "activity" && transition.Rule == rule);
+        Assert.Equal(expected.HasValue && initial != expected.Value || expectedReason is not null
+            ? Now
+            : state.ActivitySince, step.State.ActivitySince);
+        SeatAssert.Invariants(step);
+    }
 
     private static SeatState State(ActivityValue activity, string? pending = null) => SeatState.Initial(Now) with
     {
