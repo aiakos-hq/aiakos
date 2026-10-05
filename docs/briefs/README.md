@@ -40,6 +40,7 @@ Acceptance tests are not here: they stay local, so that an implementer cannot re
 | [14-1 Rig file envelope and diagnostics](14-1/brief.md) | #14 | `impl/opencode` | implemented | not split (before the story workflow) | | PR #43 |
 | [14-2 Semantic validation of the three YAML files](14-2/brief.md) | #14 | `impl/opencode` | implemented | not split (before the story workflow) | | #45 |
 | [14-3 File references and the resolved rig](14-3/brief.md) | #14 | `impl` | approved | [6](14-3/stories.md) | | |
+| [14-4 Canonical form and hashes](14-4/brief.md) | #14 | `impl` | approved | [3](14-4/stories.md) | | |
 
 Slices 10-1, 14-1 and 14-2 were implemented as one piece each, before stories existed. 14-1 and
 14-2 went through the review loop, whose follow-up briefs are kept next to them. 14-2 did not
@@ -54,7 +55,7 @@ the new gate.
 | #11 tmux session host | 11-2 runner and start, 11-3 delivery and capture, 11-4 stop and watcher, 11-5 adoption |
 | #12 Claude Code adapter | 12-1 orchestrator half, 12-2 relay and ingest, 12-3 normalizer, 12-4 node driver, 12-5 end to end |
 | #13 SeatActor | 13-3 actor shell, 13-4 lifecycle and delivery, 13-5 restart and integration |
-| #14 rig loader | 14-4 canonical form and hashes, 14-5 projection |
+| #14 rig loader | 14-5 projection |
 | #15 CLI and released instance | 15-1 skeleton and dry run, 15-2 local API, 15-3 client commands, 15-4 instance host, 15-5 release |
 | #16 aiakos-dev rig, M1 acceptance | 16-1 rig files, 16-2 pin and rig-compat, 16-3 acceptance run |
 
