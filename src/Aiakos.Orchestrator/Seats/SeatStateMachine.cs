@@ -69,6 +69,12 @@ public static class SeatStateMachine
                     Open(SeatVocabulary.FindingSourcesDisagree), NoEffects),
             _ => new SeatStep(state, null, EventDisposition.Evidence, NoTransitions, NoFindings, NoEffects)
         };
+        if (input.Body is HarnessBody evidence &&
+            string.Equals(evidence.NativeSessionId, state.NativeSessionId, StringComparison.Ordinal) &&
+            profile.IsConversationEvidence(evidence.Kind, evidence.Attributes))
+            result = ApplyConversationEvidence(result, now);
+        if (input.Body is LaunchResultBody launchResult)
+            result = ApplyLaunchResumability(result, launchResult, now);
         var findings = result.Findings;
         if (input.Body is HarnessBody)
             findings = [.. findings, new FindingChange(SeatVocabulary.FindingActivityStale, false)];
@@ -81,6 +87,78 @@ public static class SeatStateMachine
         {
             State = result.State with { LastEventAt = now },
             Disposition = result.Disposition ?? EventDisposition.Applied,
+            Findings = findings
+        };
+    }
+
+    private static SeatStep ApplyConversationEvidence(SeatStep step, DateTimeOffset now) =>
+        step.State.Resumability switch
+        {
+            ResumabilityValue.FreshOnly => SetResumability(step, ResumabilityValue.Resumable, null, "U2", now),
+            ResumabilityValue.Lost => SetResumability(step, ResumabilityValue.Unknown,
+                SeatVocabulary.ResumabilityReasonContradictingEvidence, "U2", now,
+                Open(SeatVocabulary.FindingSourcesDisagree)),
+            ResumabilityValue.Unknown => SetResumability(step, ResumabilityValue.Resumable, null, "U2", now),
+            _ => step
+        };
+
+    private static SeatStep ApplyLaunchResumability(SeatStep step, LaunchResultBody result, DateTimeOffset now)
+    {
+        var launch = step.State.Launch;
+        if (launch is null || result.Outcome != LaunchOutcome.Failed)
+        {
+            if (launch?.Mode == LaunchMode.Resume && result.Outcome == LaunchOutcome.Ready &&
+                step.State.Resumability == ResumabilityValue.Unknown)
+                return SetResumability(step, ResumabilityValue.Resumable, null, "U3", now);
+            return step;
+        }
+
+        if (launch.Mode == LaunchMode.Resume)
+        {
+            if (result.Reason == SeatVocabulary.LaunchReasonResumeSessionNotFound)
+            {
+                if (step.State.Resumability is ResumabilityValue.Resumable or ResumabilityValue.Unknown)
+                    return SetResumability(step, ResumabilityValue.Lost, null, "U4", now,
+                        Open(SeatVocabulary.FindingResumeLost));
+                return step;
+            }
+            return WithFindings(step, [.. step.Findings, new FindingChange(SeatVocabulary.FindingLaunchFailed, true)]);
+        }
+
+        if (launch.Mode == LaunchMode.Fresh && launch.ReusedNativeSessionId &&
+            step.State.Resumability == ResumabilityValue.FreshOnly)
+            return SetResumability(step, ResumabilityValue.Unknown,
+                SeatVocabulary.ResumabilityReasonFreshRelaunchFailed, "U5", now,
+                Open(SeatVocabulary.FindingLaunchFailed));
+
+        return step;
+    }
+
+    private static SeatStep SetResumability(SeatStep step, ResumabilityValue value, string? reason,
+        string rule, DateTimeOffset now, IReadOnlyList<FindingChange>? additionalFindings = null)
+    {
+        var current = step.State.Resumability;
+        var currentReason = step.State.ResumabilityReason;
+        if (current == value && currentReason == reason)
+            return additionalFindings is null
+                ? step
+                : WithFindings(step, [.. step.Findings, .. additionalFindings]);
+
+        var updated = step.State with
+        {
+            Resumability = value,
+            ResumabilityReason = reason,
+            ResumabilitySince = now
+        };
+        var transition = new SeatTransition("resumability", true, SeatVocabulary.ToStored(current),
+            SeatVocabulary.ToStored(value), reason, rule);
+        var findings = additionalFindings is null
+            ? step.Findings
+            : [.. step.Findings, .. additionalFindings];
+        return step with
+        {
+            State = updated,
+            Transitions = [.. step.Transitions, transition],
             Findings = findings
         };
     }
