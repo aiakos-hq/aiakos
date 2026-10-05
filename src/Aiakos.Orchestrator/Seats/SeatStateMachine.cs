@@ -117,9 +117,11 @@ public static class SeatStateMachine
         {
             if (result.Reason == SeatVocabulary.LaunchReasonResumeSessionNotFound)
             {
-                if (step.State.Resumability is ResumabilityValue.Resumable or ResumabilityValue.Unknown)
+                if (step.State.Resumability == ResumabilityValue.Resumable)
                     return SetResumability(step, ResumabilityValue.Lost, null, "U4", now,
                         Open(SeatVocabulary.FindingResumeLost));
+                if (step.State.Resumability == ResumabilityValue.Unknown)
+                    return SetResumability(step, ResumabilityValue.Lost, null, "U4", now);
                 return step;
             }
             return WithFindings(step, [.. step.Findings, new FindingChange(SeatVocabulary.FindingLaunchFailed, true)]);

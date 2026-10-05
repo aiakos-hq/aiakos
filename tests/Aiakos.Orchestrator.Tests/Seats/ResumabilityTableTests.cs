@@ -105,7 +105,7 @@ public sealed class ResumabilityTableTests
 
         Assert.Equal(expected, step.State.Resumability);
         Assert.Null(step.State.ResumabilityReason);
-        Assert.Equal(initial != ResumabilityValue.Lost, step.Findings.Any(finding =>
+        Assert.Equal(initial == ResumabilityValue.Resumable, step.Findings.Any(finding =>
             finding.Kind == SeatVocabulary.FindingResumeLost && finding.Open));
         SeatAssert.Invariants(step);
     }
