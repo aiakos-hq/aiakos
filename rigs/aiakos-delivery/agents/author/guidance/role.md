@@ -42,3 +42,7 @@ When `lead` asks for a story's acceptance tests:
    the gate against `main` yourself.
 
 Acceptance tests may not add a rule that is not in the brief.
+
+Acceptance tests stay outside the repository, so they guard a story only until it is merged.
+Give every rule that must stay true afterwards a `T` item: a test the implementer commits. A
+brief for a bug fix always has one for the bug itself.

@@ -36,6 +36,10 @@
 #                                         tests; label -> needs-review, or one retry, or blocked.
 #                                         A run that stops at a process check before the build
 #                                         is not an attempt
+#                                         A failure counts only for the version of the story
+#                                         text and acceptance tests it was judged by
+#   tools/story.sh waive <issue> <run> infrastructure|test-defect "<evidence>"
+#                                         takes one failed run out of the count, on record
 #   tools/story.sh pr <issue> [--maintainer-reviewed] [--partial]
 #                                         pushes the branch and opens the pull request.
 #                                         --partial: the gate did not pass because the brief
@@ -389,6 +393,15 @@ cmd_status() {
   echo
   echo "Story worktrees:"
   git worktree list | grep -E '/(story|slice|analysis|baseline|chore)-[0-9]+' || echo "  none"
+  echo
+  echo "Waived gate runs:"
+  local record found_waiver=""
+  for record in "$main_root"/artifacts/trials/*/gate-*.waived; do
+    [ -f "$record" ] || continue
+    found_waiver=1
+    printf '  %s run %s: %s\n' "$(basename "$(dirname "$record")")" "$(basename "$record" .waived | cut -d- -f2)" "$(sed -n 's/^kind: //p' "$record")"
+  done
+  [ -n "$found_waiver" ] || echo "  none"
 }
 
 cmd_ready() {
@@ -495,16 +508,80 @@ build_infrastructure_failure() {
     ! grep -Eiq 'error [[:alpha:]]+[[:digit:]]+|warning' "$1"
 }
 
-# Failed attempts so far: gate runs that reached the build and failed, and reviews that blocked.
-# A run that stopped at a process check (uncommitted changes, a file outside the paths) is not one.
+# What a gate run judged against: the story text (from the brief on main; the issue text for a
+# chore) and the acceptance tests. A failed run stops counting when this changes, because the
+# failure may have been the brief's or the tests' and not the implementer's.
+story_version() {
+  local file
+  {
+    if [ "$kind" = "story" ] && [ -n "$n" ] && git cat-file -e "$BRIEF_REF:docs/briefs/$slice/stories.md" 2>/dev/null; then
+      slice_dir "$slice" ref
+      assemble "$dir" "$slice" "$n"
+    else
+      printf '%s\n' "$body"
+    fi
+    # The gate and the test sources only: notes, logs and reviews in the folder are not tests.
+    find "$trial" -type f \( -name '*.sh' -o -name '*.cs' -o -name '*.csproj' -o -name '*.props' -o -name '*.targets' \
+        -o -name '*.json' -o -name '*.yaml' -o -name '*.yml' -o -name '*.sql' -o -name '*.proto' \) \
+        -not -path '*/bin/*' -not -path '*/obj/*' -not -path '*/TestResults/*' 2>/dev/null | LC_ALL=C sort | while read -r file; do
+      printf '== %s\n' "${file#"$trial"/}"
+      tr -d '\r' < "$file"
+    done
+  } | sha256sum | cut -c1-12
+}
+
+version_of_log() { head -n 1 "$1" | grep -oE 'version [0-9a-f]+' | cut -d' ' -f2 || true; }
+
+# Failed attempts so far, for the current version of the story: gate runs that reached the build
+# and failed, and reviews that blocked. Not counted: a run that stopped at a process check, an
+# infrastructure failure, a waived run, and a failure against an older story text or older
+# acceptance tests. A log from before versions were recorded counts.
+# Sets $stale to the number of failures left out because of their version.
 failed_attempts() {
-  local count=0 file
+  local count=0 file old
+  stale=0
+  [ -n "${version:-}" ] || version="$(story_version)"
   for file in "$trial"/gate-*.txt; do
     [ -f "$file" ] || continue
-    if grep -q '^== dotnet build' "$file" && tail -n 1 "$file" | grep -qx 'GATE: fail'; then count=$((count + 1)); fi
+    grep -q '^== dotnet build' "$file" && tail -n 1 "$file" | grep -qx 'GATE: fail' || continue
+    [ ! -f "${file%.txt}.waived" ] || continue
+    old="$(version_of_log "$file")"
+    if [ -n "$old" ] && [ "$old" != "$version" ]; then stale=$((stale + 1)); else count=$((count + 1)); fi
   done
-  for file in "$trial"/review-block-*.md; do [ -f "$file" ] && count=$((count + 1)); done
-  printf '%s' "$count"
+  for file in "$trial"/review-block-*.md; do
+    [ -f "$file" ] || continue
+    old="$(cat "${file%.md}.version" 2>/dev/null || true)"
+    if [ -n "$old" ] && [ "$old" != "$version" ]; then stale=$((stale + 1)); else count=$((count + 1)); fi
+  done
+  attempts_failed="$count"
+}
+
+# Takes one failed gate run out of the count, with a reason on record. For a failure that was
+# not the implementer's and that the version rule does not catch by itself.
+cmd_waive() {
+  load_issue "${1:-}"
+  local run="${2:-}" why="${3:-}" evidence="${4:-}" log record waived
+  [[ "$run" =~ ^[0-9]+$ ]] && [ -n "$why" ] && [ -n "$evidence" ] \
+    || die "usage: waive <issue> <run> infrastructure|test-defect \"<evidence: what failed, and where it is fixed or recorded>\""
+  case "$why" in
+    infrastructure|test-defect) ;;
+    *) die "a run can be waived as 'infrastructure' (the machine, or a flaky test the change did not touch) or 'test-defect' (the acceptance test was wrong). A failure of the implementation cannot be waived" ;;
+  esac
+  [ "${#evidence}" -ge 20 ] || die "the evidence must say what failed and where that is fixed or recorded"
+  log="$trial/gate-$run.txt"
+  [ -f "$log" ] || die "no gate run $run for $story"
+  grep -q '^== dotnet build' "$log" && tail -n 1 "$log" | grep -qx 'GATE: fail' || die "run $run of $story is not a counted failure; there is nothing to waive"
+  record="${log%.txt}.waived"
+  [ ! -f "$record" ] || die "run $run of $story is already waived"
+  waived="$(find "$trial" -maxdepth 1 -name 'gate-*.waived' | wc -l)"
+  [ "$waived" -lt 2 ] || die "$story already has $waived waived runs. A third is the maintainer's decision: park it on the maintainer"
+  if [ "${AIAKOS_NO_WRITE:-}" = "1" ]; then echo "would waive run $run of $story ($why): $evidence"; return; fi
+  printf 'kind: %s\nby: %s\nat: %s\nevidence: %s\n' "$why" "${OPENRIG_SESSION_NAME:-${USER:-unknown}}" "$(date -u +%FT%TZ)" "$evidence" > "$record"
+  gh issue comment "$number" --repo "$REPO" --body "Gate run $run waived as **$why**: $evidence" >/dev/null
+  failed_attempts
+  echo "waived   run $run of $story ($why); recorded on #$number"
+  echo "attempts $attempts_failed failed so far"
+  if has_label blocked; then echo "The issue is labelled blocked: send it back with 'start $number --retry'."; fi
 }
 
 cmd_start() {
@@ -578,6 +655,8 @@ start_retry() {
       count=$(( $(find "$trial" -maxdepth 1 -name 'review-block-*.md' | wc -l) + 1 ))
       cp "$trial/review.md" "$worktree/artifacts/briefs/$story-review.md"
       mv "$trial/review.md" "$trial/review-block-$count.md"
+      # The review judged what the last gate run judged; it stops counting when that changes.
+      if [ -n "$last" ] && [ -n "$(version_of_log "$last")" ]; then version_of_log "$last" > "$trial/review-block-$count.version"; fi
       reason="The review that sent it back is in artifacts/briefs/$story-review.md. "
     else
       count=$(( $(find "$trial" -maxdepth 1 -name 'review-superseded-*.md' | wc -l) + 1 ))
@@ -593,7 +672,9 @@ start_retry() {
   echo "branch   $branch (origin/main merged in)"
   echo "worktree $(native "$worktree")"
   echo "label    in-progress"
-  echo "attempts $(failed_attempts) failed so far"
+  failed_attempts
+  echo "attempts $attempts_failed failed so far for this version of the story"
+  if [ "$stale" -gt 0 ]; then echo "         $stale earlier failure(s) were against an older story text or older acceptance tests and do not count"; fi
   print_task "The story at artifacts/briefs/$story.md was sent back. Read it again: its text may have changed. ${reason}Fix what is named there and nothing else. Add one new commit."
 }
 
@@ -605,11 +686,12 @@ cmd_done() {
   local run failed attempt log paths path file bad="" ok=1 infrastructure=0 build_log
   # The file number counts every run; the attempt counts only runs that can use up the retry.
   run=$(( $(find "$trial" -maxdepth 1 -name 'gate-*.txt' | wc -l) + 1 ))
-  failed="$(failed_attempts)"
+  failed_attempts
+  failed="$attempts_failed"
   attempt=$((failed + 1))
   log="$trial/gate-$run.txt"
   {
-    echo "Gate for story $story, run $run, attempt $attempt, commit $(git -C "$worktree" rev-parse --short HEAD)."
+    echo "Gate for story $story, run $run, attempt $attempt, commit $(git -C "$worktree" rev-parse --short HEAD), version $version."
     echo
     if [ -n "$(git -C "$worktree" status --porcelain)" ]; then echo "FAIL: the worktree has uncommitted changes"; ok=0; fi
     if [ -z "$(git -C "$worktree" log --oneline origin/main..HEAD)" ]; then echo "FAIL: no commit on the branch"; ok=0; fi
@@ -667,6 +749,16 @@ cmd_done() {
   } > "$log" 2>&1 || true
   cat "$log"
   echo
+  # What kind of failure it was, in one word, for whoever reports or tags it.
+  if ! tail -n 1 "$log" | grep -q 'GATE: pass'; then
+    if tail -n 1 "$log" | grep -qx 'GATE: infrastructure failure'; then echo "failure  infrastructure"
+    elif ! grep -q '^== dotnet build' "$log"; then echo "failure  process check"
+    elif grep -q '^FAIL: build$' "$log"; then echo "failure  build"
+    elif grep -q '^FAIL: acceptance$' "$log"; then echo "failure  acceptance tests"
+    elif grep -q '^FAIL: tests$' "$log"; then echo "failure  tests"
+    else echo "failure  files left behind in the worktree"; fi
+  fi
+  if [ "$stale" -gt 0 ]; then echo "note     $stale earlier failure(s) were against an older story text or older acceptance tests and do not count"; fi
   if tail -n 1 "$log" | grep -q 'GATE: pass'; then
     set_state needs-review
     echo "label    needs-review"
@@ -952,7 +1044,8 @@ case "${1:-}" in
   analysis-pr) cmd_analysis_pr "${2:-}" "${3:-}" "${4:-}" ;;
   baseline)   cmd_baseline "${2:-}" "${3:-}" ;;
   done)       cmd_done "${2:-}" ;;
+  waive)      cmd_waive "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
   pr)         cmd_pr "${2:-}" "${3:-}" "${4:-}" ;;
   cleanup)    cmd_cleanup "${2:-}" ;;
-  *)          sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *)          sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
