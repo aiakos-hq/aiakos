@@ -50,3 +50,7 @@ Reviewed at commit <sha>. Stories: <n>. Check: ok.
 Write `None.` under a heading that has nothing. Hand the slice back to the author seat that
 handed it to you while
 findings are open, and to `lead-lead` when none are.
+
+When the author has resolved findings, read the changes and update the `Reviewed at commit` line
+to the commit you read, in a commit of your own. `tools/story.sh analysis-pr` refuses a slice
+whose brief, items or stories changed after the commit that line names.

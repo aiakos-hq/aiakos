@@ -9,6 +9,10 @@
 #                                         do there
 #   tools/story.sh split-done <slice>     checks the stories.md written there and copies it in
 #   tools/story.sh show <slice> <n>       prints story <n> as an implementer will get it
+#   tools/story.sh analysis-pr <slice> [--look "<reason>"]
+#                                         the one pull request of a slice's analysis: checks the
+#                                         split and the review, sets status approved and the
+#                                         index row; the maintainer's merge is the approval
 #   tools/story.sh analysis <slice> [--remove]
 #                                         a worktree and branch for the analysis of one slice
 #
@@ -22,6 +26,9 @@
 #   tools/story.sh next [<route>]         the ready story to take next
 #   tools/story.sh start <issue>          worktree + branch from origin/main, story copied in,
 #                                         label ready -> in-progress
+#                                         For an issue labelled type/chore or type/bug that is
+#                                         not a story: no brief, no acceptance tests; the gate
+#                                         of "done" is the build and every existing test
 #   tools/story.sh start <issue> --retry  sends a story back to its implementer: same worktree,
 #                                         main merged in, story text and issue body written
 #                                         again from the brief, label -> in-progress
@@ -206,13 +213,23 @@ issue_of() {
     --json number,title,state --jq ".[] | select(.title | startswith(\"$1: \")) | \"\(.number) \(.state)\"" | head -n 1
 }
 
-# Sets: number title body labels story slice n slug branch worktree trial parent route
+# Sets: number title body labels kind story slice n slug branch worktree trial parent route origin
+# kind is "story", or "chore" for an issue labelled type/chore or type/bug that has no brief.
 load_issue() {
   number="${1:-}"
   [[ "$number" =~ ^[0-9]+$ ]] || die "give the story issue number"
   title="$(gh issue view "$number" --repo "$REPO" --json title --jq .title)"
   body="$(gh issue view "$number" --repo "$REPO" --json body --jq .body | tr -d '\r')"
   labels="$(gh issue view "$number" --repo "$REPO" --json labels --jq '[.labels[].name] | join(" ")')"
+  if ! [[ "$title" =~ ^[0-9]+-[0-9]+(-[0-9]+)?:[[:space:]] ]] && { has_label type/chore || has_label type/bug; }; then
+    kind=chore; story="chore-$number"; slice=""; n=""; parent=""; route="impl/senior"; origin="chore"
+    slug="$(slug_of "$title")"
+    if has_label type/bug; then branch="fix/$number-$slug"; else branch="chore/$number-$slug"; fi
+    worktree="$main_root/.claude/worktrees/chore-$number"
+    trial="$main_root/artifacts/trials/chore-$number"
+    return
+  fi
+  kind=story
   # "<slice>-<n>: <title>", or "<slice>: <title>" for a slice that was started before stories.
   [[ "$title" =~ ^([0-9]+-[0-9]+(-[0-9]+)?):[[:space:]]*(.+)$ ]] \
     || die "title of #$number must be '<story id>: <title>', found '$title'"
@@ -232,6 +249,7 @@ load_issue() {
     if has_label "$candidate"; then route="$(norm_route "$candidate")"; fi
   done
   [ -n "$route" ] || die "#$number has no routing label (impl or impl/senior)"
+  origin="part of #$parent"
 }
 
 # Label changes on the story issue. AIAKOS_NO_WRITE=1 prints them instead (for trying a command out).
@@ -381,18 +399,30 @@ cmd_ready() {
   fi
 }
 
+# Chores and bugs that are ready: issues labelled ready with type/chore or type/bug and no story title.
+ready_chores() {
+  gh issue list --repo "$REPO" --state open --label ready --limit 100 --json number,title,labels \
+    --jq '.[] | select((.title | test("^[0-9]+-[0-9]+(-[0-9]+)?: ") | not) and ([.labels[].name] | any(. == "type/chore" or . == "type/bug"))) | "#\(.number)\timpl/senior\t\(.title)"'
+}
+
 cmd_next() {
-  local want="${1:-}" route_label
+  local want="${1:-}" route_label chores
   for route_label in $ROUTES $LEGACY_ROUTES; do
     [ -z "$want" ] || [ "$want" = "$(norm_route "$route_label")" ] || continue
     gh issue list --repo "$REPO" --state open --label ready --label "$route_label" --limit 100 --json number,title \
       --jq ".[] | select(.title | test(\"^[0-9]+-[0-9]+-[0-9]+: \")) | \"\(.title | split(\":\")[0])\t#\(.number)\t$route_label\t\(.title)\""
   done | sort -t- -k1,1n -k2,2n -k3,3n > "${TMPDIR:-/tmp}/story-next.$$" || true
-  if [ ! -s "${TMPDIR:-/tmp}/story-next.$$" ]; then echo "no story is ready"; rm -f "${TMPDIR:-/tmp}/story-next.$$"; return; fi
-  echo "next:"
-  head -n 1 "${TMPDIR:-/tmp}/story-next.$$" | cut -f2-
-  if [ "$(wc -l < "${TMPDIR:-/tmp}/story-next.$$")" -gt 1 ]; then echo; echo "also ready:"; tail -n +2 "${TMPDIR:-/tmp}/story-next.$$" | cut -f2-; fi
+  if [ ! -s "${TMPDIR:-/tmp}/story-next.$$" ]; then echo "no story is ready"
+  else
+    echo "next:"
+    head -n 1 "${TMPDIR:-/tmp}/story-next.$$" | cut -f2-
+    if [ "$(wc -l < "${TMPDIR:-/tmp}/story-next.$$")" -gt 1 ]; then echo; echo "also ready:"; tail -n +2 "${TMPDIR:-/tmp}/story-next.$$" | cut -f2-; fi
+  fi
   rm -f "${TMPDIR:-/tmp}/story-next.$$"
+  if [ -z "$want" ] || [ "$want" = "impl/senior" ]; then
+    chores="$(ready_chores || true)"
+    if [ -n "$chores" ]; then echo; echo "chores and bugs ready (for the senior seat):"; printf '%s\n' "$chores"; fi
+  fi
 }
 
 # Removes every state label the issue has and sets one.
@@ -433,16 +463,21 @@ cmd_start() {
   has_label ready || die "#$number is not labelled 'ready' (labels: $labels)"
   [ ! -e "$worktree" ] || die "worktree already exists: $worktree (to send the story back to its implementer: start $number --retry)"
   if git show-ref --verify --quiet "refs/heads/$branch"; then die "branch already exists: $branch"; fi
-  [ -f "$trial/gate.sh" ] || die "no acceptance gate: $trial/gate.sh"
+  if [ "$kind" = "story" ]; then [ -f "$trial/gate.sh" ] || die "no acceptance gate: $trial/gate.sh"; else mkdir -p "$trial"; fi
   git fetch --quiet origin main
   git worktree add --quiet -b "$branch" "$worktree" origin/main
   mkdir -p "$worktree/artifacts/briefs"
-  printf '%s\n' "$body" > "$worktree/artifacts/briefs/$story.md"
+  if [ "$kind" = "chore" ]; then printf '# #%s: %s\n\n' "$number" "$title" > "$worktree/artifacts/briefs/$story.md"; fi
+  printf '%s\n' "$body" >> "$worktree/artifacts/briefs/$story.md"
   relabel ready in-progress
-  echo "story    $story (#$number, part of #$parent, $route)"
+  echo "story    $story (#$number, $origin, $route)"
   echo "branch   $branch"
   echo "worktree $(native "$worktree")"
   echo "label    in-progress"
+  if [ "$kind" = "chore" ]; then
+    print_task "Do what the issue in artifacts/briefs/$story.md asks, and nothing more. There is no brief and no acceptance test: the gate is the build with zero warnings and every existing test. A bug fix adds a test that fails without the fix. Run build and tests until green. One commit."
+    return
+  fi
   print_task "Implement the story at artifacts/briefs/$story.md. Follow it exactly. Run build and tests until green. One commit."
 }
 
@@ -490,7 +525,7 @@ start_retry() {
     reason="${reason}The last gate output is in artifacts/briefs/$story-$(basename "$last"). "
   fi
   set_state in-progress
-  echo "story    $story (#$number, part of #$parent, $route), retry"
+  echo "story    $story (#$number, $origin, $route), retry"
   echo "branch   $branch (origin/main merged in)"
   echo "worktree $(native "$worktree")"
   echo "label    in-progress"
@@ -502,7 +537,7 @@ start_retry() {
 cmd_done() {
   load_issue "${1:-}"
   [ -d "$worktree" ] || die "no worktree for $story: $worktree"
-  [ -f "$trial/gate.sh" ] || die "no acceptance gate: $trial/gate.sh"
+  if [ "$kind" = "story" ]; then [ -f "$trial/gate.sh" ] || die "no acceptance gate: $trial/gate.sh"; else mkdir -p "$trial"; fi
   local run failed attempt log paths path file bad="" ok=1 infrastructure=0 build_log
   # The file number counts every run; the attempt counts only runs that can use up the retry.
   run=$(( $(find "$trial" -maxdepth 1 -name 'gate-*.txt' | wc -l) + 1 ))
@@ -548,7 +583,14 @@ cmd_done() {
       fi
       rm -f "$build_log"
     fi
-    if [ "$ok" -eq 1 ]; then
+    if [ "$ok" -eq 1 ] && [ "$kind" = "chore" ]; then
+      # A chore or a bug has no acceptance tests: every existing test is its gate.
+      echo "== tests (dotnet test -c Release --no-build)"
+      if ! (cd "$worktree" && dotnet test -c Release --no-build 2>&1 | tail -n 40); then echo "FAIL: tests"; ok=0; fi
+      if [ -n "$(git -C "$worktree" status --porcelain)" ]; then
+        echo "FAIL: the tests left files behind in the worktree:"; git -C "$worktree" status --short; ok=0
+      fi
+    elif [ "$ok" -eq 1 ]; then
       echo "== acceptance (gate.sh)"
       if ! (cd "$worktree" && STORY="$story" TRIAL="$trial" bash "$trial/gate.sh" 2>&1); then echo "FAIL: acceptance"; ok=0; fi
       if [ -n "$(git -C "$worktree" status --porcelain)" ]; then
@@ -624,7 +666,9 @@ cmd_pr() {
   pr_title="$(git -C "$worktree" log --reverse --format=%s origin/main..HEAD | head -n 1)"
   body_file="$(mktemp)"
   {
-    if [ -f "$trial/pr-body.md" ]; then cat "$trial/pr-body.md"; else echo "Story $story: ${title#*: }"; fi
+    if [ -f "$trial/pr-body.md" ]; then cat "$trial/pr-body.md"
+    elif [ "$kind" = "chore" ]; then echo "$title (#$number). No brief: gated by the build and every existing test."
+    else echo "Story $story: ${title#*: }"; fi
     echo
     if [ -n "$partial" ]; then
       echo "## Partial"
@@ -640,7 +684,7 @@ cmd_pr() {
     grep -E '^(Gate for|== |GATE:|Test run summary|  (total|failed|succeeded|skipped):|    [0-9]+ (Warning|Error))' "$last" || true
     echo '```'
     if [ -f "$trial/review.md" ]; then echo; echo "Review: $(head -n 1 "$trial/review.md")"; else echo; echo "Review: read by the maintainer."; fi
-    printf '\nCloses #%s. Part of #%s.\n' "$number" "$parent"
+    if [ "$kind" = "chore" ]; then printf '\nCloses #%s.\n' "$number"; else printf '\nCloses #%s. Part of #%s.\n' "$number" "$parent"; fi
   } > "$body_file"
   git -C "$worktree" push --quiet -u origin "$branch"
   if [ -n "$partial" ]; then
@@ -684,6 +728,99 @@ cmd_analysis() {
   echo "branch   $branch_name"
   echo "worktree $(native "$wt")"
   echo "Work on docs/briefs/$slice/ there. After the merge: tools/story.sh analysis $slice --remove"
+}
+
+# The index row of a slice in docs/briefs/README.md: status, story count, no open findings.
+# Adds the row when the slice has none.
+index_row() {
+  local readme="$1" slice="$2" brief="$3" stories="$4" count title issue route row
+  count="$(grep -cE '^## S[0-9]+:' "$stories")"
+  if grep -qE "^\| \[$slice " "$readme"; then
+    awk -v slice="$slice" -v count="$count" 'BEGIN { FS = OFS = "|" }
+      index($0, "| [" slice " ") == 1 { $5 = " approved "; $6 = " [" count "](" slice "/stories.md) "; $7 = " " }
+      { print }' "$readme" > "$readme.new" && mv "$readme.new" "$readme"
+  else
+    title="$(front "$brief" title)"; issue="$(front "$brief" issue)"; route="$(norm_route "$(front "$brief" route)")"
+    row="| [$slice $title]($slice/brief.md) | #$issue | \`$route\` | approved | [$count]($slice/stories.md) | | |"
+    awk -v row="$row" 'NR == FNR { if ($0 ~ /^\| \[[0-9]+-[0-9]+ /) last = FNR; next }
+      { print } FNR == last { print row }' "$readme" "$readme" > "$readme.new" && mv "$readme.new" "$readme"
+  fi
+}
+
+# Opens the one pull request of a slice's analysis: checks the split and the architect's review,
+# sets the status and the index row, and says whether the maintainer needs to read it or can
+# merge it as routine. The maintainer's merge is the approval. Run it in the analysis worktree.
+cmd_analysis_pr() {
+  local slice="${1:-}" look="" branch_name reviewed file open title issue subject body_file url
+  is_slice "$slice" || die "usage: analysis-pr <slice> [--look \"<why the maintainer should read it>\"]"
+  if [ "${2:-}" = "--look" ]; then look="${3:-}"; [ -n "$look" ] || die "--look needs the reason"
+  elif [ -n "${2:-}" ]; then die "unknown option for analysis-pr: $2"; fi
+  dir="$here/docs/briefs/$slice"
+  [ -f "$dir/brief.md" ] && [ -f "$dir/items.tsv" ] && [ -f "$dir/stories.md" ] || die "docs/briefs/$slice needs brief.md, items.tsv and stories.md"
+  branch_name="$(git -C "$here" rev-parse --abbrev-ref HEAD)"
+  [ "$branch_name" != "main" ] && [ "$branch_name" != "HEAD" ] || die "run this on the slice's branch (tools/story.sh analysis $slice), not on $branch_name"
+  [ -z "$(git -C "$here" status --porcelain)" ] || die "uncommitted changes in $(native "$here"): commit them first"
+  run_check "$dir" > /dev/null || die "the story check fails (tools/story.sh check $slice)"
+
+  # The architect's review: no open finding, and nothing but bookkeeping changed after it.
+  [ -f "$dir/findings.md" ] || die "no docs/briefs/$slice/findings.md: the architect has not reviewed this slice"
+  open="$(grep -c '^- \[ \]' "$dir/findings.md" || true)"
+  [ "$open" -eq 0 ] || die "docs/briefs/$slice/findings.md has $open open finding(s)"
+  reviewed="$(grep -oE 'Reviewed at commit [0-9a-f]{7,40}' "$dir/findings.md" | tail -n 1 | cut -d' ' -f4)"
+  [ -n "$reviewed" ] || die "findings.md has no 'Reviewed at commit <sha>' line"
+  git -C "$here" merge-base --is-ancestor "$reviewed" HEAD 2>/dev/null || die "findings.md names commit $reviewed, which is not on this branch"
+  for file in $(git -C "$here" diff --name-only "$reviewed" HEAD); do
+    case "$file" in
+      "docs/briefs/$slice/findings.md"|docs/briefs/README.md) ;;
+      "docs/briefs/$slice/brief.md")
+        if git -C "$here" diff -U0 "$reviewed" HEAD -- "$file" | grep -E '^[+-][^+-]' | grep -vqE '^[+-]status:'; then
+          die "brief.md changed after the architect's review at $reviewed: hand the slice back to the architect"
+        fi ;;
+      *) die "$file changed after the architect's review at $reviewed: hand the slice back to the architect" ;;
+    esac
+  done
+
+  # What makes this more than routine for the maintainer.
+  git -C "$here" fetch --quiet origin main
+  for file in $(git -C "$here" diff --name-only origin/main...HEAD); do
+    case "$file" in "docs/briefs/$slice/"*|docs/briefs/README.md) ;; *) look="${look:+$look; }it changes $file, outside the brief" ;; esac
+  done
+  if grep -qE '^route:[[:space:]]*impl/senior' "$dir/stories.md" || [ "$(front "$dir/brief.md" route)" = "impl/senior" ]; then
+    look="${look:+$look; }a story is escalated to impl/senior"
+  fi
+
+  title="$(front "$dir/brief.md" title)"; issue="$(front "$dir/brief.md" issue)"
+  subject="docs(briefs): brief $slice, $title (#$issue)"
+  echo "slice    $slice: $title (part of #$issue)"
+  echo "review   no open finding; reviewed at $reviewed"
+  echo "stories  $(grep -cE '^## S[0-9]+:' "$dir/stories.md")"
+  if [ -n "$look" ]; then echo "for the maintainer: READ IT: $look"; else echo "for the maintainer: routine (brief only, reviewed by the architect)"; fi
+  if [ "${AIAKOS_NO_WRITE:-}" = "1" ]; then echo "dry run: would set status approved, update the index row, commit, push and open the pull request"; return; fi
+
+  awk 'NR == 1 && /^---/ { infront = 1; print; next } infront && /^---/ { infront = 0 } infront && /^status:/ { sub(/^status:[[:space:]]*[a-z]+/, "status: approved") } { print }' "$dir/brief.md" > "$dir/brief.md.new" && mv "$dir/brief.md.new" "$dir/brief.md"
+  index_row "$here/docs/briefs/README.md" "$slice" "$dir/brief.md" "$dir/stories.md"
+  if [ -n "$(git -C "$here" status --porcelain)" ]; then
+    git -C "$here" add "docs/briefs/$slice/brief.md" docs/briefs/README.md
+    git -C "$here" commit --quiet -m "$subject"
+  fi
+  git -C "$here" push --quiet -u origin "$branch_name"
+  body_file="$(mktemp)"
+  {
+    if [ -n "$look" ]; then echo "**For the maintainer: read this one.** $look."
+    else echo "**For the maintainer: routine.** Only the brief of slice $slice changes, and the architect reviewed it."; fi
+    echo
+    echo "Analysis of slice $slice: $title. Part of #$issue. Merging this is the approval; the status is already \`approved\` in the brief, so no second pull request follows."
+    echo
+    echo '```text'
+    run_check "$dir"
+    echo '```'
+    echo
+    echo "Story review: no open finding, reviewed at \`$reviewed\` (\`docs/briefs/$slice/findings.md\`)."
+  } > "$body_file"
+  url="$(gh pr create --repo "$REPO" --base main --head "$branch_name" --title "$subject" --body-file "$body_file")"
+  rm -f "$body_file"
+  echo "pr       $url"
+  echo "Park this on the maintainer with the link. After the merge: tools/story.sh analysis $slice --remove"
 }
 
 # Runs a story's acceptance gate against main, in a worktree that is removed again. The gate
@@ -736,9 +873,10 @@ case "${1:-}" in
   next)       cmd_next "${2:-}" ;;
   start)      cmd_start "${2:-}" "${3:-}" ;;
   analysis)   cmd_analysis "${2:-}" "${3:-}" ;;
+  analysis-pr) cmd_analysis_pr "${2:-}" "${3:-}" "${4:-}" ;;
   baseline)   cmd_baseline "${2:-}" "${3:-}" ;;
   done)       cmd_done "${2:-}" ;;
   pr)         cmd_pr "${2:-}" "${3:-}" "${4:-}" ;;
   cleanup)    cmd_cleanup "${2:-}" ;;
-  *)          sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *)          awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2 ;;
 esac
