@@ -577,6 +577,7 @@ by the script; do not assert unrelated future resolve requests (B2).
 | S5 | Risks: checks 0005-RK9 and 0006-RK2 (parallel tools script). |
 | S9 | Risks: checks 0006-RK4 (permutation property and the pinned limitation). |
 | S11 | Risks: checks 0005-RK3 and 0006-RK10 (Escape denial script). |
+| S12 | Risks: this story checks none of the slice's listed open risks. |
 
 ## Out of scope (do not implement, do not stub)
 
