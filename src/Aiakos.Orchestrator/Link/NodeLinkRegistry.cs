@@ -7,36 +7,66 @@ namespace Aiakos.Orchestrator.Link;
 public sealed class NodeLinkRegistry(ActorSystem actorSystem, INodeLinkApplication application)
 {
     private readonly object _gate = new();
-    private readonly Dictionary<string, IActorRef> _actors = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, NodeLinkSession> _sessions = new(StringComparer.Ordinal);
 
-    public IActorRef Register(NodeIdentity identity, string nodeInstanceId)
+    internal NodeLinkSession Register(NodeIdentity identity, string nodeInstanceId)
     {
         lock (_gate)
         {
-            var actor = actorSystem.ActorOf(
-                Props.Create(() => new NodeProxyActor(identity, nodeInstanceId, application)),
+            var session = new NodeLinkSession();
+            session.Actor = actorSystem.ActorOf(
+                Props.Create(() => new NodeProxyActor(identity, nodeInstanceId, application, session.CallbackToken)),
                 $"node-link-{Guid.NewGuid():N}");
-            if (_actors.TryGetValue(identity.NodeId, out var previous))
-                actorSystem.Stop(previous);
-            _actors[identity.NodeId] = actor;
-            return actor;
+            if (_sessions.TryGetValue(identity.NodeId, out var previous))
+                previous.Supersede(actorSystem);
+            _sessions[identity.NodeId] = session;
+            return session;
         }
     }
 
-    public async Task ReceiveAsync(IActorRef actor, ConnectRequest request, CancellationToken cancellationToken)
+    internal static async Task ReceiveAsync(NodeLinkSession session, ConnectRequest request, CancellationToken cancellationToken)
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        actor.Tell(new ReceiveNodeMessage(request, completion, cancellationToken));
-        await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, session.CallbackToken);
+        session.Actor.Tell(new ReceiveNodeMessage(request, completion, linked.Token));
+        await completion.Task.WaitAsync(linked.Token).ConfigureAwait(false);
     }
 
-    public void Remove(NodeIdentity identity, IActorRef actor)
+    internal void Remove(NodeIdentity identity, NodeLinkSession session)
     {
         lock (_gate)
         {
-            if (_actors.TryGetValue(identity.NodeId, out var current) && ReferenceEquals(current, actor))
-                _actors.Remove(identity.NodeId);
-            actorSystem.Stop(actor);
+            if (_sessions.TryGetValue(identity.NodeId, out var current) && ReferenceEquals(current, session))
+                _sessions.Remove(identity.NodeId);
+            actorSystem.Stop(session.Actor);
+            session.Dispose();
         }
+    }
+}
+
+internal sealed class NodeLinkSession : IDisposable
+{
+    private readonly CancellationTokenSource _callbackCancellation = new();
+    private readonly TaskCompletionSource _superseded = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _ended;
+
+    public IActorRef Actor { get; set; } = ActorRefs.Nobody;
+    public CancellationToken CallbackToken => _callbackCancellation.Token;
+    public Task Superseded => _superseded.Task;
+
+    public void Supersede(ActorSystem actorSystem)
+    {
+        if (Interlocked.Exchange(ref _ended, 1) != 0)
+            return;
+        _superseded.TrySetResult();
+        _callbackCancellation.Cancel();
+        actorSystem.Stop(Actor);
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _ended, 1) == 0)
+            _callbackCancellation.Cancel();
+        _callbackCancellation.Dispose();
     }
 }

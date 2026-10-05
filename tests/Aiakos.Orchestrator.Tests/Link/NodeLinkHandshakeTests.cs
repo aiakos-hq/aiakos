@@ -57,12 +57,38 @@ public sealed class NodeLinkHandshakeTests
         Assert.NotEqual(default, welcome.ServerTime);
 
         await call.RequestStream.WriteAsync(new ConnectRequest { Heartbeat = new Heartbeat() }, TestContext.Current.CancellationToken);
+        Assert.False(app.RequestSeen.Task.IsCompleted);
+        var eventRequest = new ConnectRequest { SeatEvent = new SeatEvent() };
+        await call.RequestStream.WriteAsync(eventRequest, TestContext.Current.CancellationToken);
         var received = await app.RequestSeen.Task.WaitAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(ConnectRequest.BodyOneofCase.Heartbeat, received.BodyCase);
+        Assert.Equal(ConnectRequest.BodyOneofCase.SeatEvent, received.BodyCase);
         await call.RequestStream.WriteAsync(new ConnectRequest { Goodbye = new Goodbye() }, TestContext.Current.CancellationToken);
         await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken);
         Assert.Equal([NodeLinkState.Connected, NodeLinkState.Disconnected], app.States);
         Assert.Equal("friendly-node", Assert.Single(app.Identities).NodeName);
+        call.Dispose();
+    }
+
+    [Fact]
+    public async Task CanonicalizesAlternateGuidSpellingsBeforeReplayAndForwarding()
+    {
+        const string canonical = "12345678-90ab-4cde-8f01-234567890abc";
+        var app = new RecordingApplication();
+        using var actorSystem = ActorSystem.Create("node-link-canonical-id-test");
+        await using var server = await StartServerAsync(app, actorSystem);
+        using var channel = GrpcChannel.ForAddress(ServerAddress(server));
+        var client = new Aiakos.Contracts.Node.V1.NodeLinkService.NodeLinkServiceClient(channel);
+        var call = client.Connect(new Metadata { { "authorization", "Bearer node-secret" } },
+            cancellationToken: TestContext.Current.CancellationToken);
+        var hello = Hello("1.0");
+        hello.NodeInstanceId = "{12345678-90AB-4CDE-8F01-234567890ABC}";
+        await call.RequestStream.WriteAsync(new ConnectRequest { Hello = hello }, TestContext.Current.CancellationToken);
+        Assert.True(await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
+        Assert.Equal(canonical, Assert.Single(app.ReplayInstanceIds));
+
+        await call.RequestStream.WriteAsync(new ConnectRequest { SeatEvent = new SeatEvent() }, TestContext.Current.CancellationToken);
+        await app.RequestSeen.Task.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(canonical, Assert.Single(app.ReceivedInstanceIds));
         call.Dispose();
     }
 
@@ -217,16 +243,20 @@ public sealed class NodeLinkHandshakeTests
     {
         public List<NodeIdentity> Identities { get; } = [];
         public List<NodeLinkState> States { get; } = [];
+        public List<string> ReplayInstanceIds { get; } = [];
+        public List<string> ReceivedInstanceIds { get; } = [];
         public TaskCompletionSource<ConnectRequest> RequestSeen { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task<IReadOnlyList<ReplayFrom>> GetReplayAsync(NodeIdentity identity, Hello hello, CancellationToken ct)
         {
             Identities.Add(identity);
+            ReplayInstanceIds.Add(hello.NodeInstanceId);
             return Task.FromResult<IReadOnlyList<ReplayFrom>>([new ReplayFrom { SeatId = "seat-a", NextSeq = 4 }]);
         }
 
         public Task ReceiveAsync(NodeIdentity identity, string nodeInstanceId, ConnectRequest request, CancellationToken ct)
         {
+            ReceivedInstanceIds.Add(nodeInstanceId);
             RequestSeen.TrySetResult(request);
             return Task.CompletedTask;
         }
