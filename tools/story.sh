@@ -84,7 +84,8 @@ slice_dir() {
     dir="$here/docs/briefs/$slice"
     [ -f "$dir/brief.md" ] || die "no brief: docs/briefs/$slice/brief.md"
   else
-    git fetch --quiet origin main 2>/dev/null || true
+    # One fetch per run is enough; "status" reads every slice.
+    if [ -z "${fetched_main:-}" ]; then git fetch --quiet origin main 2>/dev/null || true; fetched_main=1; fi
     dir="$(mktemp -d)"
     for file in brief.md items.tsv stories.md findings.md; do
       git show "$BRIEF_REF:docs/briefs/$slice/$file" > "$dir/$file" 2>/dev/null || rm -f "$dir/$file"
@@ -128,6 +129,48 @@ context_of() {
       print out
     }
   ' "$1/stories.md"
+}
+
+# Removes what the cut of a story leaves empty: a table with a header and no rows, and a
+# section that then holds nothing else. A note takes its place, so that an implementer does not
+# read the gap as a truncated brief.
+drop_empty_tables() {
+  awk '
+    function is_table(s) { return s ~ /^\|/ }
+    function is_rule(s) { return s ~ /^\|[ \t:|-]+$/ }
+    function is_heading(s) { return s ~ /^#+ / }
+    { line[++count] = $0 }
+    END {
+      # An empty table: a header line, a rule line, and no row after them.
+      for (i = 1; i <= count; i++) {
+        if (is_table(line[i]) && !(i > 1 && is_table(line[i - 1])) && i < count && is_rule(line[i + 1]) && !(i + 2 <= count && is_table(line[i + 2]))) {
+          gone[i] = gone[i + 1] = 1
+          note[i] = "(This table of the brief has no rows for this story.)"
+        }
+      }
+      # A section whose body is only such tables goes as a whole.
+      for (i = 1; i <= count; i++) {
+        if (!is_heading(line[i])) continue
+        last = count
+        for (j = i + 1; j <= count; j++) if (is_heading(line[j])) { last = j - 1; break }
+        tables = 0; other = 0
+        for (j = i + 1; j <= last; j++) {
+          if (j in note) tables++
+          else if (!(j in gone) && line[j] !~ /^[ \t]*$/) other++
+        }
+        if (tables > 0 && other == 0) {
+          title = line[i]; sub(/^#+ +/, "", title)
+          for (j = i; j <= last; j++) { gone[j] = 1; delete note[j] }
+          note[i] = "(The section \"" title "\" of the brief has no rows for this story and is left out.)"
+          blank_after[i] = 1
+        }
+      }
+      for (i = 1; i <= count; i++) {
+        if (i in note) { print note[i]; if (i in blank_after) print ""; continue }
+        if (i in gone) continue
+        print line[i]
+      }
+    }'
 }
 
 # The story as an implementer gets it: the brief without the items of the other stories.
@@ -197,7 +240,7 @@ assemble() {
       }
       print
     }
-  ' "$d/items.tsv" "$d/stories.md" "$d/brief.md"
+  ' "$d/items.tsv" "$d/stories.md" "$d/brief.md" | drop_empty_tables
 }
 
 route_of() {
@@ -312,8 +355,14 @@ cmd_show() {
 }
 
 cmd_status() {
-  local d slice status n title found state
+  local d slice status n title found state cache
   git fetch --quiet origin main 2>/dev/null || true
+  # One call for every issue, not one or two per story: "<story id>\t<number>\t<state>".
+  cache="$(mktemp)"
+  gh issue list --repo "$REPO" --state all --limit 1000 --json number,title,state,labels --jq '
+    .[] | select(.title | test("^[0-9]+-[0-9]+(-[0-9]+)?: ")) |
+    [(.title | split(":")[0]), (.number | tostring),
+     (if .state == "CLOSED" then "done" else ([.labels[].name] | map(select(. == "ready" or . == "in-progress" or . == "needs-review" or . == "partial" or . == "blocked")) | join(",")) end)] | @tsv' > "$cache"
   printf '%-9s %-12s %-14s %s\n' "story" "state" "issue" "title"
   for slice in $( { if [ "$BRIEF_REF" = "WORKTREE" ]; then ls "$here/docs/briefs"; else git ls-tree --name-only "$BRIEF_REF" docs/briefs/ | sed 's|docs/briefs/||'; fi; } | grep -E '^[0-9]+-[0-9]+$' | sort -t- -k1,1n -k2,2n); do
     slice_dir "$slice" ref
@@ -325,19 +374,21 @@ cmd_status() {
     fi
     for n in $(grep -oE '^## S[0-9]+:' "$d/stories.md" | grep -oE '[0-9]+'); do
       title="$(story_field "$d" "$n" title)"
-      found="$(issue_of "$slice-$n")"
+      # The newest issue with this story id (the list is newest first).
+      found="$(awk -F'\t' -v id="$slice-$n" '$1 == id { print $2 "\t" $3; exit }' "$cache")"
       if [ -z "$found" ]; then
         state="$status"; [ "$status" = "approved" ] && state="analysed"
         printf '%-9s %-12s %-14s %s\n' "$slice-$n" "$state" "-" "$title"
       else
-        state="$(gh issue view "${found%% *}" --repo "$REPO" --json labels,state --jq 'if .state == "CLOSED" then "done" else ([.labels[].name] | map(select(. == "ready" or . == "in-progress" or . == "needs-review" or . == "partial" or . == "blocked")) | join(",")) end')"
-        printf '%-9s %-12s %-14s %s\n' "$slice-$n" "${state:-open}" "#${found%% *}" "$title"
+        state="${found#*$'\t'}"
+        printf '%-9s %-12s %-14s %s\n' "$slice-$n" "${state:-open}" "#${found%%$'\t'*}" "$title"
       fi
     done
   done
+  rm -f "$cache"
   echo
   echo "Story worktrees:"
-  git worktree list | grep -E '/(story|slice|analysis|baseline)-[0-9]+-[0-9]+' || echo "  none"
+  git worktree list | grep -E '/(story|slice|analysis|baseline|chore)-[0-9]+' || echo "  none"
 }
 
 cmd_ready() {
@@ -437,6 +488,9 @@ set_state() {
 
 # Classify the complete output, not the displayed tail, of a non-zero build.
 build_infrastructure_failure() {
+  # A compiler or analyzer diagnostic is the change's own failure, whatever else the output says
+  # (a marker text can appear in a path or a message). MSBuild's own codes are not diagnostics.
+  if grep -E 'error [A-Za-z]+[0-9]+' "$1" | grep -Evq 'error MSB[0-9]+'; then return 1; fi
   grep -Eq 'Fatal error|Internal CLR error|Unhandled exception' "$1" ||
     ! grep -Eiq 'error [[:alpha:]]+[[:digit:]]+|warning' "$1"
 }
@@ -489,11 +543,21 @@ start_retry() {
   git show-ref --verify --quiet "refs/heads/$branch" || die "no branch $branch: nothing to retry"
   [ -z "$(git -C "$worktree" status --porcelain)" ] || die "the worktree has uncommitted changes: $worktree"
   last="$(ls -t "$trial"/gate-*.txt 2>/dev/null | head -n 1 || true)"
-  if [ -n "$last" ]; then
-    [ "$(git -C "$worktree" rev-parse --short HEAD)" = "$(head -n 1 "$last" | grep -oE 'commit [0-9a-f]+' | cut -d' ' -f2)" ] \
-      || die "the branch has commits the gate has not seen; run 'done $number' first"
-  fi
   git fetch --quiet origin main
+  if [ -n "$last" ]; then
+    # The gate must have seen the work. Merges of main made after it (by this command, or by
+    # hand after a conflict) are not work.
+    local seen commit second
+    seen="$(head -n 1 "$last" | grep -oE 'commit [0-9a-f]+' | cut -d' ' -f2)"
+    git -C "$worktree" merge-base --is-ancestor "$seen" HEAD 2>/dev/null \
+      || die "the last gate ran on $seen, which is not in the branch any more; run 'done $number' first"
+    for commit in $(git -C "$worktree" rev-list --first-parent "$seen..HEAD"); do
+      second="$(git -C "$worktree" rev-parse --quiet --verify "$commit^2" || true)"
+      if [ -z "$second" ] || ! git -C "$worktree" merge-base --is-ancestor "$second" origin/main; then
+        die "the branch has commits the gate has not seen; run 'done $number' first"
+      fi
+    done
+  fi
   if ! git -C "$worktree" merge --quiet --no-edit origin/main >/dev/null 2>&1; then
     git -C "$worktree" merge --abort 2>/dev/null || true
     die "origin/main does not merge cleanly into $branch; merge it by hand in $worktree, then run this again"
@@ -612,8 +676,20 @@ cmd_done() {
     echo "  brief     $(native "$worktree/artifacts/briefs/$story.md")"
     echo "  gate      $(native "$log")"
   elif tail -n 1 "$log" | grep -qx 'GATE: infrastructure failure'; then
-    echo "The build failed for infrastructure reasons; the raw cause is above."
-    echo "This run is not an attempt. The issue label is unchanged; rerun 'done $number'."
+    echo "The build failed for infrastructure reasons; the raw cause is above. This run is not an attempt."
+    # The same crash every time is not going away by itself: stop after three in a row.
+    local streak=0 file
+    for file in $(ls -t "$trial"/gate-*.txt); do
+      if tail -n 1 "$file" | grep -qx 'GATE: infrastructure failure'; then streak=$((streak + 1)); else break; fi
+    done
+    if [ "$streak" -ge 3 ]; then
+      set_state blocked
+      echo "label    blocked"
+      echo "This is infrastructure failure $streak in a row. Do not rerun: hand it to lead, who looks"
+      echo "at the machine (SDK, memory, disk) or at whether the change itself crashes the compiler."
+    else
+      echo "The issue label is unchanged; rerun 'done $number' ($streak in a row; it stops at 3)."
+    fi
   elif ! grep -q '^== dotnet build' "$log"; then
     echo "A process check failed before the build. This run is not an attempt: fix what the"
     echo "FAIL lines name and run 'done $number' again."

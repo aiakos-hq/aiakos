@@ -170,12 +170,21 @@ A build that aborts with
 `Fatal error`, `Internal CLR error` or `Unhandled exception`, or exits non-zero without
 compiler diagnostics (error codes or warning lines), is an infrastructure failure, not an
 attempt. The gate preserves the raw cause, ends with `GATE: infrastructure failure` and leaves
-the issue label unchanged. Such logs do not count in the retry history; rerun the gate.
+the issue label unchanged. Such logs do not count in the retry history; rerun the gate. When
+the output has a compiler or analyzer error code, it is an ordinary failure even if one of those
+texts also appears. After three infrastructure failures in a row the gate sets `blocked` and the
+story goes to `lead`: the same crash every time is a broken machine or a change that crashes the
+compiler, and rerunning does not fix either.
 Compiler errors, warnings treated as errors and acceptance test failures still count.
 
 **Sending a story back:** `tools/story.sh start <issue> --retry` is the only way. It keeps the
 worktree and branch, merges `main` in, writes the story text again from the brief on `main`
-(and updates the issue body), and sets `in-progress`.
+(and updates the issue body), and sets `in-progress`. When `main` does not merge cleanly, merge
+it by hand in the worktree and run the command again; merges of `main` made after the last gate
+run are accepted, other commits are not.
+
+The story text leaves out a table, or a whole section, of the brief that has no rows for the
+story, and says so in a line at that place.
 
 **Stop rule:** one retry at most. After the second failed attempt, the tag decides:
 a `context-gap` sends the story back to the analysis, where the brief is fixed or the story is
