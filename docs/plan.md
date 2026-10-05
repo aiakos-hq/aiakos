@@ -29,9 +29,9 @@ Status:
       private vulnerability reporting enabled
 - [x] NuGet ID `Aiakos`: 0.0.1-preview.1 published under the nuget.org organization `aiakos`
 - [ ] NuGet prefix reservation `Aiakos.*` (email to account@nuget.org) — issue #6
-- [ ] Docs rebuild trigger: fine-grained token (*Contents: write* on `aiakos.dev`) as a secret in
+- [x] Docs rebuild trigger: fine-grained token (*Contents: write* on `aiakos.dev`) as a secret in
       `aiakos`, plus a workflow sending `repository_dispatch` `docs-updated` on `docs/**` changes
-      (until then the site rebuilds nightly) — issue #38
+      (nightly rebuild remains a safety net) — issue #38
 - [ ] Later: required status checks on `main` (once CI exists, M1: after #9); raise approvals to 1
       when a reviewer seat or second maintainer exists; optional GitHub Project board
 
