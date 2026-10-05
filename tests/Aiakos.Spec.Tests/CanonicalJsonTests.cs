@@ -52,4 +52,12 @@ public sealed class CanonicalJsonTests
         Assert.Null(exception.ParamName);
         Assert.Null(exception.InnerException);
     }
+
+    [Fact]
+    public void PreservesUfffeWhileNormalizingKeysAndNestedStringValues()
+    {
+        using var document = JsonDocument.Parse("{\"e\\u0301\\ufffe\":\"e\\u0301\\ufffex\",\"nested\":[\"x\\ufffee\\u0301\"]}");
+
+        Assert.Equal("{\"nested\":[\"x\ufffeé\"],\"é\ufffe\":\"é\ufffex\"}", CanonicalJson.Write(document.RootElement));
+    }
 }

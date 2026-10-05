@@ -155,7 +155,42 @@ internal static class CanonicalJson
             }
         }
 
-        return value.Normalize(NormalizationForm.FormC);
+        try
+        {
+            return value.Normalize(NormalizationForm.FormC);
+        }
+        catch (ArgumentException)
+        {
+            return NormalizeAroundUnsupportedScalars(value);
+        }
+    }
+
+    private static string NormalizeAroundUnsupportedScalars(string value)
+    {
+        var result = new StringBuilder(value.Length);
+        var segmentStart = 0;
+        for (var index = 0; index < value.Length;)
+        {
+            var scalarLength = char.IsHighSurrogate(value[index]) ? 2 : 1;
+            var scalar = value.Substring(index, scalarLength);
+            try
+            {
+                _ = scalar.Normalize(NormalizationForm.FormC);
+            }
+            catch (ArgumentException)
+            {
+                result.Append(value.AsSpan(segmentStart, index - segmentStart).ToString().Normalize(NormalizationForm.FormC));
+                result.Append(scalar);
+                index += scalarLength;
+                segmentStart = index;
+                continue;
+            }
+
+            index += scalarLength;
+        }
+
+        result.Append(value.AsSpan(segmentStart).ToString().Normalize(NormalizationForm.FormC));
+        return result.ToString();
     }
 
     private static void WriteString(string value, StringBuilder builder)
