@@ -15,6 +15,8 @@ public sealed class ActivityTableTests
     {
         AssertActivity(HarnessEventKind.PromptSubmitted, ActivityValue.Idle, ActivityValue.Working);
         AssertActivity(HarnessEventKind.PromptSubmitted, ActivityValue.Working, ActivityValue.Working);
+        AssertActivity(HarnessEventKind.PromptSubmitted, ActivityValue.Working, ActivityValue.Working,
+            pending: "request", detail: "tool:old");
         AssertActivity(HarnessEventKind.PromptSubmitted, ActivityValue.NeedsInput, ActivityValue.Working, "request");
         AssertActivity(HarnessEventKind.PromptSubmitted, ActivityValue.Unknown, ActivityValue.Working);
     }
@@ -68,7 +70,8 @@ public sealed class ActivityTableTests
             new Dictionary<string, string> { ["request_id"] = "request" });
         AssertActivity(HarnessEventKind.InputResolved, ActivityValue.NeedsInput, ActivityValue.NeedsInput, "request",
             new Dictionary<string, string> { ["request_id"] = "other" });
-        AssertActivity(HarnessEventKind.InputResolved, ActivityValue.Unknown, ActivityValue.Unknown, pending: "request");
+        AssertActivity(HarnessEventKind.InputResolved, ActivityValue.Unknown, ActivityValue.Working);
+        AssertActivity(HarnessEventKind.InputResolved, ActivityValue.Unknown, ActivityValue.Working, pending: "request");
         AssertActivity(HarnessEventKind.InputResolved, ActivityValue.Unknown, ActivityValue.Working, "request",
             new Dictionary<string, string> { ["request_id"] = "request" });
     }

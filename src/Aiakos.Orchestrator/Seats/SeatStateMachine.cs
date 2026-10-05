@@ -410,7 +410,8 @@ public static class SeatStateMachine
                     null, pending, now, "A12");
             case HarnessEventKind.PromptSubmitted:
                 activity = ActivityValue.Working;
-                detail = null;
+                if (state.KnownActivity != ActivityValue.Working)
+                    detail = null;
                 pending = null;
                 break;
             case HarnessEventKind.Active:
@@ -447,14 +448,13 @@ public static class SeatStateMachine
                 pending = attributes.TryGetValue("request_id", out var requestId) ? requestId : "*";
                 break;
             case HarnessEventKind.InputResolved:
-                if (MatchesPendingInput(pending, attributes))
-                {
+                var matchesPending = MatchesPendingInput(pending, attributes);
+                if (matchesPending)
                     pending = null;
-                    if (activity is ActivityValue.NeedsInput or ActivityValue.Unknown)
-                    {
-                        activity = ActivityValue.Working;
-                        detail = null;
-                    }
+                if (activity == ActivityValue.Unknown || activity == ActivityValue.NeedsInput && matchesPending)
+                {
+                    activity = ActivityValue.Working;
+                    detail = null;
                 }
                 break;
         }
