@@ -38,10 +38,26 @@ outputs: E15, E16, E17
 tests: T5
 notes: TmuxLaunchCommands is a low-level creation component, not the StartAsync facade. Its caller later performs R18-R20 and commits starting; do not create placeholder lifecycle methods here. Script tests call CreateAsync with valid inputs. R7 escapes data once; R14 supplies start time. R17 initial-label verification permits an empty launch label until it is set. Opt-in tests use only unique sockets.
 
-## S6: Start lifecycle and diagnostics
-goal: StartAsync validates, refuses live/foreign/orphaned seats, records launches, replaces verified dead panes and returns attach commands with safe diagnostics.
+## S6: Start lifecycle
+goal: StartAsync validates, refuses live/foreign/orphaned seats, records launches and replaces verified dead panes.
 depends: S2, S3, S4, S5
-owns: R11, R18, R19, R20, R21, R22
-outputs: E11, E18, E19, E20, E21, E22
+owns: R11, R18, R19, R20
+outputs: E11, E18, E19, E20
 tests: T6
-notes: Composes merged validators with registry, snapshots and CreateAsync. Add integrated E11/E13/E14 ordering assertions. R19 publishes through the supplied callback and persists exit.reported; no watcher/outbox is assumed. R22 adds instrumentation to existing client operations as well as the starter. The starter remains a start component, not a partial ISessionHost implementation; final node registration/reconciliation belongs to 11-5. Immediate-exit starttime and publication atomicity boundaries are explicit in the brief for architect review.
+notes: Composes merged validators with registry, snapshots and CreateAsync. Add integrated E11/E13/E14 ordering assertions. R19 publishes through the supplied callback and persists exit.reported; no watcher/outbox is assumed. The starter remains a start component, not a partial ISessionHost implementation; final node registration/reconciliation belongs to 11-5. Immediate-exit starttime and publication atomicity boundaries are explicit in the brief for architect review.
+
+## S7: Read-only attach commands
+goal: A started pane has an exact read-only attach command, with an explicit writable variant and no mutation.
+depends: S2, S6
+owns: R21
+outputs: E21
+tests: T7
+notes: Adds AttachCommand to TmuxNames and GetAttachCommand to the starter; reuse S2 SocketName validation and existing address parsing, without changing earlier helper behavior.
+
+## S8: Safe start and tmux diagnostics
+goal: Existing start and client operations emit the specified spans and metrics without payload or credentials.
+depends: S2, S6
+owns: R22
+outputs: E22
+tests: T8
+notes: R22 instruments the established client and starter, using their supplied loggers/IMeterFactory and the existing ActivitySource. No placeholder metrics for later operations. Permanent listener tests guard diagnostic values. This story does not depend on attach behavior.

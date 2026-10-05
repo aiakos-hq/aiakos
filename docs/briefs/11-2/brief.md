@@ -219,7 +219,9 @@ R5. SocketName returns aiakos-<instance>; ConfigPath returns Path.Combine(home,"
     Instance/Home default to empty, TmuxPath to null, InvocationTimeout to 5 seconds.
     Instance must match ^[a-z][a-z0-9-]{0,63}$; Home is absolute and contains no NUL;
     InvocationTimeout must be >0 and <=4294967294 milliseconds. Options errors throw
-    ArgumentException("Invalid tmux host options.") before any process/files are touched.
+    ArgumentException("Invalid tmux host options.") from the TmuxClient constructor before any
+    process/files are touched. SocketName rejects an invalid instance and ConfigPath an invalid
+    home with the same fixed ArgumentException; they perform no IO.
     Null TmuxPath resolves the first existing executable named tmux among supplied PATH's entries
     (ignore empty/relative entries); an explicit relative path is an options error; an absolute missing/non-executable path is
     unavailable with the missing-path reason below. Resolve
@@ -251,7 +253,7 @@ R7. With a valid version, rewrite <Home>/tmux/tmux.conf, UTF-8 without BOM and L
     This also preserves a literal data suffix '\\;'. RunAsync takes one command, never a compound command sequence, so every element after the
     fixed command name is data for this escaping rule (a literal standalone ';' is escaped too).
     Do not double-escape in callers. Prefix flags/path/socket are component-owned, not user options.
-    Options/config write failures yield unavailable reason "tmux configuration could not be prepared."
+    Config write failures yield unavailable reason "tmux configuration could not be prepared."
     without changing sessions. No new-session is issued during initialization.
     Configuration block (the inline comments are part of the output):
 
@@ -266,7 +268,11 @@ set-option -g automatic-rename off # preserve managed names
 ```
 
 R8. Before marking Info available, run show-environment -g on the private socket. A recognized
-    no-server result means no existing server and is success; do not create one. Otherwise
+    no-server result means no existing server and is success: stop initialization commands
+    immediately, mark Available, and do not issue any set-environment or set-option calls.
+    R7's generated config will apply when the first explicit new-session starts the server.
+    Thus no-server initialization has exactly -V then show-environment -g, and no other tmux call.
+    Otherwise
     require success, parse lines NAME=value or -NAME without echoing values, and unset every name
     outside R3's final key allowlist using separate ["set-environment","-g","-u",NAME] calls.
     Log "Removed tmux global environment variable {Name}." for each removed name. Also unset
@@ -284,7 +290,10 @@ R9. SessionRegistry rejects a non-absolute Home with ArgumentException("Invalid 
     read/delete names must match ^[a-z][a-z0-9-]{1,39}_[a-z][a-z0-9-]{0,23}$, otherwise throw
     ArgumentException("Invalid registry session name.") before IO. Never include Argv/Environment.
     Serialize every existing RegistryEntry field via source-generated System.Text.Json metadata,
-    camelCase property names, compact UTF-8 without BOM/final LF. Attributes are preserved verbatim.
+    snake_case property names, compact UTF-8 without BOM/final LF. The exact root names are:
+    schema, instance, state, seat_id, seat_address, launch_id, harness, socket, session_name,
+    session_id, pane_id, pane_pid, pane_start_time, created_at, exit, attributes. Exit object names:
+    code, signal, observed_at, reported. Attributes keys are caller-owned and are not renamed. Attributes are preserved verbatim.
     Write to a unique same-directory temporary file created with mode 0600; flush bytes to disk
     (FileStream.Flush(true)), then File.Move(overwrite:true). Final file stays 0600. The older file
     remains readable until rename. On failure remove that invocation's temporary file if possible,
@@ -350,7 +359,12 @@ R16. After parsing creation, apply six session labels, in order @aiakos-schema=1
     @aiakos-instance=Instance, @aiakos-seat-id=SeatId, @aiakos-seat=SeatAddress,
     @aiakos-launch=LaunchId, @aiakos-harness=Harness, using separate
     ["set-option","-t",SessionId,label,value] commands, then
-    ["set-option","-p","-t",PaneId,"remain-on-exit","on"]. R7's server default already
+    ["set-option","-p","-t",PaneId,"remain-on-exit","on"]. Each of those seven commands is
+    immediately preceded by its own R17 display-message verification. Full command order after
+    new-session is verify, schema, verify, instance, verify, seat-id, verify, seat-address,
+    verify, launch, verify, harness, verify, remain-on-exit (14 invocations). Verification expects
+    an empty or matching launch label through the launch write, then the exact launch label.
+    R7's server default already
     protects immediate exit. Check every command's result before proceeding. Obtain R14 start
     time and return SessionHandle with supplied SeatId/LaunchId, derived SessionName, parsed IDs/PID,
     actual start time and ReadOnly=false. Return as soon as the pane is labelled; no readiness wait.
@@ -362,12 +376,13 @@ R17. Immediately before any post-creation mutation (label/options calls) verify 
     exact value. Initial label writes are the sole exception to requiring an already-labelled
     handle. A different PID or unexpected nonempty launch -> NotFound,"Session was not found.",false,
     with no subsequent mutation. Dead=1 is allowed when labelling the new pane (immediate-exit
-    evidence); no need to wait for process liveness. Opaque label values containing TAB/LF/CR/NUL
-    are rejected at StartAsync's preflight with InvalidArgument,"Launch labels contain a forbidden
-    character.",false. This runtime check does not change LaunchValidator or fake behavior.
+    evidence); no need to wait for process liveness.
 
 R18. TmuxSessionStarter checks availability, caller cancellation, LaunchValidator with LaunchFiles,
-    then R17 label characters, before any registry/tmux mutation. Serialize StartAsync by derived
+    then reject TAB/LF/CR/NUL in SeatId, LaunchId or Harness with
+    InvalidArgument,"Launch labels contain a forbidden character.",false before any registry/tmux
+    mutation. SeatAddress is already validated by LaunchValidator. This runtime check leaves
+    LaunchValidator and the fake unchanged. Serialize StartAsync by derived
     SessionName across its callers; a second same-seat start waits, validates and then sees the
     first pane (AlreadyRunning), never kills or queues input. Different seat starts overlap under
     the runner cap. Within the lock, list panes via ["list-panes","-a","-F",the fixed format below].
@@ -385,10 +400,13 @@ R19. After listing and the alive/foreign checks, perform R13 orphan checking. A 
     target needs a matching registry entry (same SessionId/PaneId/PanePid/launch label) before
     removal; absence/mismatch -> NotFound,"Session was not found.",false, no removal/new entry.
     Read its exit code/signal as nullable integers: empty stays null, never zero. If Exit.Reported
-    is not already true, write that exit with injected ObservedAt and Reported=true, then call
-    publish(PaneExited(old handle,ObservedAt,code,signal)) once before removal. The callback must
-    synchronously enqueue and not throw; if it throws, convert to TmuxFailed,"Pane exit publication
-    failed.",true and do not remove the pane. Persisted reported=true gives process-restart dedupe;
+    is not already true, write that exit with injected ObservedAt and Reported=false, then call
+    publish(PaneExited(old handle,ObservedAt,code,signal)) before removal. Only after publish returns
+    successfully write the same exit with Reported=true. If publish throws, convert to
+    TmuxFailed,"Pane exit publication failed.",true, leave Reported=false, do not remove the pane;
+    a later retry must attempt publication again. The supplied callback synchronously enqueues
+    before returning, and a throw means it did not accept the event. Persisted reported=true
+    deduplicates successful publication on a normal retry/process restart;
     atomic persistence plus external event delivery is not a transactional outbox in this slice.
     Reverify PID/launch/dead=1 using R17's display command immediately before
     ["kill-session","-t","="+SessionName]; refusal leaves the existing registry/session untouched.
@@ -403,8 +421,9 @@ R20. On an absent/removed target, write R11 starting -> R15–R17 CreateAsync ->
 R21. GetAttachCommand uses TmuxNames.AttachCommand(Instance, seat address reconstructed from the
     validated SessionName, readOnlyMode), returns exactly ["tmux","-L",SocketName,
     "attach-session","-r","="+SessionName] by default, without -r for false. No shell quoting in
-    these elements, no process/input/file mutation. TmuxNames rejects invalid instance/address/home
-    with ArgumentException and preserves prior address/session helpers. Starter requires Available;
+    these elements, no process/input/file mutation. Use R5's existing SocketName validation;
+    AttachCommand validates its address through the existing SessionName helper, retaining that
+    helper's ArgumentException. Starter requires Available;
     handle SessionName must parse under the existing seat/rig patterns, otherwise NotFound.
 
 R22. Use ActivitySource/Meter name Aiakos.Node (reuse NodeTelemetry.ActivitySource; meter through
@@ -432,21 +451,21 @@ paths/socket and a harmless test executable. Exact error triples below are (Code
 | `E2` | 9 blocked clients at default cap; injected-clock timeout; waiting-client and active-client cancellation | at most 8 active; queued cancellation starts nothing; timeout kills/reaps only client and returns TimedOut/null exit; caller cancellation throws and releases permit; blocked stdin or inherited pipes cannot hold teardown; later request succeeds; server/pane unaffected; maxConcurrency=0 and timeout=0 throw ArgumentOutOfRangeException before launch |
 | `E3` | node dictionary holds allowlisted values, AIAKOS_NODE_TOKEN/OTEL/DOTNET/TMUX sentinels; LANG/LC_ALL non-UTF8, UTF8 and absent | only R3 keys reach the request; caller dictionary mutation has no effect; LC_ALL=UTF-8 retained when valid, otherwise valid LANG with empty LC_ALL retained, otherwise LANG=C.UTF-8 and LC_ALL absent; no sentinel inherited |
 | `E4` | timeout/start-failed/no-server/not-found/duplicate/other stderr plus >1024 stderr bytes | exact R4 triples; successful exit remains success regardless of stderr; unclassified metadata stderr contains only first 1024 bytes decoded with replacement; stderr never in logs/traces, recognized errors have no stderr metadata |
-| `E5` | naming helpers, PATH with two executables, explicit path, unsupported OS, invalid instance/home | socket aiakos-test, config /tmp/node-fixture/tmux/tmux.conf; first executable/explicit path resolved once; only resolved path logged; invalid options ArgumentException("Invalid tmux host options.") and no IO; unsupported OS Unavailable/"tmux session host requires Linux."/[] |
-| `E6` | tmux 3.4, 3.6, 4.0, 3.3a, next-3.7, master, garbage, missing binary; two Initialize calls | accepted 3.4/3.6/4.0 have Available/session-host.tmux; 3.3a has Unavailable/"tmux 3.3a < 3.4"/[]; unparseable has null Version and fixed R6 reason; missing has fixed R5 reason; only one -V invocation, no socket/config flags in version command; no new-session/input; subsequent start throws Unavailable |
+| `E5` | naming helpers, PATH with two executables, explicit path, unsupported OS, invalid instance/home | socket aiakos-test, config /tmp/node-fixture/tmux/tmux.conf; first executable/explicit path resolved once; only resolved path logged; invalid options ArgumentException("Invalid tmux host options.") from TmuxClient constructor and no IO; invalid SocketName/ConfigPath inputs throw the same fixed error; unsupported OS Unavailable/"tmux session host requires Linux."/[] |
+| `E6` | tmux 3.4, 3.6, 4.0, 3.3a, next-3.7, master, garbage, missing binary; two Initialize calls | accepted 3.4/3.6/4.0 have Available/session-host.tmux; 3.3a has Unavailable/"tmux 3.3a < 3.4"/[]; unparseable has null Version and fixed R6 reason; missing has fixed R5 reason; only one -V invocation, no socket/config flags in version command; no new-session/input; subsequent client RunAsync throws Unavailable |
 | `E7` | initialization and scripted RunAsync; semicolon data and load-buffer stdin | exact R7 config bytes/prefix; no user config; every data suffix ';' gets one inserted backslash and round-trips including literal '\\;'; standalone ';' data is escaped; separate args unchanged otherwise; non-load stdin refused with ArgumentException; load stdin uses 5s+2s/MiB; configuration failure Unavailable with fixed R7 reason |
-| `E8` | no server; existing server with allowed variables plus AIAKOS_NODE_TOKEN, OTEL_X, DOTNET_X and unsafe LC_ALL; failing unset | no server not started; forbidden globals removed with names-only logs; six options applied in order; prior sessions untouched; failed unset stops initialization and Available is not advertised |
-| `E9` | registry write/read/update; malformed name; simulated crash before rename | directory 0700/file 0600, exact camelCase schema and Attributes round-trip; null handle fields starting then real fields running; no argv/env; invalid name ArgumentException("Invalid registry session name."); failed write preserves previous committed bytes |
+| `E8` | no server; existing server with allowed variables plus AIAKOS_NODE_TOKEN, OTEL_X, DOTNET_X and unsafe LC_ALL; failing unset | no-server sequence exactly -V then prefixed show-environment -g, no other calls or server creation; forbidden globals removed with names-only logs; six options applied in order; prior sessions untouched; failed unset stops initialization and Available is not advertised |
+| `E9` | registry write/read/update; malformed name; simulated crash before rename | directory 0700/file 0600, exact R9 snake_case schema and Attributes round-trip; null handle fields starting then real fields running; no argv/env; invalid name ArgumentException("Invalid registry session name."); failed write preserves previous committed bytes |
 | `E10` | absent/corrupt registry file; .tmp leftover; repeated delete; concurrent writes and cancellation before rename | absent read null; corrupt read TmuxFailed/"Session registry operation failed."/true; sorted .json entries only; delete absent succeeds; no torn committed file; canceled pre-rename write preserves older entry |
 | `E11` | successful/failed start with recording registry | starting committed before new-session, running committed only after labels; CreatedAt/Attributes preserved; failures after starting retain it and do not stop/remove panes |
 | `E12` | fake proc with foreign UID, vanished pid, comm containing parentheses/spaces, invalid cmdline UTF8 and matching-UID malformed stat | only own effective UID; exact fields 4/6/22; sorted PIDs; argv NUL-split with U+FFFD; no environ read; transient disappearance skipped; matching-user parse failure TmuxFailed/"Process snapshot could not be read."/true |
 | `E13` | roots/descendants/session members, two unmatched probe hits 42 and 99; null/throwing probe | managed live tree/session members excluded; probe called once per remaining own-UID process in PID order; hits OrphanDetected/"Orphan harness processes detected."/false with pids="42,99"; null probe not invoked; throwing probe fixed R13 failure; no signals or start mutations |
 | `E14` | created pane PID present/absent from snapshot | present handle uses 9876; absent TmuxFailed/"Created pane process could not be identified."/true; no guessed PID/starttime, no cleanup |
 | `E15` | base launch, one-element argv, quote/dollar/backtick/internal-semicolon data and env value ending ';' | exact R15 new-session args and env order, stdin null; single argv uses -- /usr/bin/env executable; no shell evaluation or readiness/input; malformed successful response fixed R15 failure, no second new-session |
-| `E16` | response $1 TAB %2 TAB 1234; failure in each label write | six exact labels then per-pane remain-on-exit; handle (seat-1,launch-1,demo_impl,$1,%2,1234,9876,false); failure stops subsequent commands and preserves pane/starting |
-| `E17` | post-create verification mismatch, immediate dead new pane, opaque labels with TAB/LF/CR/NUL | mismatched PID/nonempty launch NotFound/"Session was not found."/false before mutation; matching PID and allowed empty launch permit labels; immediate dead pane stays as evidence; forbidden characters InvalidArgument/"Launch labels contain a forbidden character."/false before start mutations |
-| `E18` | invalid spec; live existing target; malformed listing; foreign dead target; two same-seat/different-seat starts | validator's existing first error unchanged and no mutation; live target AlreadyRunning/"A live session already exists for SeatId."/false and running launch_id, no kill; malformed listing fixed R18 failure; foreign dead target NotFound; same seat serializes, different seats overlap |
-| `E19` | matching managed dead target with status 7, empty signal, exit.reported=false/true; registry mismatch; failed publication; stale reverify | PaneExited(7,null) published once before dead removal (none if reported); old registry deleted after successful remove; no false 0 for unknown exit; mismatched registry/stale PID or launch/dead refuses deletion; publication failure fixed R19 error and no removal |
+| `E16` | response $1 TAB %2 TAB 1234; failure in each label write | exact sequence verify/schema, verify/instance, verify/seat-id, verify/seat-address, verify/launch, verify/harness, verify/remain-on-exit (14 calls); handle (seat-1,launch-1,demo_impl,$1,%2,1234,9876,false); failure stops subsequent commands and preserves pane/starting |
+| `E17` | post-create verification mismatch, immediate dead new pane | mismatched PID/nonempty launch NotFound/"Session was not found."/false before mutation; matching PID and allowed empty launch permit labels; immediate dead pane stays as evidence |
+| `E18` | invalid spec; SeatId/LaunchId/Harness containing TAB/LF/CR/NUL; live existing target; malformed listing; foreign dead target; two same-seat/different-seat starts | validator's existing first error unchanged and no mutation; after valid validator result, those named label fields reject TAB/LF/CR/NUL with InvalidArgument/"Launch labels contain a forbidden character."/false before mutation; live target AlreadyRunning/"A live session already exists for SeatId."/false and running launch_id, no kill; malformed listing fixed R18 failure; foreign dead target NotFound; same seat serializes, different seats overlap |
+| `E19` | matching managed dead target with status 7, empty signal, exit.reported=false/true; registry mismatch; failed publication; stale reverify | PaneExited(7,null) published once before dead removal (none if reported); old registry deleted after successful remove; no false 0 for unknown exit; mismatched registry/stale PID or launch/dead refuses deletion; publication failure fixed R19 error, Reported=false and no removal; retry publishes, then persists Reported=true before removal |
 | `E20` | empty-target start, injected failure/cancellation at registry/create/labels/running-write stages, retry after uncertain start | ordered R20 stages; no subsequent action on failure; retained uncertain entry/pane; locks released, retry refuses an existing live pane; no automatic input/kill/retry; supplied event callback used |
 | `E21` | default/true/false attach for demo_impl, invalid name, unavailable client | exactly [tmux,-L,aiakos-test,attach-session,-r,=demo_impl], without -r for false; invalid name NotFound; unavailable throws Unavailable; no process/input/mutation |
 | `E22` | ActivityListener/MeterListener and log capture with argv/env/attributes/stdout/stderr sentinels; success/failure/version cases | exact R22 spans/instruments and bounded tags; current outcomes/availability observed; no sentinel values, raw commands or error messages in diagnostics; registry has Attributes but no argv/environment; disposing runner/client components leaves existing harness alive |
@@ -489,10 +508,14 @@ tests are removed. Do not mirror code branches without asserting the caller-visi
     .tmux.conf is not loaded, immediate exit leaves a dead pane, and no startup input is sent.
     Test teardown only may kill-server on that unique test socket and removes its temp data.
     No CI edit here: full shared ISessionHost contract tests and the CI switch belong to 11-5.
-- T6. Commit lifecycle/attach/diagnostic tests for E18–E22 and integrated ordering assertions for
+- T6. Commit lifecycle tests for E18–E20 and integrated ordering assertions for
     E11/E13/E14. Script failures at each boundary, assert no forbidden later commands. Add opt-in
     real-tmux alive refusal/dead replacement and server-hygiene tests using T5 isolation. Check
     previous session remains alive after initializing another component and disposal.
+- T7. Commit exact attach-command and validation/availability/no-mutation tests for E21.
+- T8. Commit ActivityListener/MeterListener/log-capture tests for E22 over initialization,
+    command creation and integrated start success/failure. Observe the existing host remains alive
+    across component disposal; use only T5's isolated test socket in real opt-in checks.
 
 ## Definition of done
 

@@ -50,5 +50,7 @@ T2	test	once	R3,R4,R5,R6,R7,R8
 T3	test	once	R9,R10
 T4	test	once	R12,R13,R14
 T5	test	once	R15,R16,R17
-T6	test	once	R11,R18,R19,R20,R21,R22
+T6	test	once	R11,R18,R19,R20
+T7	test	once	R21
+T8	test	once	R22
 T0	test	all	G1,G2
