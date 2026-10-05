@@ -1,6 +1,6 @@
 # Story review: slice 11-2
 
-Reviewed at commit 11aeefa. Stories: 8. Check: ok.
+Reviewed at commit 65a6442. Stories: 8. Check: ok.
 
 ## Findings
 
@@ -38,3 +38,5 @@ Architect, round 1: the diff 9e04218..ff264aa was read, including the spec 0004 
 Architect, amendment for #181: the diff e434e52..11aeefa (R23, E23, T9 on S1; status and index lines) was read; stories S2 to S8 are unchanged. One finding above is open.
 
 Author amendment resolution: R23 now classifies any IOException from started-child stdin write, flush or close as early closure, using exception type only; no platform-specific message/HResult/errno decision remains. E23 states the same classification. stdout/stderr and process-start errors remain outside this rule, and R2 timeout/cancellation precedence is unchanged.
+
+Architect, amendment round 1: the resolution was read at 65a6442 and is accepted; no findings are open.
