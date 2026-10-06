@@ -180,3 +180,16 @@ retryable. No other reason is emitted.
 Server tracing uses `ActivitySource("Aiakos.Api")`, one `api.<command>` activity for each route,
 propagates `traceparent`, and tags only `api.command`, `http.route`, and `caller.user`.
 It never exports body/token attributes; this slice does not add OTLP export.
+
+## Third-pass contract details
+
+`RegisterRigRequest` carries `IReadOnlyDictionary<string,byte[]> FilesBySha256`, with lowercase SHA-256 hex keys and raw UTF-8 bytes. Each file is at most 1 MiB and the total is at most 16 MiB. Every canonical path/hash/size entry must have exactly one matching map entry; verify byte length and SHA-256 before any write. Reject violations with fixed `FILE_CONTENT_INVALID` and detail `Rig file contents do not match the canonical form.`; never include file bytes in errors.
+
+`Aiakos.Spec.RigHashVerifier.Verify(string resolvedJson, string specHash, string bindingHash)` returns `RigHashVerification(bool Valid,string SpecHash,string BindingHash,ResolvedRig Rig)`. It parses and validates the request's canonical JSON and recomputes both hashes through the existing `RigCanonicalizer`/`CanonicalJson`; no orchestrator hash implementation is permitted. `RigRegistration` is `(string Rig,string Resolved,string ToolVersion,string SourcePath,string? SourceCommit,bool SourceDirty,string SpecHash,string BindingHash,IReadOnlyDictionary<string,byte[]> FilesBySha256)`; `RigRevisionReceipt` is `(Guid RevisionId,int Revision,bool SpecChanged,bool BindingChanged,IReadOnlyList<SeatRegistrationResponse> Seats)`.
+
+Item ownership additions: C3 and R10 belong to S1; E8 is the exact verifier result described above; T8 pins verifier hashes to the 14-4 loader goldens.
+
+C3. The public verifier is implemented only in Aiakos.Spec.
+R10. The verifier returns the typed result and uses the existing canonicalizer.
+E8. The verifier returns the loader-golden hash pair.
+T8. Tests pin verifier output to the 14-4 goldens.

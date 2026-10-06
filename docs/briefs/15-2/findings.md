@@ -38,3 +38,9 @@ removed from this slice.
 Architect, round 1: the diff b16b72b..62fb2b1 was read. Accepted: the configuration keys, token store and loopback error (third finding), the route list now visible to every story (fourth finding), the problem table and the version header except for the two points above. Six points remain open, written as new findings above; the author's ticks on the first, second, fifth, sixth, seventh and eighth findings stand only for the parts named as accepted. R5, R9, the expected outputs table, items and stories are unchanged in that commit. `InstanceDefaults.ReleasedPortBase` and `ApiPortOffset` exist on main.
 
 Architect, round 2: the diff 4ab83f6..ada84ed was read. Accepted: S1's external prerequisite on 13-4, the resolver members, `NodeResponse`, `ProblemResponse`, the command responses with their status codes, `INVALID_REQUEST` and the `SEAT_REJECTED` text, R9's activity names with the export removed, and the registration request, response and E4 documents. Three points on S3 remain open, written above. This was the second round, so the slice goes to lead with them instead of back to the author. Read in the source: `RigCanonicalizer` and `CanonicalJson` are `internal` in `Aiakos.Spec` and `AssemblyInfo.cs` exposes internals only to `Aiakos.Spec.Tests`.
+
+## Third-round resolution
+
+- [x] S3 (context-gap): canonical hashing now has one public Aiakos.Spec verifier owned by new head story S0; S3 depends on S0 and forbids an orchestrator duplicate.
+- [x] S3 (context-gap): registration carries bounded SHA-256 keyed file bytes with exact verification and fixed `FILE_CONTENT_INVALID` text.
+- [x] S3 (context-gap): `RigRegistration`, `RigRevisionReceipt`, migration types/tenant keys, and canonical resolved contents are explicit.
