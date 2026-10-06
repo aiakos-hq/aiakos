@@ -54,3 +54,6 @@ T6	test	once	R11,R18,R19,R20
 T7	test	once	R21
 T8	test	once	R22
 T0	test	all	G1,G2
+R23	rule	once	R1,R2
+E23	output	once	R23
+T9	test	once	R23,E23
