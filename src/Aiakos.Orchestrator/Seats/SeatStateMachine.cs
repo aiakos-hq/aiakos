@@ -112,6 +112,7 @@ public static class SeatStateMachine
                 break;
         }
 
+        abandonPreviousSession = newNativeSession && state.NativeSessionId is not null;
         var nativeSessionId = newNativeSession ? input.NewNativeSessionId : state.NativeSessionId;
         var step = ApplySession(state, SessionValue.Starting, null, "S1", now);
         if (newNativeSession)

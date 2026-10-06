@@ -10,17 +10,17 @@ public sealed class LaunchDecisionTests
     private static readonly Guid NewLaunchId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
 
     [Theory]
-    [InlineData(ResumabilityValue.None, false, LaunchMode.Fresh, SeatVocabulary.DecisionNewSession, false, false, true)]
-    [InlineData(ResumabilityValue.None, true, LaunchMode.Fresh, SeatVocabulary.DecisionNewSession, false, false, true)]
-    [InlineData(ResumabilityValue.FreshOnly, false, LaunchMode.Fresh, SeatVocabulary.DecisionNoConversationYet, true, false, false)]
-    [InlineData(ResumabilityValue.FreshOnly, true, LaunchMode.Fresh, SeatVocabulary.DecisionFreshExplicit, false, false, true)]
-    [InlineData(ResumabilityValue.Resumable, false, LaunchMode.Resume, SeatVocabulary.DecisionResume, false, false, false)]
-    [InlineData(ResumabilityValue.Resumable, true, LaunchMode.Fresh, SeatVocabulary.DecisionFreshExplicit, false, true, true)]
-    [InlineData(ResumabilityValue.Lost, true, LaunchMode.Fresh, SeatVocabulary.DecisionFreshExplicit, false, true, true)]
-    [InlineData(ResumabilityValue.Unknown, false, LaunchMode.Resume, SeatVocabulary.DecisionResumeUnverified, false, false, false)]
-    [InlineData(ResumabilityValue.Unknown, true, LaunchMode.Fresh, SeatVocabulary.DecisionFreshExplicit, false, true, true)]
+    [InlineData(ResumabilityValue.None, false, LaunchMode.Fresh, SeatVocabulary.DecisionNewSession, false, true)]
+    [InlineData(ResumabilityValue.None, true, LaunchMode.Fresh, SeatVocabulary.DecisionNewSession, false, true)]
+    [InlineData(ResumabilityValue.FreshOnly, false, LaunchMode.Fresh, SeatVocabulary.DecisionNoConversationYet, true, false)]
+    [InlineData(ResumabilityValue.FreshOnly, true, LaunchMode.Fresh, SeatVocabulary.DecisionFreshExplicit, false, true)]
+    [InlineData(ResumabilityValue.Resumable, false, LaunchMode.Resume, SeatVocabulary.DecisionResume, false, false)]
+    [InlineData(ResumabilityValue.Resumable, true, LaunchMode.Fresh, SeatVocabulary.DecisionFreshExplicit, false, true)]
+    [InlineData(ResumabilityValue.Lost, true, LaunchMode.Fresh, SeatVocabulary.DecisionFreshExplicit, false, true)]
+    [InlineData(ResumabilityValue.Unknown, false, LaunchMode.Resume, SeatVocabulary.DecisionResumeUnverified, false, false)]
+    [InlineData(ResumabilityValue.Unknown, true, LaunchMode.Fresh, SeatVocabulary.DecisionFreshExplicit, false, true)]
     public void LD1ToLD5ChooseLaunchModeAndSession(ResumabilityValue resumability, bool fresh,
-        LaunchMode mode, string decision, bool reusedClaudeId, bool abandonOld, bool newSession)
+        LaunchMode mode, string decision, bool reusedClaudeId, bool newSession)
     {
         foreach (var profile in Profiles())
         {
@@ -41,10 +41,10 @@ public sealed class LaunchDecisionTests
                 ? !profile.FreshRelaunchReusesSessionId
                 : newSession;
             Assert.Equal(expectedNewSession, start.NewSession);
-            Assert.Equal(abandonOld, start.AbandonPreviousSession);
             var expectedNativeId = mode == LaunchMode.Resume ||
                 reusedClaudeId && profile.FreshRelaunchReusesSessionId ? "native-1" : "native-new";
             Assert.Equal(expectedNativeId, start.NativeSessionId);
+            Assert.Equal(existingId is not null && expectedNativeId != existingId, start.AbandonPreviousSession);
             Assert.Equal(start.NativeSessionId, step.State.NativeSessionId);
             Assert.Equal(new CurrentLaunch(NewLaunchId, mode,
                 reusedClaudeId && profile.FreshRelaunchReusesSessionId, false), step.State.Launch);
@@ -70,6 +70,23 @@ public sealed class LaunchDecisionTests
         Assert.Equal(new Rejected(SeatVocabulary.RejectionResumeLost), step.Reply);
         Assert.Equal(state, step.State);
         Assert.Empty(step.Effects);
+        SeatAssert.Invariants(step);
+    }
+
+    [Fact]
+    public void ReplacingExistingNativeSessionAbandonsThePreviousSession()
+    {
+        var state = State(SessionValue.Absent, ResumabilityValue.FreshOnly) with
+        {
+            Session = SessionValue.Absent,
+            NativeSessionId = "native-old"
+        };
+
+        var step = Apply(state, new UpRequested(false, true, NewLaunchId, "native-new"), new OpenCodeLike());
+
+        var launch = Assert.IsType<StartLaunch>(Assert.Single(step.Effects));
+        Assert.Equal("native-new", launch.NativeSessionId);
+        Assert.True(launch.AbandonPreviousSession);
         SeatAssert.Invariants(step);
     }
 
