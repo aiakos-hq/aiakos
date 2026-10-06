@@ -442,7 +442,8 @@ R8. The nine checks, labels and exact stdout lines are the table below. Paths ar
     require equivalent manual checks in README; configurable paths are out of this slice.
     Git origin accepts only https://github.com/aiakos-hq/aiakos[.git],
     git@github.com:aiakos-hq/aiakos[.git] or ssh://git@github.com/aiakos-hq/aiakos[.git],
-    with no trailing slash, credentials or other remotes. Git worktree check must return true.
+    with no trailing slash or embedded credentials. Only origin is checked; additional remotes
+    do not fail the clone group when origin is valid. Git worktree check must return true.
     For paths use physical existing ancestors (cd -P/pwd -P) plus planned descendants, following
     symlinks without creating directories; either resolved default under /mnt or resolution
     failure fails filesystem group. Root may be absent; resolve nearest existing ancestor.
@@ -508,6 +509,9 @@ R10. Integrate actual rig with existing loader after its referenced files land. 
     worktrees/branches/projection roots below, raw embedded culture and selected guidance/skill
     bytes. Render each seat's guidance with ClaudeGuidanceRenderer.Render using returned SpecHash;
     compare committed independent literal goldens (not expected text obtained by the renderer).
+    The golden first line contains exactly one {{SPEC_HASH}} placeholder instead of the spec
+    hash; replace that placeholder with returned Rig.SpecHash before comparison. Every other
+    golden byte is literal, including independently computed source-byte SHA256 comments.
     Goldens contain roster then CULTURE.md then only that seat's guidance, each source comment
     with source-byte SHA256. Map skill directories and compare exact destination names/bytes.
     No loader/projection change, no requirement for the unmerged ResolvedSeatParameters.Projection.
@@ -525,13 +529,13 @@ R10. Integrate actual rig with existing loader after its referenced files land. 
 | `REVIEW-agent` | reviewer agent | exact R4 ordered arrays; default, claude-code, opus; one skill; deny Edit/Write/NotebookEdit/approval/commit/push |
 | `IMPL-guidance` | guidance and two skills | all R5 headings/steps/commands/trailer; frontmatter names implement-issue/address-review and exact descriptions; ready-for-review/changes-pushed reports |
 | `REVIEW-guidance` | guidance and review-pr | all R6 checklist/severity/head/comment-only rules; exact skill frontmatter; reviewed report/prefix, no approvals |
-| `PREREQ-ok` | fakes all checks valid at exact version floors | nine success lines in R8 order, final LF, no stderr, exit0; Claude line states marker only |
+| `PREREQ-ok` | fakes all checks valid at exact version floors | nine success lines in R8 order, final LF, no stderr, exit0; Claude line states marker only; valid origin plus an additional remote remains ok clone |
 | `PREREQ-fail` | each prerequisite missing/invalid individually | corresponding exact R8 failure line; other eight success lines, continue all checks, exit1; marker absent/unreadable exact unknown/manual line |
 | `PREREQ-bounds` | tmux3.3/3.4a; Claude2.1.283/2.1.284; SDK10.0.99/10.0.100/10.1.0; args | numeric low versions fail own group, boundary/newer pass; wrong args stderr usage: check-prereqs.sh\n, stdout empty, exit2 |
 | `README-stage` | operating README | review seat-worktree (never shared-readonly); all R9 headings/runbook actions/links; no claim acceptance completed; custom paths checked manually |
-| `LOAD-real` | full real rig | Rig.Name aiakos-dev, zero diagnostics; seats lead/impl/review, human has null Agent/no parameters; two agents with exact settings and embedded evidence |
+| `LOAD-real` | full real rig | Rig.Name aiakos-dev, zero diagnostics; seats lead/impl/review, human has null Agent/no parameters; two agents with exact settings and embedded evidence; exact git-tracked rig layout, ignored local rig.env.yaml on disk is permitted |
 | `LOAD-paths` | impl and review | node wsl-local, model opus, auth subscription, checkout seat-worktree; workdir ~/aiakos/seats/aiakos-dev/<seat>/repos/aiakos, branch aiakos/aiakos-dev/<seat>, BaseRef origin/main, projection root ~/aiakos/seats/aiakos-dev/<seat>/projection |
-| `PROJECT-real` | existing renderer and skill mapper | each CLAUDE.md exact static golden, roster/culture/guidance in order; impl skills .claude/skills/implement-issue/SKILL.md and .claude/skills/address-review/SKILL.md; review .claude/skills/review-pr/SKILL.md, byte-exact sources |
+| `PROJECT-real` | existing renderer and skill mapper | each CLAUDE.md exact static golden after replacing its sole first-line {{SPEC_HASH}} with Rig.SpecHash, roster/culture/guidance in order; impl skills .claude/skills/implement-issue/SKILL.md and .claude/skills/address-review/SKILL.md; review .claude/skills/review-pr/SKILL.md, byte-exact sources |
 | `LOAD-unknown` | temp copy append unrecognized_field: true | one Error AIK2002, null Rig; original rig unchanged |
 
 ## Tests
@@ -555,16 +559,21 @@ T6. Commit reviewer guidance/skill tests checking R6 required checklist/head/ver
     comment-only review and honest failures. No gh/git actions.
 T7. Commit POSIX script fake-command tests pinning all R7/R8 exact lines/status/order, single and
     multiple failures, version boundaries, malformed versions, absent marker/file, symlink paths
-    under /mnt and safe planned nonexistent seat root. Run only on Linux (explicitly skip on
+    under /mnt, safe planned nonexistent seat root, and valid origin with an additional remote
+    (still ok clone). Run only on Linux (explicitly skip on
     other hosts); Linux executes actual script with no real prerequisites. Shell syntax sh -n
     required. Shellcheck -s sh when installed; report unavailable rather than add dependency.
     On Windows test project still builds and non-shell tests run.
 T8. Commit README assertions for R9/C1 pending status, seat table, custom-binding limits, runbook,
     upgrade and risk/bootstrap links. Pure file checks; no live commands.
 T9. Commit actual-rig integration tests R10 with exact parameter goldens and mutated copy. Pin
-    expected culture/guidance contents in static renderer goldens; skill byte equality to source
+    expected culture/guidance contents in static renderer goldens with only first-line
+    {{SPEC_HASH}} replaced by returned Rig.SpecHash; all other expected bytes remain literal; skill byte equality to source
     and literal destination names. Do not derive an expected render from production renderer.
-    Include exact committed rig file list from layout, reject stray source files/local binding.
+    Include exact git-tracked rig file list from layout using git ls-files -- rigs/aiakos-dev;
+    reject extra tracked source files or tracked rig.env.yaml. An ignored rig.env.yaml present
+    on disk is permitted and excluded from the list; test that case without editing owner files
+    by using an isolated git repository fixture for the tracked-layout assertion.
 
 ## Definition of done
 
