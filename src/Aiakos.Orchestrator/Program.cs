@@ -58,12 +58,11 @@ builder.WebHost.ConfigureKestrel((context, kestrel) =>
 
     var configuredAddresses = context.Configuration.GetSection("Kestrel:Endpoints").GetChildren()
         .Select(static endpoint => endpoint["Url"])
-        .Where(static url => !string.IsNullOrWhiteSpace(url))
-        .Cast<string>()
+        .OfType<string>()
         .ToList();
     var serverUrls = context.Configuration[WebHostDefaults.ServerUrlsKey];
-    if (!string.IsNullOrWhiteSpace(serverUrls))
-        configuredAddresses.AddRange(serverUrls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    if (serverUrls is not null)
+        configuredAddresses.AddRange(serverUrls.Split(';', StringSplitOptions.RemoveEmptyEntries));
     NodeLinkEndpointPolicy.ValidateConfigured(configuredAddresses, grpcPort);
 
     kestrel.ConfigureEndpointDefaults(listen =>
