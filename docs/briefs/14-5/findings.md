@@ -1,6 +1,6 @@
 # Story review: slice 14-5
 
-Reviewed at commit 71f7d61. Stories: 4. Check: ok.
+Reviewed at commit 34493b1. Stories: 4. Check: ok.
 
 ## Findings
 
@@ -17,3 +17,5 @@ in the owning classes and forbids edits to CanonicalJson.cs; C1/R7/LOAD-errors n
 - Earlier validation (14-2 AIK5002) already limits node paths to `/` and `~/`, so R5's two anchors cover every path that reaches Load; this was read in the 14-2 brief, not run.
 - Left unraised: R5 reports a binding overlap as AIK3002 at the seat id in `rig.yaml` without naming a path, while spec 0003 lists AIK3002 for shared rig paths and earlier binding errors are AIK5xxx in `rig.env.yaml` with the path. The message is determinate and the author recorded it as a closed choice.
 - Whether an earlier whole-result JSON golden exists for C1 to extend.
+
+Architect, round 1: the diff a1c9cb1..34493b1 was read and both resolutions are accepted; no findings are open.
