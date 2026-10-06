@@ -92,13 +92,14 @@ public static class RigLoader
         var references = LoadReferenceIntegration.Load(root, rigDocument, agentDocuments, semanticDiagnostics,
             environmentDiagnostics, envDocument.File);
         ResolvedRig? resolved = null;
+        IReadOnlyList<Diagnostic> finalDiagnostics = references.Diagnostics;
         if (!references.Diagnostics.Any(item => item.Severity == Severity.Error))
         {
             var assembled = ResolvedRigAssembler.Assemble(rigDocument, agentDocuments, seatAgents, envDocument, references);
             var canonical = RigCanonicalizer.Create(assembled);
             var specHash = canonical.SpecHash;
             var bindingHash = canonical.BindingHash;
-            resolved = assembled with
+            var finalized = assembled with
             {
                 Canonical = canonical,
                 SpecHash = specHash,
@@ -110,8 +111,48 @@ public static class RigLoader
                     BindingHash = bindingHash
                 }).ToArray()
             };
+
+            var parameters = finalized.SeatParameters.ToArray();
+            var projectionDiagnostics = new List<Diagnostic>();
+            var projectionFailed = false;
+            for (var index = 0; index < parameters.Length; index++)
+            {
+                var seatParameters = parameters[index];
+                var seat = finalized.Seats.First(item => item.Id == seatParameters.Seat && item.Agent is not null);
+                var agent = finalized.Agents.First(item => item.Directory == seat.Agent!.AgentDirectory);
+                var seatNode = Values(rigNode, "seats").First().Items
+                    .First(item => IsAgentSeat(item) && Values(item, "id").FirstOrDefault()?.Value == seatParameters.Seat);
+                var idNode = Values(seatNode, "id").First();
+                var source = new ReferenceSource("rig.yaml", Math.Max(1, (int)idNode.Mark.Line),
+                    Math.Max(1, (int)idNode.Mark.Column));
+                var files = new List<EmbeddedFile>
+                {
+                    new("CLAUDE.md", string.Empty, ClaudeGuidanceRenderer.Render(finalized,
+                        seatParameters.Seat, specHash))
+                };
+                files.AddRange(ClaudeSkillProjection.Map(agent.Skills));
+                var checkoutPaths = finalized.Binding.Repos.Select(item => item.Path)
+                    .Concat(parameters.Where(item => item.Node == seatParameters.Node)
+                        .SelectMany(item => item.Checkouts).Select(item => item.Path))
+                    .ToArray();
+                var seatDiagnostics = new List<Diagnostic>();
+                var projection = ProjectionPlanBuilder.Build(seatParameters.ProjectionRoot, files,
+                    checkoutPaths, source, seatDiagnostics);
+                projectionDiagnostics.AddRange(seatDiagnostics);
+                if (projection is null)
+                {
+                    projectionFailed = true;
+                    continue;
+                }
+
+                parameters[index] = seatParameters with { Projection = projection };
+            }
+
+            finalDiagnostics = references.Diagnostics.Concat(projectionDiagnostics).ToArray();
+            if (!projectionFailed)
+                resolved = finalized with { SeatParameters = parameters };
         }
-        return new LoadResult(resolved, references.Diagnostics);
+        return new LoadResult(resolved, finalDiagnostics);
     }
 
     private static YamlNode? LoadFile(string path, string displayPath, RigFileKind kind, List<Diagnostic> allDiagnostics, out bool parsed)
