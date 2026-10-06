@@ -44,6 +44,7 @@ public sealed class ProcessRunnerTests
         Assert.Empty(runner.Requests);
         await runner.RunAsync(new ProcessRequest("fixture", [], new Dictionary<string, string>(), null,
             TimeSpan.FromSeconds(1)), TestContext.Current.CancellationToken);
+        Assert.Null(Assert.Single(runner.Requests).Stdin);
         var empty = await Assert.ThrowsAsync<InvalidOperationException>(() => runner.RunAsync(
             new ProcessRequest("fixture", [], new Dictionary<string, string>(), null, TimeSpan.FromSeconds(1)),
             TestContext.Current.CancellationToken));

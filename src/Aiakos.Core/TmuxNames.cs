@@ -1,7 +1,34 @@
 namespace Aiakos.Core;
 
+using System.IO;
+
 public static class TmuxNames
 {
+    public static string SocketName(string instance)
+    {
+        if (!IsValidInstance(instance))
+            throw new ArgumentException("Invalid tmux host options.");
+
+        return "aiakos-" + instance;
+    }
+
+    public static string ConfigPath(string home)
+    {
+        if (string.IsNullOrEmpty(home) || home.Contains('\0') || !Path.IsPathFullyQualified(home))
+            throw new ArgumentException("Invalid tmux host options.");
+
+        return Path.Combine(home, "tmux", "tmux.conf");
+    }
+
+    public static IReadOnlyList<string> AttachCommand(string instance, string seatAddress, bool readOnlyMode = true)
+    {
+        var socketName = SocketName(instance);
+        var sessionName = SessionName(seatAddress);
+        return readOnlyMode
+            ? ["tmux", "-L", socketName, "attach-session", "-r", "-t", sessionName]
+            : ["tmux", "-L", socketName, "attach-session", "-t", sessionName];
+    }
+
     public static bool TryParseAddress(string seatAddress, out string seat, out string rig)
     {
         seat = string.Empty;
@@ -55,5 +82,13 @@ public static class TmuxNames
         }
 
         return true;
+    }
+
+    private static bool IsValidInstance(string? instance)
+    {
+        if (string.IsNullOrEmpty(instance) || instance.Length > 64 || instance[0] is < 'a' or > 'z')
+            return false;
+
+        return instance.All(character => character is >= 'a' and <= 'z' or >= '0' and <= '9' or '-');
     }
 }
