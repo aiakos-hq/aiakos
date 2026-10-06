@@ -1,6 +1,6 @@
 # Story review: slice 15-2
 
-Reviewed at commit baa5bdf. Stories: 7. Check: ok.
+Reviewed at commit b27e1a4. Stories: 7. Check: ok.
 
 ## Findings
 
@@ -54,3 +54,5 @@ Architect, round 2: the diff 4ab83f6..ada84ed was read. Accepted: S1's external 
 Architect, round 3: the diff 0fd2a2b..67ad353 was read. The stories were renumbered: the new hash story is S1 and the old S1 to S6 are now S2 to S7; findings written before this round use the old numbers. Accepted: one public verifier in `Aiakos.Spec` with no second hash implementation in the orchestrator, registration depending on it through S2, the contents map with its size limits, and the two repository records. Four points remain open, written above with the new story numbers. The three "open after round 2" boxes stay unticked by me: the first two are answered in substance by the new story and the contents map, the third only in part.
 
 Architect, round 4: the diff 860e536..baa5bdf was read. Accepted: the `paths` now include `Aiakos.Spec` and its tests; the verifier returns only the match flag and the two hashes; E8 refers to 14-4's minimal canonical JSON and its two published hashes with a mismatch case; the contents are binary; `FILE_CONTENT_INVALID` is 400; the revision table's column types. Two points remain, written above; the first was found by reading `aiakos.seat` in migration 0002.
+
+Architect, round 5: the diff 9085c2f..b27e1a4 was read. The two new paragraphs answer both round-4 findings: the upsert names the columns that exist in `aiakos.seat` and leaves `desired`, `desired_at` and `desired_by` alone, and malformed JSON throws `FormatException("Resolved JSON is invalid.")`. The two boxes stay open for one reason only: the sentences they replace are still in the brief (line 197, "Malformed JSON returns the fixed validation failure without constructing a `ResolvedRig`"; line 199, the upsert of `desired_json`, `params_json`, `retired` and "updates only desired metadata"), so the brief now says both things. Fix: delete those two superseded sentences, then tick the boxes.
