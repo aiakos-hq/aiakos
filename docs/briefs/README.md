@@ -32,6 +32,7 @@ Acceptance tests are not here: they stay local, so that an implementer cannot re
 |---|---|---|---|---|---|---|
 | [9-1 Deterministic orchestrator host disposal](9-1/brief.md) | #9 | `impl` + `impl/senior` | approved | [2](9-1/stories.md) | | #103 (superseded at ready) |
 | [10-1 Proto and buf checks](10-1/brief.md) | #10 | `impl/opencode` | implemented | not split (before the story workflow) | | PR #44 |
+| [10-4 Buffered node events](10-4/brief.md) | #10 | `impl` | approved | [7](10-4/stories.md) | | |
 | [10-3 Authenticated node link](10-3/brief.md) | #10 | `impl` | approved | [10](10-3/stories.md) | | |
 | [10-2 Contract helpers and contract tests](10-2/brief.md) | #10 | `impl/opencode` | approved | [1](10-2/stories.md) | | |
 | [11-2 Tmux runner and start](11-2/brief.md) | #11 | `impl` | approved | [8](11-2/stories.md) | | |
@@ -53,7 +54,7 @@ the new gate.
 
 | Issue | Slices |
 |---|---|
-| #10 gRPC contract | 10-4 events, 10-5 commands |
+| #10 gRPC contract | 10-5 commands |
 | #11 tmux session host | 11-3 delivery and capture, 11-4 stop and watcher, 11-5 adoption |
 | #12 Claude Code adapter | 12-1 orchestrator half, 12-2 relay and ingest, 12-3 normalizer, 12-4 node driver, 12-5 end to end |
 | #13 SeatActor | 13-3 actor shell, 13-4 lifecycle and delivery, 13-5 restart and integration |
