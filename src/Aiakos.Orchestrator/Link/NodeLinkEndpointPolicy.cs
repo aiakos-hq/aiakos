@@ -124,10 +124,26 @@ public static class NodeLinkEndpointPolicy
 
     public static void ValidateConfigured(IEnumerable<string> addresses, int? grpcPort)
     {
-        var eligible = addresses
-            .Where(address => grpcPort is null ||
-                Uri.TryCreate(address, UriKind.Absolute, out var uri) && uri.Port == grpcPort.Value)
-            .ToArray();
+        if (grpcPort is null)
+        {
+            Validate(addresses);
+            return;
+        }
+
+        var eligible = new List<string>();
+        foreach (var address in addresses)
+        {
+            if (!Uri.TryCreate(address, UriKind.Absolute, out var uri) ||
+                !string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+            {
+                Validate([address]);
+                continue;
+            }
+
+            if (uri.Port == grpcPort.Value)
+                eligible.Add(address);
+        }
+
         Validate(eligible);
     }
 
