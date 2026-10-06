@@ -1,6 +1,6 @@
 # Story review: slice 13-3
 
-Reviewed at commit e89ccbe. Stories: 9. Check: ok.
+Reviewed at commit 6188d1d. Stories: 9. Check: ok.
 
 ## Findings
 
@@ -32,3 +32,5 @@ Author resolution in the commit following this review:
 Architect, round 1: the diff 941f029..e0fb70e was read and the four resolutions are accepted; no findings are open. The ports 10-4 consumes are unchanged by it. Left unraised: a store rejection that repeats (`SEAT_COMMIT_REJECTED`, PostgreSQL 23514/23502/23503) is not acknowledged, so 10-4 closes the stream and the node sends the event again; I found no valid input that reaches it, only a defect in the machine or the schema would, and the brief answers it with a fixed error instead of a restart loop.
 
 Architect, amendment (wire metadata and malformed body evidence): the diff of e89ccbe against its base 6193b35 was read (G1, G2, R5, R6, R8, R9, R10, `WRITE-evidence`, `ACTOR-reject`, T4, T5, T9 and the notes of S4, S6, S7). No findings are open. The amendment follows the rule already accepted for NUL: content the node buffer lets through and the store cannot format (a nested body timestamp outside the protobuf range) is committed as opaque evidence with a gap and acknowledged. Read in the contract: the only well-known types inside `SeatEvent` bodies are `Timestamp` fields (`observed_at`, `captured_at`, gap `from` and `to`), so no `Duration` reaches the JSON formatter there; `raw_size` is `uint32` on the wire and `int` in the table, which is why values above 2147483647 are stored as null. An invalid envelope `observed_at` stays a rejection without an ack; 10-4's node buffer (R1) and adapter (R11) already refuse it, so only a node that breaks the protocol reaches it. Not checked: the bounds in R5 against Google.Protobuf's own validation by running it, and the acceptance tests in `artifacts/trials/`.
+
+Architect, after lead merged main into the branch (6188d1d): brief, items and stories of 13-3 are byte-identical to e89ccbe, and the branch differs from main only in the three 13-3 files. No findings are open.
