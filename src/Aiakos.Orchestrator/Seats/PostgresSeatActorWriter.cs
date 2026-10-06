@@ -5,6 +5,7 @@ using System.Text.Json;
 using Aiakos.Contracts.Node.V1;
 
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 
 using Npgsql;
 using NpgsqlTypes;
@@ -36,7 +37,7 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
                 if (input.Event is { } value)
                 {
                     eventId = Guid.CreateVersion7();
-                    var opaque = Body(value) is null || ContainsNul(Body(value)!);
+                    var opaque = IsOpaque(value);
                     await WriteEventAsync(connection, transaction, before.Key, input, eventId.Value, opaque, ct)
                         .ConfigureAwait(false);
                     if (!opaque && value.Harness?.Usage is { } telemetry &&
@@ -74,10 +75,13 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
 
     private static void ValidateStage(SeatActorSnapshot before, SeatAppliedInput input)
     {
+        if (input.Event?.ObservedAt is { } observedAt && !IsValidTimestamp(observedAt))
+            throw new SeatStoreRejectedException();
+        var opaque = input.Event is { } evidence && IsOpaque(evidence);
         if (input.Step.Findings.Count != 0 || input.Step.Effects.Any(effect => effect is not RequestCapture) ||
             input.Step.State.NativeSessionId != before.State.NativeSessionId ||
-            input.Input is EventReceived { Body: LaunchResultBody or StartNotCompletedBody or
-                StopResultBody or StopNotCompletedBody or ProcessExitedBody })
+            (!opaque && input.Input is EventReceived { Body: LaunchResultBody or StartNotCompletedBody or
+                StopResultBody or StopNotCompletedBody or ProcessExitedBody }))
             throw new SeatStoreRejectedException();
         if (input.Event is { } value)
             ValidateText(value);
@@ -129,7 +133,7 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
             new("raw", NpgsqlDbType.Bytea, raw),
             Text("raw_content_type", opaque ? "application/x-protobuf" : harness?.RawContentType),
             Bool("raw_truncated", !opaque && harness?.RawTruncated == true),
-            new("raw_size", NpgsqlDbType.Integer, opaque ? raw!.Length : harness is null ? null : checked((int)harness.RawSize)),
+            new("raw_size", NpgsqlDbType.Integer, opaque ? raw!.Length : harness is null || harness.RawSize > int.MaxValue ? null : (int)harness.RawSize),
             Text("disposition", SeatVocabulary.ToStored(disposition)),
             Time("observed_at", value.ObservedAt?.ToDateTimeOffset()), Time("received_at", input.At), Text("traceparent", trace)
         ], ct).ConfigureAwait(false);
@@ -239,6 +243,25 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
                 else foreach (var nested in Strings(item)) yield return nested;
             }
         }
+    }
+
+    private static bool IsOpaque(SeatEvent value) => Body(value) is not { } body ||
+        ContainsNul(body) || ContainsInvalidTimestamp(body);
+
+    private static bool IsValidTimestamp(Timestamp value) =>
+        value.Seconds is >= -62135596800 and <= 253402300799 &&
+        value.Nanos is >= 0 and <= 999999999;
+
+    private static bool ContainsInvalidTimestamp(object? value)
+    {
+        if (value is Timestamp timestamp) return !IsValidTimestamp(timestamp);
+        if (value is IMessage message)
+            return message.Descriptor.Fields.InFieldNumberOrder()
+                .Any(field => ContainsInvalidTimestamp(field.Accessor.GetValue(message)));
+        if (value is IEnumerable items && value is not string && value is not ByteString)
+            foreach (var item in items)
+                if (ContainsInvalidTimestamp(item)) return true;
+        return false;
     }
 
     private static bool ContainsNul(IMessage body) => Strings(body).Any(text => text.Contains('\0'));

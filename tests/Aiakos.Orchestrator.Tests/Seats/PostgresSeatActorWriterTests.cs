@@ -240,7 +240,8 @@ public sealed class PostgresSeatActorWriterTests(PostgresContainerFixture postgr
         var input = Applied(1, before.State with { NextSeq = 2 }, new SeatEvent { Seq = 1 });
         var finding = input with { Step = input.Step with { Findings = [new("observation-gap", true)] } };
         var rotation = input with { Step = input.Step with { Effects = [new AdoptRotatedSession("new", "old")] } };
-        var result = input with { Input = new EventReceived(Epoch, 1, 0, Launch, new ProcessExitedBody(0, null)) };
+        var result = input with { Input = new EventReceived(Epoch, 1, 0, Launch, new ProcessExitedBody(0, null)),
+            Event = new SeatEvent { Seq = 1, ProcessExited = new() { ExitCode = 0 } } };
         var surrogate = input with { Event = new SeatEvent { Seq = 1, Harness = new() { NativeName = "\ud800" } } };
         var nulState = input with { Step = input.Step with { State = input.Step.State with { PendingInputRequest = "a\0b" } } };
         foreach (var rejected in new[] { finding, rotation, result, surrogate, nulState })
@@ -252,6 +253,145 @@ public sealed class PostgresSeatActorWriterTests(PostgresContainerFixture postgr
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => writer.CommitAsync(before, [], canceled.Token));
         Assert.Equal(7L, await ScalarAsync(db, "SELECT version FROM aiakos.seat_state"));
         Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_event"));
+    }
+
+    [Fact]
+    public async Task RawSizeBoundsAndDefaultPayloadPreserveOtherHarnessFields()
+    {
+        await using var db = await SeedAsync();
+        var before = Snapshot();
+        uint[] sizes = [0, int.MaxValue, (uint)int.MaxValue + 1, uint.MaxValue];
+        var events = sizes.Select((size, i) => new SeatEvent
+        {
+            Seq = (ulong)i + 1, LaunchId = Launch.ToString(), Harness = new()
+            {
+                RawSize = size, NativeName = "statusLine", Kind = HarnessEventKind.Telemetry,
+                RawContentType = "application/json", RawTruncated = true, Origin = EventOrigin.Live,
+                Usage = new() { ModelId = "model" }
+            }
+        }).Append(new SeatEvent { Seq = 5, Harness = new() }).ToArray();
+        var inputs = events.Select((value, i) => Applied(i + 1, before.State with { NextSeq = i + 2 }, value)).ToArray();
+        Assert.Equal(new SeatStoreReceipt(8, Session), await new PostgresSeatActorWriter(db).CommitAsync(before, inputs, Ct));
+        await using var command = db.CreateCommand("SELECT body_type, raw, raw_content_type, raw_size, raw_truncated, native_name, kind, origin, usage FROM aiakos.seat_event ORDER BY seq");
+        await using var rows = await command.ExecuteReaderAsync(Ct);
+        for (var i = 0; i < events.Length; i++)
+        {
+            Assert.True(await rows.ReadAsync(Ct));
+            Assert.Equal("harness", rows.GetString(0));
+            Assert.Empty(rows.GetFieldValue<byte[]>(1));
+            Assert.Equal(i == 4 ? "" : "application/json", rows.GetString(2));
+            if (i is 2 or 3) Assert.True(rows.IsDBNull(3));
+            else Assert.Equal(i == 1 ? int.MaxValue : 0, rows.GetInt32(3));
+            Assert.Equal(i != 4, rows.GetBoolean(4));
+            Assert.Equal(i == 4 ? "" : "statusLine", rows.GetString(5));
+            Assert.Equal(i == 4 ? "unknown" : "telemetry", rows.GetString(6));
+            if (i != 4)
+            {
+                Assert.Equal("live", rows.GetString(7));
+                using var usage = System.Text.Json.JsonDocument.Parse(rows.GetString(8));
+                Assert.Equal("model", usage.RootElement.GetProperty("model_id").GetString());
+            }
+        }
+        Assert.False(await rows.ReadAsync(Ct));
+    }
+
+    [Fact]
+    public async Task NestedTimestampBoundsAreKnownOrOriginalOpaqueEvidenceForEveryPath()
+    {
+        await using var db = await SeedAsync();
+        var before = Snapshot();
+        var timestamps = new Google.Protobuf.WellKnownTypes.Timestamp?[]
+        {
+            null,
+            new() { Seconds = -62135596800, Nanos = 0 },
+            new() { Seconds = 253402300799, Nanos = 999999999 },
+            new() { Seconds = 1, Nanos = -1 },
+            new() { Seconds = 1, Nanos = 1000000000 },
+            new() { Seconds = -62135596801 },
+            new() { Seconds = 253402300800 }
+        };
+        var events = new List<SeatEvent>();
+        foreach (var timestamp in timestamps)
+        {
+            events.Add(new() { CommandResult = new() { Status = CommandStatus.Completed,
+                Capture = new() { Text = "capture", CapturedAt = timestamp } } });
+            events.Add(new() { CommandResult = new() { Status = CommandStatus.Completed,
+                Launch = new() { Evidence = new() { Text = "evidence", CapturedAt = timestamp } } } });
+            events.Add(new() { Gap = new() { From = timestamp } });
+            events.Add(new() { Gap = new() { To = timestamp } });
+        }
+        var inputs = events.Select((value, i) =>
+        {
+            value.Seq = (ulong)i + 1;
+            value.SourceSeq = 9;
+            value.LaunchId = Launch.ToString();
+            value.ObservedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(At);
+            var input = Applied(i + 1, before.State with { NextSeq = i + 2 }, value);
+            // Malformed launch results must be classified before the later result-stage guard.
+            if (i >= 12 && value.CommandResult?.Launch is not null)
+                input = input with { Input = new EventReceived(Epoch, i + 1, 9, Launch,
+                    new LaunchResultBody(LaunchOutcome.Unknown, "", null)) };
+            return input;
+        }).ToArray();
+        await new PostgresSeatActorWriter(db).CommitAsync(before, inputs, Ct);
+        await using var command = db.CreateCommand("SELECT body_type, body, raw, raw_content_type, raw_size, raw_truncated, kind, native_name, native_session_id, attributes, usage, origin, node_instance_id, source_seq, launch_id, observed_at, disposition FROM aiakos.seat_event ORDER BY seq");
+        await using var rows = await command.ExecuteReaderAsync(Ct);
+        for (var i = 0; i < events.Count; i++)
+        {
+            Assert.True(await rows.ReadAsync(Ct));
+            if (i < 12)
+            {
+                Assert.Equal(i % 4 < 2 ? "command-result" : "gap", rows.GetString(0));
+                if (i % 4 < 2) Assert.Equal(events[i].CommandResult, CommandResult.Parser.ParseJson(rows.GetString(1)));
+                else Assert.Equal(events[i].Gap, ObservationGap.Parser.ParseJson(rows.GetString(1)));
+                Assert.True(rows.IsDBNull(2));
+            }
+            else
+            {
+                Assert.Equal("unknown", rows.GetString(0));
+                Assert.True(rows.IsDBNull(1));
+                Assert.Equal(events[i].ToByteArray(), rows.GetFieldValue<byte[]>(2));
+                Assert.Equal("application/x-protobuf", rows.GetString(3));
+                Assert.Equal(events[i].CalculateSize(), rows.GetInt32(4));
+                Assert.False(rows.GetBoolean(5));
+                for (var column = 6; column <= 11; column++) Assert.True(rows.IsDBNull(column));
+            }
+            Assert.Equal(Epoch, rows.GetGuid(12));
+            Assert.Equal(9L, rows.GetInt64(13));
+            Assert.Equal(Launch, rows.GetGuid(14));
+            Assert.Equal(At, rows.GetFieldValue<DateTimeOffset>(15));
+            Assert.Equal("applied", rows.GetString(16));
+        }
+        Assert.False(await rows.ReadAsync(Ct));
+        await rows.DisposeAsync();
+        Assert.Equal(8L, await ScalarAsync(db, "SELECT version FROM aiakos.seat_state"));
+        Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_command"));
+    }
+
+    [Fact]
+    public async Task InvalidEnvelopeTimestampRejectsSafelyBeforeAnyWritesButDuplicateSkipsValidation()
+    {
+        await using var db = await SeedAsync();
+        var before = Snapshot();
+        var writer = new PostgresSeatActorWriter(db);
+        var valid = Applied(1, before.State with { NextSeq = 2 }, new SeatEvent { Seq = 1 });
+        foreach (var timestamp in new Google.Protobuf.WellKnownTypes.Timestamp[]
+        {
+            new() { Nanos = -1 }, new() { Nanos = 1000000000 },
+            new() { Seconds = -62135596801 }, new() { Seconds = 253402300800 },
+            new() { Seconds = long.MaxValue }
+        })
+        {
+            var invalid = Applied(2, before.State with { NextSeq = 3 }, new SeatEvent { Seq = 2, ObservedAt = timestamp });
+            var exception = await Assert.ThrowsAsync<SeatStoreRejectedException>(() => writer.CommitAsync(before, [valid, invalid], Ct));
+            Assert.Equal("SEAT_COMMIT_REJECTED", exception.Message);
+            Assert.Null(exception.InnerException);
+            Assert.Equal(new SeatStoreReceipt(7, Session), await writer.CommitAsync(before,
+                [invalid with { Step = invalid.Step with { Disposition = EventDisposition.Duplicate } }], Ct));
+        }
+        Assert.Equal(7L, await ScalarAsync(db, "SELECT version FROM aiakos.seat_state"));
+        Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_event"));
+        Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_transition"));
     }
 
     private static SeatActorSnapshot Snapshot()
