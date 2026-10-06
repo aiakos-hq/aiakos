@@ -4,7 +4,7 @@ title: "#13 slice 4 — SeatActor lifecycle and delivery"
 issue: 13
 status: draft
 route: impl
-paths: [src/Aiakos.Orchestrator/, tests/Aiakos.Orchestrator.Tests/]
+paths: [src/Aiakos.Core/, src/Aiakos.Orchestrator/, tests/Aiakos.Orchestrator.Tests/]
 date: 2026-10-06
 ---
 
@@ -20,7 +20,8 @@ existing normalized state machine and return a fixed safe rejection.
 
 | Path | What |
 |---|---|
-| `src/Aiakos.Orchestrator/Seats/` | CallerContext, command messages/replies, dispatcher and lifecycle/delivery coordination |
+| `src/Aiakos.Core/` | CallerContext, command messages/replies and dispatcher port |
+| `src/Aiakos.Orchestrator/Seats/` | dispatcher implementation and lifecycle/delivery coordination |
 | `tests/Aiakos.Orchestrator.Tests/` | command, dispatcher, timeout and delivery tests |
 
 No transport adapter, schema/migration, harness-specific branch, CLI or 15-2 API project.
@@ -28,28 +29,47 @@ No transport adapter, schema/migration, harness-specific branch, CLI or 15-2 API
 ## Public surface (exact names)
 
 ```csharp
-namespace Aiakos.Orchestrator.Seats;
+namespace Aiakos.Core;
 public sealed record CallerContext(Guid TenantId, string User, string Sender);
-public sealed record SeatUp(bool Fresh, string? Note, CallerContext Caller);
-public sealed record SeatDown(CallerContext Caller);
-public sealed record SeatSend(string Lead, string Body, bool ExpectConfirmation, bool Force, CallerContext Caller);
-public sealed record SeatCapture(int HistoryLines, CallerContext Caller);
+public sealed record SeatEnvelope(object Command);
+public interface ISeatCommandDispatcher { Task<object> DispatchAsync(SeatEnvelope command, CallerContext caller, CancellationToken ct); }
+public sealed record SeatUp(bool Fresh, string? Note);
+public sealed record SeatDown;
+public sealed record SeatSend(string Body, bool Force);
+public sealed record SeatCapture(int HistoryLines);
+namespace Aiakos.Orchestrator.Seats;
 public sealed record SeatCommandAccepted(Guid? LaunchId, Guid CommandId);
 public sealed record SeatAlreadyUp(Guid LaunchId);
+public sealed record SeatAlreadyDown;
 public sealed record SeatCommandRejected(string Reason);
 public sealed record SeatCaptureCompleted(Aiakos.Contracts.Node.V1.PaneCapture Capture);
 public sealed record SeatCommandTimedOut(string Reason);
 ```
 
-15-2 resolves tenant/user/sender and sends these messages through its local API; 13-4 never reads
-tokens or derives identity from a body. Existing `ISeatInputCommitter` remains the committed-input
-port and is not widened with transport or API types.
+15-2 resolves tenant/user/sender and calls `ISeatCommandDispatcher.DispatchAsync` with a
+`SeatEnvelope` and `CallerContext`; it changes its bridge to these Core types. 13-4 never reads
+tokens or derives identity from a body. Existing `ISeatInputCommitter.ApplyAsync` remains the
+committed-input port; 13-4 owns row creation through its atomic `ISeatCommandStore.CommitAsync`.
 
 ## General rules
 
 G1. All command decisions use trusted `CallerContext`, reported state and node-link availability;
     no body, address spelling or transport metadata can change tenant identity. Bodies and tokens
     never appear in logs or exception text.
+
+The outbound seam is `ISeatCommandPort`: `StartSeat(SeatLaunch)`, `StopSeat(Guid)`,
+`CapturePane(Guid)`, and `Deliver(Guid,string,string,bool)`, each accepting a cancellation token.
+13-4 calls 12-1's `BuildLaunch`/`BuildDelivery` before invoking that port; 10-5 supplies the
+transport implementation. `ISeatCommandStore.CommitAsync` atomically writes `seat_session`,
+`seat_launch`, and `seat_command` rows (tenant, seat, command id/kind, caller and payload hash)
+before any port call. Stop/capture/send use the same store. Capture timeout is 5s, stop timeout
+10s, delivery timeout 15s, and quiet/activity watchdogs 10 minutes.
+
+The absent-seat down result is `SeatAlreadyDown`. A reload consumes 13-3's `SeatActorReloaded`,
+marks launch and delivery overlays unknown, requests capture for gaps, and releases queued work
+only after that notification. Structured names are log `aiakos.seat.transitions`, metric
+`aiakos_seat_commands_total`, and spans `seat.apply`, `seat.up`, `seat.down`, `seat.send`,
+`seat.capture`; tags contain IDs, kinds, outcomes and reasons only.
 
 ## Rules
 
