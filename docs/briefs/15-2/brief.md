@@ -1,0 +1,126 @@
+---
+id: 15-2
+title: "#15 slice 2 — local API contracts, authentication and rig revisions"
+issue: 15
+status: draft
+route: impl
+paths: [src/Aiakos.Api.Contracts/, src/Aiakos.Orchestrator/, src/Aiakos.Data/, tests/Aiakos.Orchestrator.Tests/, tests/Aiakos.Data.Tests/, Aiakos.slnx]
+date: 2026-10-06
+---
+
+# Brief: #15 slice 2 — local API contracts, authentication and rig revisions
+
+Part of #15 and spec 0007 R22–R29, R34, R48. The CLI transport and instance host consume this
+slice; this slice does not implement the CLI, instance host, Docker, WSL, node, or seat actor.
+Where silent, reject malformed input with the existing problem-details shape and do not write.
+
+## Goal and prerequisites
+
+Provide the loopback HTTP/JSON contract, bearer-token caller context, UUID address resolution,
+read endpoints, and append-only rig revision registration. Existing `SeatQueries`, tenant
+migration, `ResolvedRig` canonical hashes, and seat schema are on main. The 13-4 SeatActor slice
+owns the transport-free command dispatcher and exact command messages. Its bridge is a later
+story in this slice and is gated on 13-4 merging; tests use ports only and never fake production.
+
+The required 13-4 seam is: `Aiakos.Core.CallerContext(Guid TenantId, string User, string Sender)`;
+`Aiakos.Orchestrator.Seats.ISeatCommandDispatcher.DispatchAsync(SeatEnvelope, CallerContext,
+CancellationToken)`; and immutable command/reply records for `SeatUp(bool Fresh,string? Note)`,
+`SeatDown`, `SeatSend(string Body,bool Force)`, `SeatCapture(int HistoryLines)`, with accepted,
+already-up/no-op, rejected, capture-completed and capture-timeout replies. The API bridge passes
+the authenticated context and never takes identity from request JSON. If 13-4 changes these exact
+names before merge, this bridge story follows the merged 13-4 contract; it does not invent a
+second dispatcher.
+
+## Files
+
+| Path | Purpose |
+|---|---|
+| src/Aiakos.Api.Contracts/ | Request/response records and source-generated JSON context |
+| src/Aiakos.Orchestrator/ | API host, authentication, address resolver, read/registration and gated command bridge |
+| src/Aiakos.Data/ | append-only rig revision repository and migration |
+| tests/Aiakos.Orchestrator.Tests/, tests/Aiakos.Data.Tests/ | contract, auth, routing and revision tests |
+| Aiakos.slnx | register contracts/tests |
+
+No secrets in DTOs, no provider payloads, no new package except the centrally managed API contract
+dependencies already used by the solution. Do not change existing migrations.
+
+## Public surface
+
+`Aiakos.Api.Contracts` contains immutable records for Version, problem details, seat status/detail,
+launch, command, node, rig registration and every endpoint in spec 0007's API table. A source-
+generated `JsonSerializerContext` emits snake_case v1 JSON. `CallerContext` is the sole identity
+source. `ISeatAddressResolver` resolves `<seat>@<rig>` under a tenant and distinguishes unknown
+rig/seat from ambiguous short addresses. `IRigRevisionRepository` appends and reads revisions.
+
+## General rules
+
+G1. Every request is loopback-only HTTP/1.1 under `/v1`; API startup rejects a non-loopback bind.
+G2. Bearer token comparison is constant-time, missing/wrong token returns 401 with no detail, and
+    no token, tenant, sender, or secret value is logged or serialized.
+G3. JSON is one compact UTF-8 document, snake_case, top-level `api: "v1"` where specified; problem
+    responses are `application/problem+json` with `reason`, `detail`, `retryable` only.
+G4. Cancellation and malformed bodies stop before lookup/write; no partial revision or command.
+
+## Changes
+
+C1. Add the API contract project and source-generated serializer; no existing node or orchestrator
+    wire contract changes.
+C2. Add migration `0003_rig_revision.sql` only if the current migration sequence has no later
+    revision; it is append-only with tenant, rig, hashes, canonical resolved JSON, source metadata,
+    creator and timestamps, and uniqueness for `(tenant,rig,revision)` and `(tenant,rig,hashes)`.
+
+## Rules
+
+R1. `GET /v1/version` returns `{ "api":"v1", "version": <server version> }`; `GET /health` and
+    `/alive` retain existing behavior.
+R2. Authentication maps the configured API token to `CallerContext(DefaultTenant, "user:<Windows username>", configured operator)`; request JSON cannot override any field.
+R3. Address resolution accepts full `member@rig`; a short member is accepted only when unique in
+    the tenant. Unknown rig/seat is 404 `NOT_FOUND`; ambiguous short member is 400 `AMBIGUOUS_SEAT`.
+R4. Read endpoints return `SeatStatusRow`, `SeatDetail`, `SeatLaunchRow`, `SeatCommandRow` and
+    node rows from existing readers, preserving DB order and omitting secret/token hashes.
+R5. `PUT /v1/rigs/{rig}` validates canonical hash pair, rejects mismatch as 400 `HASH_MISMATCH`,
+    appends a revision only for a new pair, upserts desired seats, retires removed seats only when
+    absent/exited, and performs no write on a running-seat removal failure (`SEAT_REMOVED_WHILE_RUNNING`).
+R6. Problem mapping is exact: validation 400, unknown address 404, actor/domain rejection 409,
+    authentication 401; `retryable` is true only for transient command/host outcomes.
+R7. `GET /v1/seats`, `/v1/seats/{address}`, `/v1/launches/{id}`, `/v1/commands/{id}`, and
+    `/v1/nodes` are read-only and work across CLI/server patch versions; changing commands require
+    same major.minor and otherwise return 409 `VERSION_INCOMPATIBLE` with both versions.
+R8. The gated bridge maps `up`, `down`, `send`, and `capture` request DTOs to the merged 13-4
+    dispatcher with CallerContext, maps replies and fixed reasons, and never acknowledges a
+    command before the dispatcher completes. Until 13-4 merges, no production bridge is present.
+R9. API activity creates one `cli.<command>` root continuation from `traceparent`; no body or token
+    value enters spans/logs. OTLP export is enabled only when connection metadata supplies it and
+    flush is bounded to one second.
+
+## Expected outputs: exact text
+
+| ID | Input | Expected |
+|---|---|---|
+| `E1` | version/auth matrix | exact v1 version JSON; missing/wrong bearer is 401 with empty detail |
+| `E2` | address matrix | full address resolves; unique short resolves; ambiguous is `AMBIGUOUS_SEAT`; unknown is `NOT_FOUND` |
+| `E3` | read endpoint fixture | ordered status/detail/launch/command/node JSON with no token hashes or secret paths |
+| `E4` | revision registration matrix | new pair revision1, duplicate pair same revision, changed pair revision2, mismatch `HASH_MISMATCH`, running removal `SEAT_REMOVED_WHILE_RUNNING` and zero writes |
+| `E5` | problem/version matrix | exact status/reason/detail/retryable mapping and major.minor gate |
+| `E6` | 13-4 port fake bridge | context and immutable command mapping; accepted/rejected/capture replies; no bridge before dependency |
+| `E7` | trace/cancellation matrix | one root continuation, no sensitive values, cancellation before lookup/write |
+
+## Tests
+
+T1. Contract golden tests cover source-generated snake_case JSON, nullability, problem media type,
+    and immutable DTO snapshots.
+T2. Auth/address tests use fake token store and tenant fixtures; test full/short/ambiguous/unknown
+    addresses, constant-time comparison behavior, and no sensitive output.
+T3. Read tests use existing SeatQueries fakes and assert ordering and omission of hashes/secrets.
+T4. Real Postgres migration/repository tests assert revision uniqueness, append-only numbering,
+    hash mismatch, retirement guard and transaction rollback.
+T5. API integration tests assert loopback bind, status/reason mapping and version gate.
+T6. After 13-4 merges, fake-port bridge tests assert every command/reply and cancellation; no
+    production dispatcher double is allowed.
+T7. Activity tests assert trace continuation and bounded export without body/token attributes.
+
+## Done and out of scope
+
+Build and tests have zero warnings/errors; all existing suites remain green. No API client command
+implementation, instance host/configuration, Docker/WSL supervision, node transport, actor
+dispatcher implementation, secret generation, or release packaging belongs here.
