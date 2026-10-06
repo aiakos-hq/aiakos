@@ -1,6 +1,6 @@
 ## S1: Canonical rig hash port
 goal: A single public Aiakos.Spec entry point parses canonical registration JSON, validates it, and recomputes spec_hash and binding_hash using RigCanonicalizer/CanonicalJson.
-depends: S1
+depends: -
 owns: C3, R10
 outputs: E8
 tests: T8
@@ -9,7 +9,7 @@ notes: Head story; allowed paths are src/Aiakos.Spec and its tests only. Return 
 
 ## S2: API contracts and authentication
 goal: The local API has immutable v1 DTOs, source-generated snake_case JSON, loopback policy and bearer CallerContext authentication.
-depends: -
+depends: S1
 owns: C1, R1, R2
 outputs: E1
 tests: T1
