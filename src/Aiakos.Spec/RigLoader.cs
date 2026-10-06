@@ -91,9 +91,26 @@ public static class RigLoader
         var environmentDiagnostics = semanticDiagnostics.Where(item => item.File == envDocument.File).ToArray();
         var references = LoadReferenceIntegration.Load(root, rigDocument, agentDocuments, semanticDiagnostics,
             environmentDiagnostics, envDocument.File);
-        var resolved = references.Diagnostics.Any(item => item.Severity == Severity.Error)
-            ? null
-            : ResolvedRigAssembler.Assemble(rigDocument, agentDocuments, seatAgents, envDocument, references);
+        ResolvedRig? resolved = null;
+        if (!references.Diagnostics.Any(item => item.Severity == Severity.Error))
+        {
+            var assembled = ResolvedRigAssembler.Assemble(rigDocument, agentDocuments, seatAgents, envDocument, references);
+            var canonical = RigCanonicalizer.Create(assembled);
+            var specHash = canonical.SpecHash;
+            var bindingHash = canonical.BindingHash;
+            resolved = assembled with
+            {
+                Canonical = canonical,
+                SpecHash = specHash,
+                BindingHash = bindingHash,
+                ToolVersion = typeof(RigLoader).Assembly.GetName().Version!.ToString(),
+                SeatParameters = assembled.SeatParameters.Select(parameters => parameters with
+                {
+                    SpecHash = specHash,
+                    BindingHash = bindingHash
+                }).ToArray()
+            };
+        }
         return new LoadResult(resolved, references.Diagnostics);
     }
 

@@ -41,6 +41,55 @@ public sealed class ValidTests
     }
 
     [Fact]
+    public void LOADresultFinalizesHashesAndToolVersionOnSuccessfulLoad()
+    {
+        var result = RigLoader.Load(MinimalRoot, null);
+
+        Assert.NotNull(result.Rig);
+        Assert.NotNull(result.Rig.Canonical);
+        Assert.Equal(result.Rig.Canonical.SpecHash, result.Rig.SpecHash);
+        Assert.Equal(result.Rig.Canonical.BindingHash, result.Rig.BindingHash);
+        Assert.Equal(typeof(RigLoader).Assembly.GetName().Version!.ToString(), result.Rig.ToolVersion);
+        var parameters = Assert.Single(result.Rig.SeatParameters);
+        Assert.Equal(result.Rig.SpecHash, parameters.SpecHash);
+        Assert.Equal(result.Rig.BindingHash, parameters.BindingHash);
+
+        var fullRoot = Path.Combine(AppContext.BaseDirectory, "Fixtures", "valid", "full");
+        var full = RigLoader.Load(fullRoot, null);
+        Assert.NotNull(full.Rig);
+        Assert.NotNull(full.Rig.Canonical);
+        Assert.All(full.Rig.SeatParameters, seatParameters =>
+        {
+            Assert.Equal(full.Rig.SpecHash, seatParameters.SpecHash);
+            Assert.Equal(full.Rig.BindingHash, seatParameters.BindingHash);
+        });
+
+        var warningRoot = CopyFixture(fullRoot);
+        try
+        {
+            var rigPath = Path.Combine(warningRoot, "rig.yaml");
+            File.WriteAllText(rigPath, File.ReadAllText(rigPath).Replace(
+                "requires: {auth: api-key, secrets: [anthropic_api_key]}",
+                "requires: {auth: api-key}", StringComparison.Ordinal));
+            var warning = RigLoader.Load(warningRoot, null);
+            Assert.NotNull(warning.Rig);
+            Assert.NotNull(warning.Rig.Canonical);
+            Assert.Contains(warning.Diagnostics, diagnostic => diagnostic.Code == "AIK4012" &&
+                diagnostic.Severity == Severity.Warning);
+        }
+        finally
+        {
+            Directory.Delete(warningRoot, recursive: true);
+        }
+
+        var invalid = RigLoader.Load(Path.Combine(AppContext.BaseDirectory, "Fixtures", "invalid",
+            "AIK1001-missing-env"), null);
+        Assert.Null(invalid.Rig);
+        Assert.Null(invalid.Rig?.Canonical);
+        Assert.Equal("AIK1001", Assert.Single(invalid.Diagnostics).Code);
+    }
+
+    [Fact]
     public void LoadsFullRigWithoutDiagnostics()
     {
         var fullRoot = Path.Combine(AppContext.BaseDirectory, "Fixtures", "valid", "full");
@@ -99,6 +148,7 @@ public sealed class ValidTests
 
             var result = RigLoader.Load(root, null);
             Assert.NotNull(result.Rig);
+            Assert.NotNull(result.Rig.Canonical);
             var json = JsonSerializer.Serialize(result.Rig);
             var agentSnapshot = Assert.Single(result.Rig.Agents);
             Assert.Equal("Team\n", System.Text.Encoding.UTF8.GetString(result.Rig.Culture!.Content));
@@ -107,6 +157,12 @@ public sealed class ValidTests
             var skill = Assert.Single(agentSnapshot.Skills);
             Assert.Equal("build", skill.Name);
             Assert.Equal(".metadata,SKILL.md", string.Join(',', skill.Files.Select(file => file.Path.Split('/').Last())));
+            var embeddedFiles = new[] { result.Rig.Culture! }.Concat(agentSnapshot.Guidance)
+                .Concat(skill.Files).ToArray();
+            Assert.Equal(embeddedFiles.Select(file => file.Sha256).Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal), result.Rig.Canonical.Contents.Keys);
+            foreach (var file in embeddedFiles)
+                Assert.Equal(file.Content, result.Rig.Canonical.Contents[file.Sha256]);
             var oldSecondHash = agentSnapshot.Guidance[0].Sha256;
             File.WriteAllText(secondPath, "Changed\n");
             var changed = RigLoader.Load(root, null);
@@ -117,11 +173,14 @@ public sealed class ValidTests
 
             Assert.Equal("demo", result.Rig.Name);
             Assert.Equal("Second\n", System.Text.Encoding.UTF8.GetString(result.Rig.Agents[0].Guidance[0].Content));
+            Assert.Equal(json, JsonSerializer.Serialize(result.Rig));
             Assert.Contains("agents/impl", json, StringComparison.Ordinal);
             Assert.DoesNotContain(root, json, StringComparison.Ordinal);
             Assert.DoesNotContain("YamlNode", json, StringComparison.Ordinal);
             Assert.DoesNotContain("x-note", json, StringComparison.Ordinal);
             Assert.DoesNotContain("session_id", json, StringComparison.Ordinal);
+            Assert.Contains("Canonical", json, StringComparison.Ordinal);
+            Assert.Contains("sha256:", json, StringComparison.Ordinal);
         }
         finally
         {
@@ -181,6 +240,15 @@ public sealed class ValidTests
             var normal = RigLoader.Load(root, null);
             Assert.NotNull(normal.Rig);
             var normalJson = JsonSerializer.Serialize(normal.Rig);
+            var normalSpecHash = normal.Rig.SpecHash;
+            var normalBindingHash = normal.Rig.BindingHash;
+
+            File.WriteAllText(secretFile, sentinel + "-changed");
+            var changedSecretValue = RigLoader.Load(root, null);
+            Assert.NotNull(changedSecretValue.Rig);
+            Assert.Equal(normalSpecHash, changedSecretValue.Rig.SpecHash);
+            Assert.Equal(normalBindingHash, changedSecretValue.Rig.BindingHash);
+            File.WriteAllText(secretFile, sentinel);
 
             Environment.SetEnvironmentVariable("PATH", "");
             var pathless = RigLoader.Load(root, null);
@@ -312,6 +380,13 @@ public sealed class ValidTests
     {
         var root = Path.Combine(Path.GetTempPath(), $"aiakos-rig-{Guid.NewGuid():N}");
         CopyDirectory(MinimalRoot, root);
+        return root;
+    }
+
+    private static string CopyFixture(string source)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aiakos-rig-{Guid.NewGuid():N}");
+        CopyDirectory(source, root);
         return root;
     }
 

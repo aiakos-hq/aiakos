@@ -35,9 +35,9 @@ public sealed class FakeProcessRunner : IProcessRunner
             var arguments = Array.AsReadOnly(request.Arguments.ToArray());
             var environment = new ReadOnlyDictionary<string, string>(
                 new Dictionary<string, string>(request.Environment, StringComparer.Ordinal));
-            ReadOnlyMemory<byte>? stdin = request.Stdin is { } bytes
-                ? new ReadOnlyMemory<byte>(bytes.ToArray())
-                : null;
+            ReadOnlyMemory<byte>? stdin = null;
+            if (request.Stdin.HasValue)
+                stdin = new ReadOnlyMemory<byte>(request.Stdin.Value.ToArray());
             _requests.Add(new ProcessRequest(request.FileName, arguments, environment, stdin, request.Timeout));
             return Task.FromResult(_results.Dequeue());
         }

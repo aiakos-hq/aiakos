@@ -732,6 +732,7 @@ Spec 0005 must also provide, through the node-side mapping (spec 0002's table):
 
 Node-scoped findings that spec 0002 raises (events for unassigned seats R12, unknown seats on a
 node R31 and D9) use the same table with `seat_id` null and `node_name` set.
+The node link writes these node-scoped findings, not a SeatActor; ADR 0032 governs a seat's state.
 
 ### Schema
 

@@ -491,7 +491,10 @@ listed here change with it.
   reaches a seat.
 - **R36** `auth: api-key` (specified; **not** in M1 acceptance): the settings file gets
   `"apiKeyHelper": "cat '<abs path>'"`, where the path is the node-local secret source from
-  `rig.env.yaml` (spec 0003 R21). The path is checked against R12's character set, so it cannot
+  `rig.env.yaml` (spec 0003 R21). A safe `~/` source instead uses `cat "$HOME/<rest>"`
+  with an ASCII-only rest and no empty, `.` or `..` segments, expanded by the node shell at
+  helper invocation; the orchestrator reads neither its own HOME nor the secret (maintainer
+  clarification, 2026-10-06). The path is checked against R12's character set, so it cannot
   break out of the quotes. The node checks before launch that the file exists and has mode ≤ 0600,
   and never reads its content. For a sandbox home (M6), the driver also seeds
   `hasCompletedOnboarding`, `theme` and the workspace trust in the seat's own `.claude.json`
