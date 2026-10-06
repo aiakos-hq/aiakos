@@ -2,7 +2,7 @@
 id: 16-1
 title: "#16 slice 1 — aiakos-dev rig files and read-only prerequisites"
 issue: 16
-status: draft
+status: approved
 route: impl
 paths: [rigs/aiakos-dev/, tests/Aiakos.Spec.Tests/]
 date: 2026-10-06
