@@ -65,9 +65,12 @@ G4. Cancellation and malformed bodies stop before lookup/write; no partial revis
 
 C1. Add the API contract project and source-generated serializer; no existing node or orchestrator
     wire contract changes.
-C2. Add migration `0003_rig_revision.sql` only if the current migration sequence has no later
-    revision; it is append-only with tenant, rig, hashes, canonical resolved JSON, source metadata,
-    creator and timestamps, and uniqueness for `(tenant,rig,revision)` and `(tenant,rig,hashes)`.
+C2. Add migration `0003_rig_revision.sql` with `aiakos.rig_revision(tenant_id, revision_id,
+    rig_id, revision, spec_hash, binding_hash, tool_version, resolved jsonb, source_path,
+    source_commit, source_dirty, created_by, created_at)`, foreign key `(tenant_id,rig_id)` to
+    `aiakos.rig`, unique `(tenant_id,rig_id,revision)` and `(tenant_id,rig_id,spec_hash,binding_hash)`,
+    then add nullable `current_revision_id` and its foreign key to `aiakos.rig`; all in one
+    transaction, with no existing migration edited. `resolved` stores complete canonical file contents.
 
 ## Rules
 
@@ -78,9 +81,12 @@ R3. Address resolution accepts full `member@rig`; a short member is accepted onl
     the tenant. Unknown rig/seat is 404 `NOT_FOUND`; ambiguous short member is 400 `AMBIGUOUS_SEAT`.
 R4. Read endpoints return `SeatStatusRow`, `SeatDetail`, `SeatLaunchRow`, `SeatCommandRow` and
     node rows from existing readers, preserving DB order and omitting secret/token hashes.
-R5. `PUT /v1/rigs/{rig}` validates canonical hash pair, rejects mismatch as 400 `HASH_MISMATCH`,
-    appends a revision only for a new pair, upserts desired seats, retires removed seats only when
-    absent/exited, and performs no write on a running-seat removal failure (`SEAT_REMOVED_WHILE_RUNNING`).
+R5. `PUT /v1/rigs/{rig}` parses and canonicalizes its `Resolved` JSON with the existing
+    `ResolvedRig` canonicalizer and recomputes both hashes; submitted hashes are never trusted.
+    Mismatch returns 400 `HASH_MISMATCH` with no writes. A new pair appends a revision and updates
+    `aiakos.rig.current_revision_id` in one transaction. Upsert every desired seat's address, kind,
+    parameters and hashes; retire a removed seat only when its session is absent or exited. A running
+    removal aborts the transaction with `SEAT_REMOVED_WHILE_RUNNING`, leaving all tables unchanged.
 R6. Problem mapping is exact: validation 400, unknown address 404, actor/domain rejection 409,
     authentication 401; `retryable` is true only for transient command/host outcomes.
 R7. `GET /v1/seats`, `/v1/seats/{address}`, `/v1/launches/{id}`, `/v1/commands/{id}`, and
@@ -89,9 +95,11 @@ R7. `GET /v1/seats`, `/v1/seats/{address}`, `/v1/launches/{id}`, `/v1/commands/{
 R8. The gated bridge maps `up`, `down`, `send`, and `capture` request DTOs to the merged 13-4
     dispatcher with CallerContext, maps replies and fixed reasons, and never acknowledges a
     command before the dispatcher completes. Until 13-4 merges, no production bridge is present.
-R9. API activity creates one `cli.<command>` root continuation from `traceparent`; no body or token
-    value enters spans/logs. OTLP export is enabled only when connection metadata supplies it and
-    flush is bounded to one second.
+R9. API activity uses `ActivitySource("Aiakos.Api")`, one `api.<command>` activity per route, and
+    continues incoming `traceparent`. Names are `version`, `seats.list`, `seat.detail`, `launch.get`,
+    `command.get`, `nodes.list`, `rig.put`, `seat.up`, `seat.down`, `seat.send`, and `seat.capture`.
+    Tags are only `api.command`, `http.route`, and `caller.user`; body and bearer token never enter
+    spans or logs. This slice does not export OTLP.
 
 ## Expected outputs: exact text
 
@@ -104,6 +112,8 @@ R9. API activity creates one `cli.<command>` root continuation from `traceparent
 | `E5` | problem/version matrix | exact status/reason/detail/retryable mapping and major.minor gate |
 | `E6` | 13-4 port fake bridge | context and immutable command mapping; accepted/rejected/capture replies; no bridge before dependency |
 | `E7` | trace/cancellation matrix | one root continuation, no sensitive values, cancellation before lookup/write |
+
+E4 uses these exact documents: revision 1 request `{"resolved":"{...}","tool_version":"2.0","source_path":"rig.yaml","source_commit":"abc","source_dirty":false,"spec_hash":"<recomputed>","binding_hash":"<recomputed>"}` returns HTTP 200 `{"revision_id":"<uuid>","revision":1,"spec_changed":true,"binding_changed":true,"seats":[]}`; repeating the same pair returns the same revision and both changed flags false; a changed pair returns revision 2. A submitted hash mismatch returns HTTP 400 `{"reason":"HASH_MISMATCH","detail":"Resolved rig hashes do not match.","retryable":false}`. Removing a running seat returns HTTP 409 `{"reason":"SEAT_REMOVED_WHILE_RUNNING","detail":"A running seat cannot be removed.","retryable":false}` and leaves all rows unchanged.
 
 ## Tests
 
@@ -128,13 +138,14 @@ dispatcher implementation, secret generation, or release packaging belongs here.
 ## Exact contract detail
 
 `Aiakos.Api.Contracts` records are immutable. They are `VersionResponse(string Api,string Version)`,
-`ProblemResponse(string Type,string Title,int Status,string Detail,string Reason,bool Retryable)`,
+`ProblemResponse(string Reason,string Detail,bool Retryable)`,
 `RegisterRigRequest(string Resolved,string ToolVersion,string SourcePath,string? SourceCommit,
 bool SourceDirty,string SpecHash,string BindingHash)`, `RegisterRigResponse(Guid RevisionId,int
 Revision,bool SpecChanged,bool BindingChanged,IReadOnlyList<SeatRegistrationResponse> Seats)`,
 `SeatRegistrationResponse(string Address,string Kind,bool Retired,bool Drifted)`,
 `UpRequest(bool Fresh,string? Note)`, `SendRequest(string Body,bool Force)`,
 `CaptureRequest(int HistoryLines)`, `AcceptedResponse(Guid LaunchId,Guid CommandId)`,
+`CommandAcceptedResponse(Guid CommandId)`,
 `AlreadyUpResponse(Guid LaunchId)`, `NoOpResponse`, `CaptureResponse(string Text,bool Truncated,
 bool PaneDead)`, `CaptureTimeoutResponse`, and response records mirroring existing `SeatStatusRow`,
 `SeatDetail`, `SeatLaunchRow`, `SeatCommandRow` and node fields in their declared order.
@@ -143,24 +154,27 @@ order using snake_case. `CallerContext` is created exactly once by 13-4; 15-2 co
 declares no duplicate.
 
 Configuration is `Aiakos:Api:TokenFile`, `Aiakos:Api:Operator`, `Aiakos:Api:Port` (default
-`InstanceDefaults.ReleasedPortBase + ApiPortOffset`) and `Aiakos:Api:OtlpEndpoint`.
+`InstanceDefaults.ReleasedPortBase + ApiPortOffset`).
 `IApiTokenStore.ReadAsync(CancellationToken)` returns the token; `IApiCallerContextFactory.Create
-(string token)` returns the 13-4 context or null. A non-loopback bind fails startup with exactly
+(string token)` returns the 13-4 context or null. `ISeatAddressResolver.ResolveAsync(Guid tenantId,
+string address,CancellationToken ct)` returns `SeatAddressResolution(Guid? SeatId,string? Rig,string?
+Member,bool Ambiguous)`. `IRigRevisionRepository.AppendAsync(Guid tenantId,RigRegistration
+registration,CallerContext caller,CancellationToken ct)` returns `RigRevisionReceipt`. A non-loopback bind fails startup with exactly
 `API endpoint must bind to loopback.`
 
 Routes are exact: `GET /v1/version`→VersionResponse; `GET /v1/seats?rig=<name>`→ordered
 SeatStatusResponse[]; `GET /v1/seats/{address}`→SeatDetailResponse; `GET /v1/launches/{id}`→
-LaunchResponse; `GET /v1/commands/{id}`→CommandResponse; `GET /v1/nodes`→NodeResponse[];
-`PUT /v1/rigs/{rig}`→RegisterRigResponse; `POST /v1/seats/{address}/up`→AcceptedResponse or
-AlreadyUpResponse; `/down`→AcceptedResponse or NoOpResponse; `/send`→AcceptedResponse; `/capture`
-→CaptureResponse or CaptureTimeoutResponse. Bodies are the request records above. Changing routes
+LaunchResponse; `GET /v1/commands/{id}`→CommandResponse; `GET /v1/nodes`→`NodeResponse(string Node,bool Connected,DateTimeOffset? Since,string? NodeInstanceId,string? Version,IReadOnlyList<string> Capabilities,string? LastError)[]`;
+`PUT /v1/rigs/{rig}`→RegisterRigResponse (200); `POST /v1/seats/{address}/up`→202 AcceptedResponse or
+200 AlreadyUpResponse; `/down`→202 CommandAcceptedResponse or 200 NoOpResponse; `/send`→202
+CommandAcceptedResponse; `/capture`→200 CaptureResponse or 504 CaptureTimeoutResponse. Bodies are the request records above. Changing routes
 require `X-Aiakos-Client-Version` and matching major.minor.
 
-Problem mapping is exact: `UNAUTHORIZED` 401 empty detail non-retryable; `NOT_FOUND` 404
+Problem mapping is exact: `UNAUTHORIZED` 401 empty detail non-retryable; `INVALID_REQUEST` 400 `Request body is invalid.` non-retryable; `NOT_FOUND` 404
 `Seat or rig was not found.`; `AMBIGUOUS_SEAT` 400 `Seat address is ambiguous.`; `HASH_MISMATCH`
 400 `Resolved rig hashes do not match.`; `SEAT_REMOVED_WHILE_RUNNING` 409 `A running seat cannot
 be removed.`; `VERSION_INCOMPATIBLE` 409 `CLI and instance versions are incompatible.`;
-`SEAT_REJECTED` 409 fixed actor detail; `HOST_UNAVAILABLE` 503 `The instance host is unavailable.`
+`SEAT_REJECTED` 409 `The seat rejected the command.`; `HOST_UNAVAILABLE` 503 `The instance host is unavailable.`
 retryable. No other reason is emitted.
 
 Server tracing uses `ActivitySource("Aiakos.Api")`, one `api.<command>` activity for each route,

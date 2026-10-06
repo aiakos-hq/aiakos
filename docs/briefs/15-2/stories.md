@@ -4,7 +4,7 @@ depends: -
 owns: C1, R1, R2
 outputs: E1
 tests: T1
-notes: No actor or database write dependency. CallerContext is the exact shared type consumed by 13-4 and the later bridge.
+notes: External prerequisite: 13-4 creates and merges Aiakos.Core.CallerContext before this story's authentication factory can compile. No actor or database write dependency. CallerContext is the exact shared type consumed by 13-4 and the later bridge.
 
 ## S2: Address resolution and read endpoints
 goal: Authenticated callers can resolve full or unique short seat addresses and read existing seat, launch, command and node projections.
@@ -44,4 +44,4 @@ depends: S1, S4
 owns: R9
 outputs: E7
 tests: T7
-notes: No OTLP endpoint is invented; connection metadata controls bounded export.
+notes: No OTLP endpoint is invented; this slice does not export OTLP.
