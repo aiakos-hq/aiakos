@@ -47,6 +47,7 @@ Acceptance tests are not here: they stay local, so that an implementer cannot re
 | [14-3 File references and the resolved rig](14-3/brief.md) | #14 | `impl` | approved | [6](14-3/stories.md) | | |
 | [14-4 Canonical form and hashes](14-4/brief.md) | #14 | `impl` | approved | [3](14-4/stories.md) | | |
 | [14-5 Claude Code projection plans](14-5/brief.md) | #14 | `impl` | approved | [4](14-5/stories.md) | | |
+| [15-1 #15 slice 1 — CLI skeleton and local dry run](15-1/brief.md) | #15 | `impl` | approved | [5](15-1/stories.md) | | |
 
 Slices 10-1, 14-1 and 14-2 were implemented as one piece each, before stories existed. 14-1 and
 14-2 went through the review loop, whose follow-up briefs are kept next to them. 14-2 did not
