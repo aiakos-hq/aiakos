@@ -23,8 +23,21 @@ public sealed record ResolvedSeatSecret(string Name, string File, string Deliver
 public sealed record ResolvedSeatParameters(string Seat, string Rig, string Node, string Harness,
     string? Model, string Auth, string Sandbox, string SeatDir, string Workdir,
     string ProjectionRoot, IReadOnlyList<ResolvedCheckout> Checkouts,
-    ResolvedHarnessSettings HarnessSettings, IReadOnlyList<ResolvedSeatSecret> Secrets);
+    ResolvedHarnessSettings HarnessSettings, IReadOnlyList<ResolvedSeatSecret> Secrets)
+{
+    public string? SpecHash { get; init; }
+    public string? BindingHash { get; init; }
+}
 public sealed record ResolvedRig(string Name, string Description, EmbeddedFile? Culture,
     IReadOnlyList<ResolvedRepo> Repos, IReadOnlyList<ResolvedAgent> Agents,
     IReadOnlyList<ResolvedSeat> Seats, ResolvedBinding Binding,
-    IReadOnlyList<ResolvedSeatParameters> SeatParameters);
+    IReadOnlyList<ResolvedSeatParameters> SeatParameters)
+{
+    public string? SpecHash { get; init; }
+    public string? BindingHash { get; init; }
+    public string? ToolVersion { get; init; }
+    public CanonicalRigResult? Canonical { get; init; }
+}
+
+public sealed record CanonicalRigResult(string SharedJson, string BindingJson, string ResolvedJson,
+    string SpecHash, string BindingHash, IReadOnlyDictionary<string, byte[]> Contents);
