@@ -1,6 +1,6 @@
 # Story review: slice 13-3
 
-Reviewed at commit feaa8fd. Stories: 7. Check: ok.
+Reviewed at commit e0fb70e. Stories: 9. Check: ok.
 
 ## Findings
 
@@ -28,3 +28,5 @@ Author resolution in the commit following this review:
 - R4's derived properties (`ReusedNativeSessionId`, `StopRequested`) are not stored, so a reloaded state can differ from the one in memory before a restart; the schema gives no other source and this was not raised.
 - S6 (three rules, four outputs: region, gateway, supervision, lifecycle) was judged to fit one run.
 - Nothing in this slice applies `OrchestratorRestarted` at startup (spec 0006 R35); the brief leaves restart handling to 13-5 and I did not check that 13-5 will own it.
+
+Architect, round 1: the diff 941f029..e0fb70e was read and the four resolutions are accepted; no findings are open. The ports 10-4 consumes are unchanged by it. Left unraised: a store rejection that repeats (`SEAT_COMMIT_REJECTED`, PostgreSQL 23514/23502/23503) is not acknowledged, so 10-4 closes the stream and the node sends the event again; I found no valid input that reaches it, only a defect in the machine or the schema would, and the brief answers it with a fixed error instead of a restart loop.
