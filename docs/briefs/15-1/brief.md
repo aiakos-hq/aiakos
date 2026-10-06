@@ -20,7 +20,7 @@ Replace the published preview greeting with the real System.CommandLine command 
 fully local `up --dry-run`. This slice supplies parsing and validation for future commands,
 not their API or host implementation. Several pure concerns can proceed in parallel after S1.
 
-At analysis base d847290, `src/Aiakos.Cli/Program.cs` only prints its version or a preview greeting;
+At reviewed main base c2a1bd5, `src/Aiakos.Cli/Program.cs` only prints its version or a preview greeting;
 its package is Aiakos 0.0.1-preview.1. RigLoader.Load, DiagnosticFormatter and ResolvedRig are
 on main. No local `/v1` API (15-2), CLI API client/operational handlers (15-3), detached released
 instance host/configuration/secrets/connection discovery (15-4), or release payload/tag pipeline
