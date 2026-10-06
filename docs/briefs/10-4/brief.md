@@ -2,7 +2,7 @@
 id: 10-4
 title: "#10 slice 4 — buffered node events"
 issue: 10
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Data/Link/, src/Aiakos.Node/Link/, src/Aiakos.Node/OrchestratorConnection.cs, src/Aiakos.Node/NodeProgram.cs, src/Aiakos.Orchestrator/Link/, src/Aiakos.Orchestrator/Program.cs, tests/Aiakos.Node.Tests/Link/, tests/Aiakos.Orchestrator.Tests/Link/]
 date: 2026-10-06
