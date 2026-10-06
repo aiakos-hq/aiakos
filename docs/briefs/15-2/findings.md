@@ -1,6 +1,6 @@
 # Story review: slice 15-2
 
-Reviewed at commit 683fc44. Stories: 6. Check: ok.
+Reviewed at commit 62fb2b1. Stories: 6. Check: ok.
 
 ## Findings
 
@@ -18,6 +18,12 @@ problem mapping, version header, revision/API contracts, and server activity rul
 in the brief. `CallerContext` has one owner: 13-4 creates the Core type and dispatcher; 15-2
 consumes it and declares no duplicate. The S5 bridge remains gated on that merge. OTLP export is
 removed from this slice.
+- [ ] S1 (context-gap), remaining from the first and second findings: `CallerContext` is now 13-4's alone, but S1 still says "depends: -" and "No actor ... dependency" while R2 and `IApiCallerContextFactory` return that type, so the root story of the slice cannot be built before 13-4 merges and nothing says so. Fix: add the external prerequisite to S1's notes (as S5 has it), or have lead move the record so S1 can start.
+- [ ] S1 (context-gap), remaining from the first finding: `ISeatAddressResolver` and `IRigRevisionRepository` still have no members; `NodeResponse` is "node fields", but main has no node row or reader to mirror (the other four rows exist in `SeatReadModels.cs`); and `ProblemResponse(Type, Title, Status, Detail, Reason, Retryable)` contradicts G3's "`reason`, `detail`, `retryable` only". Fix: give the two interfaces' members and `NodeResponse`'s properties, and make G3 and `ProblemResponse` agree.
+- [ ] S3 (context-gap), remaining from the fifth finding: the new section names the request and response records, but R5 and C2 are unchanged: no SQL or column list for the revision table, no statement of how it relates to the existing `aiakos.rig` row, no rule for recomputing the two hashes from the one `Resolved` string, no place for the file contents that a registered rig needs, no per-seat upsert and retirement rule, and the migration name is still conditional. Fix: put those in R5 and C2 and give E4 one exact request and response per row.
+- [ ] S5 (context-gap), remaining from the eighth finding: `/down` and `/send` return `AcceptedResponse(Guid LaunchId, Guid CommandId)`, which has no launch id to give for a stop or a delivery, and no HTTP status is stated for any command response (accepted, already up, no-op, capture, capture timeout). Fix: give each command its own response shape or make the launch id optional, and add the status code of every response to the route list.
+- [ ] S4 (context-gap), remaining from the sixth finding: `SEAT_REJECTED` has "fixed actor detail" without the text, and the table has no reason for a malformed or invalid request body although R6 maps validation to 400 and the table ends with "No other reason is emitted". Fix: add the detail text and the validation reason to the table.
+- [ ] S6 (context-gap), remaining from the seventh finding: R9 itself still says `cli.<command>` and an OTLP export with a one second flush, the new section says `api.<command>` and no export, and `Aiakos:Api:OtlpEndpoint` is still a configuration key; the values of `<command>` per route are not listed. Fix: rewrite R9 and E7 to the new section's rule, remove the key, and list the command name of each route.
 
 ## Not checked
 
@@ -25,3 +31,5 @@ removed from this slice.
 - `docs/briefs/TEMPLATE.md` asks for a self-contained brief with exact names and exact expected text; that is the standard the findings apply.
 - 13-4 has no brief yet, so the seam named here (`ISeatCommandDispatcher`, `SeatUp`, `SeatDown`, `SeatSend`, `SeatCapture`) could not be compared with it.
 - Size and order were not judged beyond the tie in the fourth finding: the stories cannot be sized until their surface is written down.
+
+Architect, round 1: the diff b16b72b..62fb2b1 was read. Accepted: the configuration keys, token store and loopback error (third finding), the route list now visible to every story (fourth finding), the problem table and the version header except for the two points above. Six points remain open, written as new findings above; the author's ticks on the first, second, fifth, sixth, seventh and eighth findings stand only for the parts named as accepted. R5, R9, the expected outputs table, items and stories are unchanged in that commit. `InstanceDefaults.ReleasedPortBase` and `ApiPortOffset` exist on main.
