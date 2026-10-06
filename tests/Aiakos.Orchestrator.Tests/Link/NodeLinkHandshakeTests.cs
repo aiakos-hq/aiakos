@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 
 using Aiakos.Contracts.Node.V1;
@@ -33,6 +34,12 @@ public sealed class NodeLinkHandshakeTests
     public async Task WelcomesAnAuthenticatedNodeWithNegotiatedIdentityLimitsAndReplay()
     {
         var app = new RecordingApplication();
+        using var traceListener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == "Aiakos.Orchestrator.Link",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+        };
+        ActivitySource.AddActivityListener(traceListener);
         using var actorSystem = ActorSystem.Create("node-link-test");
         await using var server = await StartServerAsync(app, actorSystem);
         var address = ServerAddress(server);
@@ -58,10 +65,21 @@ public sealed class NodeLinkHandshakeTests
 
         await call.RequestStream.WriteAsync(new ConnectRequest { Heartbeat = new Heartbeat() }, TestContext.Current.CancellationToken);
         Assert.False(app.RequestSeen.Task.IsCompleted);
-        var eventRequest = new ConnectRequest { SeatEvent = new SeatEvent() };
+        var eventRequest = new ConnectRequest
+        {
+            Trace = new TraceContext
+            {
+                Traceparent = "00-33333333333333333333333333333333-3333333333333333-01",
+                Tracestate = "tenant=test",
+            },
+            SeatEvent = new SeatEvent(),
+        };
         await call.RequestStream.WriteAsync(eventRequest, TestContext.Current.CancellationToken);
         var received = await app.RequestSeen.Task.WaitAsync(TestContext.Current.CancellationToken);
         Assert.Equal(ConnectRequest.BodyOneofCase.SeatEvent, received.BodyCase);
+        Assert.Equal("node-link.receive", app.ReceiveActivityName);
+        Assert.Equal("33333333333333333333333333333333", app.ReceiveTraceId);
+        Assert.Equal("3333333333333333", app.ReceiveParentSpanId);
         await call.RequestStream.WriteAsync(new ConnectRequest { Goodbye = new Goodbye() }, TestContext.Current.CancellationToken);
         await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken);
         Assert.Equal([NodeLinkState.Connected, NodeLinkState.Disconnected], app.States);
@@ -249,6 +267,9 @@ public sealed class NodeLinkHandshakeTests
         public List<NodeLinkState> States { get; } = [];
         public List<string> ReplayInstanceIds { get; } = [];
         public List<string> ReceivedInstanceIds { get; } = [];
+        public string? ReceiveActivityName { get; private set; }
+        public string? ReceiveTraceId { get; private set; }
+        public string? ReceiveParentSpanId { get; private set; }
         public TaskCompletionSource<ConnectRequest> RequestSeen { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task<IReadOnlyList<ReplayFrom>> GetReplayAsync(NodeIdentity identity, Hello hello, CancellationToken ct)
@@ -261,6 +282,9 @@ public sealed class NodeLinkHandshakeTests
         public Task ReceiveAsync(NodeIdentity identity, string nodeInstanceId, ConnectRequest request, CancellationToken ct)
         {
             ReceivedInstanceIds.Add(nodeInstanceId);
+            ReceiveActivityName = Activity.Current?.OperationName;
+            ReceiveTraceId = Activity.Current?.TraceId.ToString();
+            ReceiveParentSpanId = Activity.Current?.ParentSpanId.ToString();
             RequestSeen.TrySetResult(request);
             return Task.CompletedTask;
         }
