@@ -1,6 +1,6 @@
 # Story review: slice 15-2
 
-Reviewed at commit b27e1a4. Stories: 7. Check: ok.
+Reviewed at commit 6802c16. Stories: 7. Check: ok.
 
 ## Findings
 
@@ -56,3 +56,5 @@ Architect, round 3: the diff 0fd2a2b..67ad353 was read. The stories were renumbe
 Architect, round 4: the diff 860e536..baa5bdf was read. Accepted: the `paths` now include `Aiakos.Spec` and its tests; the verifier returns only the match flag and the two hashes; E8 refers to 14-4's minimal canonical JSON and its two published hashes with a mismatch case; the contents are binary; `FILE_CONTENT_INVALID` is 400; the revision table's column types. Two points remain, written above; the first was found by reading `aiakos.seat` in migration 0002.
 
 Architect, round 5: the diff 9085c2f..b27e1a4 was read. The two new paragraphs answer both round-4 findings: the upsert names the columns that exist in `aiakos.seat` and leaves `desired`, `desired_at` and `desired_by` alone, and malformed JSON throws `FormatException("Resolved JSON is invalid.")`. The two boxes stay open for one reason only: the sentences they replace are still in the brief (line 197, "Malformed JSON returns the fixed validation failure without constructing a `ResolvedRig`"; line 199, the upsert of `desired_json`, `params_json`, `retired` and "updates only desired metadata"), so the brief now says both things. Fix: delete those two superseded sentences, then tick the boxes.
+
+Architect, round 6: the diff 4afbdd2..6802c16 was read: the two superseded sentences are gone and nothing else changed. No findings are open. The brief was closed over six rounds by appended sections ("Exact contract detail", "Third-pass contract details") instead of by rewriting the original rules, so R5, R6 and the first outputs table are short and the later sections carry the exact text; the story view shows all of it, but nobody has yet read one story's view from start to finish for contradictions.
