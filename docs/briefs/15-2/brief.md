@@ -124,3 +124,45 @@ T7. Activity tests assert trace continuation and bounded export without body/tok
 Build and tests have zero warnings/errors; all existing suites remain green. No API client command
 implementation, instance host/configuration, Docker/WSL supervision, node transport, actor
 dispatcher implementation, secret generation, or release packaging belongs here.
+
+## Exact contract detail
+
+`Aiakos.Api.Contracts` records are immutable. They are `VersionResponse(string Api,string Version)`,
+`ProblemResponse(string Type,string Title,int Status,string Detail,string Reason,bool Retryable)`,
+`RegisterRigRequest(string Resolved,string ToolVersion,string SourcePath,string? SourceCommit,
+bool SourceDirty,string SpecHash,string BindingHash)`, `RegisterRigResponse(Guid RevisionId,int
+Revision,bool SpecChanged,bool BindingChanged,IReadOnlyList<SeatRegistrationResponse> Seats)`,
+`SeatRegistrationResponse(string Address,string Kind,bool Retired,bool Drifted)`,
+`UpRequest(bool Fresh,string? Note)`, `SendRequest(string Body,bool Force)`,
+`CaptureRequest(int HistoryLines)`, `AcceptedResponse(Guid LaunchId,Guid CommandId)`,
+`AlreadyUpResponse(Guid LaunchId)`, `NoOpResponse`, `CaptureResponse(string Text,bool Truncated,
+bool PaneDead)`, `CaptureTimeoutResponse`, and response records mirroring existing `SeatStatusRow`,
+`SeatDetail`, `SeatLaunchRow`, `SeatCommandRow` and node fields in their declared order.
+The JSON context emits `api,version`, `problem` fields, and response properties in declaration
+order using snake_case. `CallerContext` is created exactly once by 13-4; 15-2 consumes it and
+declares no duplicate.
+
+Configuration is `Aiakos:Api:TokenFile`, `Aiakos:Api:Operator`, `Aiakos:Api:Port` (default
+`InstanceDefaults.ReleasedPortBase + ApiPortOffset`) and `Aiakos:Api:OtlpEndpoint`.
+`IApiTokenStore.ReadAsync(CancellationToken)` returns the token; `IApiCallerContextFactory.Create
+(string token)` returns the 13-4 context or null. A non-loopback bind fails startup with exactly
+`API endpoint must bind to loopback.`
+
+Routes are exact: `GET /v1/version`→VersionResponse; `GET /v1/seats?rig=<name>`→ordered
+SeatStatusResponse[]; `GET /v1/seats/{address}`→SeatDetailResponse; `GET /v1/launches/{id}`→
+LaunchResponse; `GET /v1/commands/{id}`→CommandResponse; `GET /v1/nodes`→NodeResponse[];
+`PUT /v1/rigs/{rig}`→RegisterRigResponse; `POST /v1/seats/{address}/up`→AcceptedResponse or
+AlreadyUpResponse; `/down`→AcceptedResponse or NoOpResponse; `/send`→AcceptedResponse; `/capture`
+→CaptureResponse or CaptureTimeoutResponse. Bodies are the request records above. Changing routes
+require `X-Aiakos-Client-Version` and matching major.minor.
+
+Problem mapping is exact: `UNAUTHORIZED` 401 empty detail non-retryable; `NOT_FOUND` 404
+`Seat or rig was not found.`; `AMBIGUOUS_SEAT` 400 `Seat address is ambiguous.`; `HASH_MISMATCH`
+400 `Resolved rig hashes do not match.`; `SEAT_REMOVED_WHILE_RUNNING` 409 `A running seat cannot
+be removed.`; `VERSION_INCOMPATIBLE` 409 `CLI and instance versions are incompatible.`;
+`SEAT_REJECTED` 409 fixed actor detail; `HOST_UNAVAILABLE` 503 `The instance host is unavailable.`
+retryable. No other reason is emitted.
+
+Server tracing uses `ActivitySource("Aiakos.Api")`, one `api.<command>` activity for each route,
+propagates `traceparent`, and tags only `api.command`, `http.route`, and `caller.user`.
+It never exports body/token attributes; this slice does not add OTLP export.
