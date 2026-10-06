@@ -36,7 +36,7 @@ depends: S2, S4
 owns: R15, R16, R17
 outputs: E15, E16, E17
 tests: T5
-notes: TmuxLaunchCommands is a low-level creation component, not the StartAsync facade. Its caller later performs R18-R20 and commits starting; do not create placeholder lifecycle methods here. Script tests call CreateAsync with valid inputs. R7 escapes data once; R14 supplies start time. R17 initial-label verification permits an empty launch label until it is set. Opt-in tests use only unique sockets.
+notes: MERGE PREREQUISITE: 11-2-9 must merge before 11-2-5 is baselined/readied again; lead enforces this later-numbered dependency because story-check only permits earlier-numbered depends. TmuxLaunchCommands is a low-level creation component, not the StartAsync facade. Its caller later performs R18-R20 and commits starting; do not create placeholder lifecycle methods here. Script tests call CreateAsync with valid inputs. R7 escapes data once; R14 supplies start time. R17 initial-label verification permits an empty launch label until it is set. Opt-in tests use only unique sockets.
 
 ## S6: Start lifecycle
 goal: StartAsync validates, refuses live/foreign/orphaned seats, records launches and replaces verified dead panes.
@@ -44,7 +44,7 @@ depends: S2, S3, S4, S5
 owns: R11, R18, R19, R20
 outputs: E11, E18, E19, E20
 tests: T6
-notes: Composes merged validators with registry, snapshots and CreateAsync. Add integrated E11/E13/E14 ordering assertions. R19 publishes through the supplied callback and persists exit.reported; no watcher/outbox is assumed. The starter remains a start component, not a partial ISessionHost implementation; final node registration/reconciliation belongs to 11-5. R19 applies maintainer decision 2026-10-06 to dead starting launches without a returned handle; no event or invented start time, and recovery evidence lasts until durable replacement. Publication atomicity stays explicit for architect review.
+notes: Composes merged validators with registry, snapshots and CreateAsync. Add integrated E11/E13/E14 ordering assertions. R19 publishes through the supplied callback and persists exit.reported; no watcher/outbox is assumed. The starter remains a start component, not a partial ISessionHost implementation; final node registration/reconciliation belongs to 11-5. R19 applies maintainer decision 2026-10-06 to dead starting launches without a returned handle; no event or invented start time, and recovery evidence lasts until durable replacement. Publication atomicity stays explicit for architect review. Reviewer backlog: an immediate-exit process gone at snapshot read retains R14 TmuxFailed/Created pane process could not be identified. and dead labelled evidence/starting record; test recovery through R19 without inventing start time or a new error.
 
 ## S7: Read-only attach commands
 goal: A started pane has an exact read-only attach command, with an explicit writable variant and no mutation.
@@ -61,3 +61,11 @@ owns: R22
 outputs: E22
 tests: T8
 notes: R22 instruments the established client and starter, using their supplied loggers/IMeterFactory and the existing ActivitySource. No placeholder metrics for later operations. Permanent listener tests guard diagnostic values. This story does not depend on attach behavior.
+
+## S9: Safe tmux initialization before detached creation
+goal: Repair merged global window sizing so cold and existing private servers survive initialization and subsequent detached creation.
+depends: S2
+owns: C1, R24
+outputs: E24
+tests: T10
+notes: Bug #230. Change TmuxClient R7/R8 exact config and convergence to largest; update prior scripted expectations. No launch-command implementation dependency: real tests create fixtures directly through client.RunAsync after initialization, never reset product options. S5 is blocked on this fix and takes per-window manual from amended R16. Other review backlog: vanished immediate-exit PID retains R14 fixed failure/dead evidence for S6; no invented start time or new error. Hard-to-read VerifyPaneAsync is no requirement. 3.4/3.5 runtime coverage remains unclaimed until binaries available; installed3.6 must pass.
