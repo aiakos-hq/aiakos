@@ -249,7 +249,10 @@ public static class SeatStateMachine
         var result = Combine(pipeline, bodyResult);
         if (result.State.Overlay is not null && result.State.CatchUpSeq is { } catchUpSeq &&
             result.State.NextSeq > catchUpSeq)
-            result = Combine(result, ClearOverlay(result.State, now));
+        {
+            var disposition = result.Disposition;
+            result = Combine(result, ClearOverlay(result.State, now)) with { Disposition = disposition };
+        }
         return result;
     }
 
@@ -259,16 +262,18 @@ public static class SeatStateMachine
         var isCurrentLaunch = state.Launch is not null && input.LaunchId == state.Launch.LaunchId;
         if (!isCurrentLaunch)
         {
-            var staleFindings = input.Body is HarnessBody harness && IsOrphanHarness(harness, profile)
+            var staleFindings = input.Body is HarnessBody staleHarness && IsOrphanHarness(staleHarness, profile)
                 ? Open(SeatVocabulary.FindingOrphanHarness)
                 : NoFindings;
             return new SeatStep(state with { LastEventAt = now }, null, EventDisposition.StaleLaunch,
                 NoTransitions, staleFindings, NoEffects);
         }
 
+        if (input.Body is HarnessBody harness)
+            return ApplyCurrentHarnessEvent(state, input, harness, profile, now);
+
         SeatStep result = input.Body switch
         {
-            HarnessBody harness => HarnessEvent(state, harness, profile, now),
             SessionObservedBody observed when !observed.MatchesExpected => SessionIdMismatch(state,
                 state.Resumability == ResumabilityValue.None ? EventDisposition.Evidence : EventDisposition.Applied, now),
             LaunchResultBody launch => LaunchResult(state, launch, now),
@@ -281,24 +286,78 @@ public static class SeatStateMachine
                     Open(SeatVocabulary.FindingSourcesDisagree), NoEffects),
             _ => new SeatStep(state, null, EventDisposition.Evidence, NoTransitions, NoFindings, NoEffects)
         };
-        if (input.Body is HarnessBody evidence &&
-            string.Equals(evidence.NativeSessionId, state.NativeSessionId, StringComparison.Ordinal) &&
-            profile.IsConversationEvidence(evidence.Kind, evidence.Attributes))
-            result = ApplyConversationEvidence(result, now);
         if (input.Body is LaunchResultBody launchResult)
             result = ApplyLaunchResumability(result, launchResult, now);
-        var findings = result.Findings;
-        if (input.Body is HarnessBody)
-            findings = [.. findings, new FindingChange(SeatVocabulary.FindingActivityStale, false)];
-        if (input.Body is HarnessBody { Kind: HarnessEventKind.PromptSubmitted })
-            findings = [.. findings, new FindingChange(SeatVocabulary.FindingDeliveryUnconfirmed, false)];
-        if (input.Body is HarnessBody { Kind: HarnessEventKind.TurnEnded })
-            findings = [.. findings, new FindingChange(SeatVocabulary.FindingTurnFailed, false)];
 
         return result with
         {
             State = result.State with { LastEventAt = now },
-            Disposition = result.Disposition ?? EventDisposition.Applied,
+            Disposition = result.Disposition ?? EventDisposition.Applied
+        };
+    }
+
+    private static SeatStep ApplyCurrentHarnessEvent(SeatState state, EventReceived input, HarnessBody harness,
+        IHarnessStateProfile profile, DateTimeOffset now)
+    {
+        var kind = Enum.IsDefined(harness.Kind) && harness.Kind != HarnessEventKind.Unspecified
+            ? harness.Kind
+            : HarnessEventKind.Other;
+
+        if (kind == HarnessEventKind.SessionEnded && !state.ReadinessSeen)
+            return CompleteHarnessEvent(HarnessEvent(state, harness, profile, now), kind, now, late: false);
+
+        var ordered = input.SourceSeq > 0 && kind is not (HarnessEventKind.Telemetry or HarnessEventKind.Other);
+        if (ordered && input.SourceSeq <= state.LastSourceSeq)
+            return ApplyLateHarnessEvent(state, harness, kind, profile, now);
+
+        if (ordered)
+            state = state with { LastSourceSeq = input.SourceSeq };
+
+        var step = HarnessEvent(state, harness, profile, now);
+        if (string.Equals(harness.NativeSessionId, state.NativeSessionId, StringComparison.Ordinal) &&
+            profile.IsConversationEvidence(kind, harness.Attributes))
+            step = ApplyConversationEvidence(step, now);
+
+        return CompleteHarnessEvent(step, kind, now, late: false);
+    }
+
+    private static SeatStep ApplyLateHarnessEvent(SeatState state, HarnessBody harness, HarnessEventKind kind,
+        IHarnessStateProfile profile, DateTimeOffset now)
+    {
+        var step = Unchanged(state) with { Disposition = EventDisposition.Late };
+        if (string.Equals(harness.NativeSessionId, state.NativeSessionId, StringComparison.Ordinal) &&
+            profile.IsConversationEvidence(kind, harness.Attributes))
+            step = ApplyConversationEvidence(step, now) with { Disposition = EventDisposition.Late };
+
+        if (!string.Equals(harness.NativeSessionId, state.NativeSessionId, StringComparison.Ordinal) &&
+            profile.IsReadiness(kind, harness.Attributes) &&
+            profile.IsSessionRotation(kind, harness.Attributes) &&
+            harness.Attributes.TryGetValue("previous_session_id", out var previousSessionId) &&
+            string.Equals(previousSessionId, state.NativeSessionId, StringComparison.Ordinal) &&
+            profile.IsValidNativeSessionId(harness.NativeSessionId))
+        {
+            var rotation = RotateSession(step.State, harness.NativeSessionId, previousSessionId, now, late: true);
+            step = Combine(step, rotation) with { Disposition = EventDisposition.Late };
+        }
+
+        return CompleteHarnessEvent(step, kind, now, late: true);
+    }
+
+    private static SeatStep CompleteHarnessEvent(SeatStep step, HarnessEventKind kind, DateTimeOffset now, bool late)
+    {
+        var findings = new List<FindingChange>(step.Findings)
+        {
+            new(SeatVocabulary.FindingActivityStale, false)
+        };
+        if (!late && kind == HarnessEventKind.PromptSubmitted)
+            findings.Add(new FindingChange(SeatVocabulary.FindingDeliveryUnconfirmed, false));
+        if (!late && kind == HarnessEventKind.TurnEnded)
+            findings.Add(new FindingChange(SeatVocabulary.FindingTurnFailed, false));
+
+        return step with
+        {
+            State = step.State with { LastEventAt = now },
+            Disposition = late ? EventDisposition.Late : step.Disposition ?? EventDisposition.Applied,
             Findings = findings
         };
     }
@@ -474,7 +533,7 @@ public static class SeatStateMachine
     }
 
     private static SeatStep RotateSession(SeatState state, string nativeSessionId, string previousSessionId,
-        DateTimeOffset now)
+        DateTimeOffset now, bool late = false)
     {
         var next = state with { NativeSessionId = nativeSessionId, ReadinessSeen = true };
         var transitions = new List<SeatTransition>();
@@ -492,7 +551,7 @@ public static class SeatStateMachine
                 null, "U8"));
         }
 
-        if (state.KnownSession == SessionValue.Present &&
+        if (!late && state.KnownSession == SessionValue.Present &&
             (state.KnownActivity != ActivityValue.Idle || state.KnownActivityReason is not null || state.KnownActivityDetail is not null))
         {
             next = next with
