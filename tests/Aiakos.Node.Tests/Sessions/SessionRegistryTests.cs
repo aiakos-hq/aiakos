@@ -111,6 +111,34 @@ public sealed class SessionRegistryTests
         Assert.Throws<ArgumentException>(() => new SessionRegistry("relative-home"));
     }
 
+    [Fact]
+    public async Task RejectsNullAndWrongShapeJsonEntriesAndRecoveryElements()
+    {
+        using var fixture = new RegistryFixture();
+        var registry = new SessionRegistry(fixture.Home);
+        var dir = Path.Combine(fixture.Home, "sessions");
+        var primary = Path.Combine(dir, "demo_impl.json");
+        var recovery = Path.Combine(dir, "demo_impl.recovery");
+
+        await File.WriteAllTextAsync(primary, "{}", TestContext.Current.CancellationToken);
+        await AssertMalformedAsync(() => registry.ReadAsync("demo_impl", TestContext.Current.CancellationToken));
+
+        await File.WriteAllTextAsync(recovery, "[null]", TestContext.Current.CancellationToken);
+        await AssertMalformedAsync(() => registry.ReadRecoveryAsync("demo_impl", TestContext.Current.CancellationToken));
+        await AssertMalformedAsync(() => registry.WriteRecoveryAsync(Entry("demo_impl", "impl@demo", "launch-1"), TestContext.Current.CancellationToken));
+
+        await File.WriteAllTextAsync(recovery, "[{}]", TestContext.Current.CancellationToken);
+        await AssertMalformedAsync(() => registry.ReadRecoveryAsync("demo_impl", TestContext.Current.CancellationToken));
+        await AssertMalformedAsync(() => registry.WriteRecoveryAsync(Entry("demo_impl", "impl@demo", "launch-2"), TestContext.Current.CancellationToken));
+    }
+
+    private static async Task AssertMalformedAsync(Func<Task> read)
+    {
+        var error = await Assert.ThrowsAsync<SessionHostException>(read);
+        Assert.Equal((SessionHostErrorCode.TmuxFailed, "Session registry operation failed.", true),
+            (error.Code, error.Message, error.Error.Retryable));
+    }
+
     private static RegistryEntry Entry(string sessionName, string address, string launchId) => new(
         1, "test", "running", "seat-1", address, launchId, "test-harness", "aiakos-test", sessionName,
         "session-1", "%1", 1234, 9876, DateTimeOffset.Parse("2026-10-05T11:00:00Z", CultureInfo.InvariantCulture), null,

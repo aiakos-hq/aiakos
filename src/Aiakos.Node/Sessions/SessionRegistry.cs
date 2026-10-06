@@ -97,7 +97,9 @@ public sealed class SessionRegistry : ISessionRegistry
             if (!File.Exists(path)) return Array.Empty<RegistryEntry>();
             await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true);
             var entries = await JsonSerializer.DeserializeAsync(stream, SessionRegistryJsonContext.Default.IReadOnlyListRegistryEntry, ct).ConfigureAwait(false);
-            return entries ?? throw Failed();
+            if (entries is null || entries.Any(entry => !IsValidSerializedEntry(entry)))
+                throw Failed();
+            return entries;
         }
         catch (OperationCanceledException) { throw; }
         catch (SessionHostException) { throw; }
@@ -130,8 +132,8 @@ public sealed class SessionRegistry : ISessionRegistry
             ct.ThrowIfCancellationRequested();
             if (!File.Exists(path)) return null;
             await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true);
-            return await JsonSerializer.DeserializeAsync(stream, SessionRegistryJsonContext.Default.RegistryEntry, ct).ConfigureAwait(false)
-                ?? throw Failed();
+            var entry = await JsonSerializer.DeserializeAsync(stream, SessionRegistryJsonContext.Default.RegistryEntry, ct).ConfigureAwait(false);
+            return IsValidSerializedEntry(entry) ? entry : throw Failed();
         }
         catch (OperationCanceledException) { throw; }
         catch (SessionHostException) { throw; }
@@ -221,6 +223,13 @@ public sealed class SessionRegistry : ISessionRegistry
             parts.Any(part => part.Any(c => c is not (>= 'a' and <= 'z') and not (>= '0' and <= '9') and not '-')))
             throw new ArgumentException("Invalid registry session name.");
     }
+
+    private static bool IsValidSerializedEntry(RegistryEntry? entry) =>
+        entry is not null && entry.Schema == 1 && entry.CreatedAt != default &&
+        entry.Instance is not null && entry.State is not null && entry.SeatId is not null &&
+        entry.SeatAddress is not null && entry.LaunchId is not null && entry.Harness is not null &&
+        entry.Socket is not null && entry.SessionName is not null && entry.Attributes is not null &&
+        entry.Attributes.All(attribute => attribute.Key is not null && attribute.Value is not null);
 
     private static void SetMode(string path, UnixFileMode mode)
     {
