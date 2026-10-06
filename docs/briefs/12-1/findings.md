@@ -1,6 +1,6 @@
 # Story review: slice 12-1
 
-Reviewed at commit 69dee4e. Stories: 5. Check: ok.
+Reviewed at commit 02aab63. Stories: 5. Check: ok.
 
 ## Findings
 
@@ -27,3 +27,5 @@ safe ~/ source => fixed runtime-node HOME helper, preserving absolute source beh
 R5/E5/T2 now specify both paths, exact escaped JSON bytes, unsafe-input rejection and no
 orchestrator HOME/secret read. Spec0005R36 has the requested one-sentence clarification;
 the analysisPR is explicitly read-this-one. All findings ticked; architect re-reads independently.
+
+Architect, round 1: the diff b2e4160..02aab63 was read, including the spec 0005 R36 sentence, and the three resolutions are accepted; no findings are open. The maintainer decision was read in lead's qitem-20261006123052-cc0bd3ce and the brief and spec text match it. The escaped bytes in R5 (`\u0027`, `\u0022`, `$` unescaped) agree with the default System.Text.Json encoder as I know it; not run.
