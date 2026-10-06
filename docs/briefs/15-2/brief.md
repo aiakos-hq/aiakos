@@ -2,7 +2,7 @@
 id: 15-2
 title: "#15 slice 2 — local API contracts, authentication and rig revisions"
 issue: 15
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Spec/, tests/Aiakos.Spec.Tests/, src/Aiakos.Api.Contracts/, src/Aiakos.Orchestrator/, src/Aiakos.Data/, tests/Aiakos.Orchestrator.Tests/, tests/Aiakos.Data.Tests/, Aiakos.slnx]
 date: 2026-10-06
