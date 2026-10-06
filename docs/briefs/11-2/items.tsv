@@ -57,3 +57,7 @@ T0	test	all	G1,G2
 R23	rule	once	R1,R2
 E23	output	once	R23
 T9	test	once	R23,E23
+C1	change	once	-
+R24	rule	once	R7,R8
+E24	output	once	C1,R24
+T10	test	once	C1,R24,E24
