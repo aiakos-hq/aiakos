@@ -141,7 +141,7 @@ R11–R13 are recorded in [ADR 0037](../adr/0037-team-pin-in-local-tool-manifest
 
 - **R15** `rigs/aiakos-dev/check-prereqs.sh` (POSIX `sh`, read-only, run by the lead inside WSL)
   checks every item of [Prerequisites](#prerequisites) and prints one `ok` / `FAIL <what to do>`
-  line per item; it exits non-zero if any item fails. It never installs or changes anything.
+  line per item; it exits non-zero if any item fails. It never installs or changes anything. The no-argument script checks the committed example defaults; its undocumented `~/.claude.json` `oauthAccount` object check is only a heuristic (absent/unreadable reports unknown, check by hand via Claude `/login`, and exits non-zero), and custom RigEnv paths are checked manually per the README.
 
 ### Acceptance
 
