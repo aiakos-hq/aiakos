@@ -1,6 +1,6 @@
 # Story review: slice 15-2
 
-Reviewed at commit ada84ed. Stories: 6. Check: ok.
+Reviewed at commit 67ad353. Stories: 7. Check: ok.
 
 ## Findings
 
@@ -27,6 +27,10 @@ removed from this slice.
 - [ ] S3 (context-gap), open after round 2: R5 recomputes both hashes "with the existing `ResolvedRig` canonicalizer", but that canonicalizer (`RigCanonicalizer.Create`) takes a `ResolvedRig` object, not the request's `Resolved` JSON string, and it and `CanonicalJson.Write` are internal to `Aiakos.Spec`, visible only to its test assembly, while `src/Aiakos.Spec/` is not in this slice's paths, so the story depends on something that does not exist in usable form. Fix: decide where the recomputation lives (a public entry point in `Aiakos.Spec` with that project added to the paths, or another named rule) and state it in R5.
 - [ ] S3 (context-gap), open after round 2: C2 says `resolved` "stores complete canonical file contents" and spec 0007 R34 sends "canonical form plus file contents", but `RegisterRigRequest` has only the `Resolved` string, and the canonical JSON holds descriptors (path, hash, size), not bytes; the contents are a separate map in `CanonicalRigResult`. Fix: add the field that carries the contents to `RegisterRigRequest`, with its encoding, and say in C2 where they are stored.
 - [ ] S3 (context-gap), open after round 2: `RigRegistration` and `RigRevisionReceipt` (parameter and result of `IRigRevisionRepository.AppendAsync`) have no properties, and C2 lists the revision table's columns without types, nullability or the name of the seat table and columns that R5's upsert writes. Fix: give both records' properties and the migration's column types, and name the seat columns the upsert sets.
+- [ ] S1, the new hash story (context-gap): its notes allow only `src/Aiakos.Spec` and its tests, but the brief's `paths` list has neither `src/Aiakos.Spec/` nor `tests/Aiakos.Spec.Tests/`, so the gate's path check refuses the story's own files. Fix: add both to `paths` in the front matter.
+- [ ] S1, the new hash story (judgment-gap): `RigHashVerifier.Verify` returns a `ResolvedRig`, but the canonical JSON it is given leaves out, by 14-4's rules, the file bytes, the seat parameters and the tool version that a `ResolvedRig` holds, so that object cannot be built from the input, and "validates" names no rule; recomputing the two hashes needs only the `shared` and `binding` subtrees written through `CanonicalJson`. Fix: return the two recomputed hashes and the match flag only (and whatever R5 really reads, named field by field), and say what "validates" rejects and with which result.
+- [ ] S1, the new hash story (context-gap): C3, R10, E8 and T8 are one line each at the end of the brief, and E8 ("returns the loader-golden hash pair") has no input and no values, although 14-4's minimal golden gives both exactly. Fix: put E8 in the expected outputs table with the 14-4 minimal canonical JSON as input and its two hashes as the expected result, plus one mismatch row.
+- [ ] S4, registration (context-gap): `FilesBySha256` is described as "raw UTF-8 bytes", but skill files are byte-exact and may be binary; `FILE_CONTENT_INVALID` has no HTTP status and is not in the problem table, which still ends "No other reason is emitted"; and C2 is unchanged, so the revision table's columns still have no types and the seat table and columns of R5's upsert are still not named, although the third-round note says they are explicit. Fix: say "raw bytes", add the reason with its status to the table, and put the column types and the seat columns in C2 and R5.
 
 ## Not checked
 
@@ -44,3 +48,5 @@ Architect, round 2: the diff 4ab83f6..ada84ed was read. Accepted: S1's external 
 - [x] S3 (context-gap): canonical hashing now has one public Aiakos.Spec verifier owned by new head story S0; S3 depends on S0 and forbids an orchestrator duplicate.
 - [x] S3 (context-gap): registration carries bounded SHA-256 keyed file bytes with exact verification and fixed `FILE_CONTENT_INVALID` text.
 - [x] S3 (context-gap): `RigRegistration`, `RigRevisionReceipt`, migration types/tenant keys, and canonical resolved contents are explicit.
+
+Architect, round 3: the diff 0fd2a2b..67ad353 was read. The stories were renumbered: the new hash story is S1 and the old S1 to S6 are now S2 to S7; findings written before this round use the old numbers. Accepted: one public verifier in `Aiakos.Spec` with no second hash implementation in the orchestrator, registration depending on it through S2, the contents map with its size limits, and the two repository records. Four points remain open, written above with the new story numbers. The three "open after round 2" boxes stay unticked by me: the first two are answered in substance by the new story and the contents map, the third only in part.
