@@ -2,7 +2,7 @@
 id: 14-5
 title: "#14 slice 5 — Claude Code projection plans"
 issue: 14
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Spec/, tests/Aiakos.Spec.Tests/]
 date: 2026-10-06
