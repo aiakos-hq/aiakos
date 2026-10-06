@@ -4,8 +4,11 @@ Reviewed at commit 71f7d61. Stories: 4. Check: ok.
 
 ## Findings
 
-- [ ] S1 (context-gap): S1, S2 and S3 have no dependency on each other and each needs G1's NFC step, but `CanonicalJson.NormalizeAndValidate` is private and G1 does not say where the write-then-parse wrapper lives, so three stories built in parallel can each add the same shared helper file or each edit `CanonicalJson.cs`, and the second and third pull request then conflict. Fix: state in G1 that each helper class keeps that step as a private member of its own and that `CanonicalJson.cs` is not touched, or name one helper owned by one story that the other two depend on.
-- [ ] S4 (context-gap): R7, C1 and `LOAD-errors` say `Resolved=null` and "Resolved null", but the result record is `LoadResult(ResolvedRig? Rig, IReadOnlyList<Diagnostic> Diagnostics)` and has no member of that name. Fix: write `LoadResult.Rig` is null in R7, C1 and `LOAD-errors`.
+- [x] S1 (context-gap): S1, S2 and S3 have no dependency on each other and each needs G1's NFC step, but `CanonicalJson.NormalizeAndValidate` is private and G1 does not say where the write-then-parse wrapper lives, so three stories built in parallel can each add the same shared helper file or each edit `CanonicalJson.cs`, and the second and third pull request then conflict. Fix: state in G1 that each helper class keeps that step as a private member of its own and that `CanonicalJson.cs` is not touched, or name one helper owned by one story that the other two depend on.
+- [x] S4 (context-gap): R7, C1 and `LOAD-errors` say `Resolved=null` and "Resolved null", but the result record is `LoadResult(ResolvedRig? Rig, IReadOnlyList<Diagnostic> Diagnostics)` and has no member of that name. Fix: write `LoadResult.Rig` is null in R7, C1 and `LOAD-errors`.
+
+Both findings resolved in the author commit following this review: G1 keeps private wrappers
+in the owning classes and forbids edits to CanonicalJson.cs; C1/R7/LOAD-errors name LoadResult.Rig.
 
 ## Not checked
 

@@ -84,7 +84,9 @@ G1. These helpers are pure: no file/directory reads or writes, no streams, envir
     across current cultures and Windows/Linux. For metadata/destination NFC semantics in every
     story, use the existing CanonicalJson writer, including its scalar-preserving fallback when
     platform Normalize rejects U+FFFE; writing then parsing a JSON string obtains that value
-    without inventing another normalizer. Do not normalize embedded file bodies.
+    without inventing another normalizer. Each owning helper class keeps its write-then-parse
+    normalization wrapper private inside that class; do not create a shared helper file or
+    modify CanonicalJson.cs. Do not normalize embedded file bodies.
     Commit each owned expected-output test in its
     owning story; the T items name additional permanent tests. Do not defer tests to integration.
     There is no peer-input stream in this slice: unread/early-closed transport input is outside
@@ -100,7 +102,7 @@ C1. Successful loads additionally populate `ResolvedSeatParameters.Projection`. 
     projection's own Contents map, not Canonical.Contents. Update earlier whole-success-JSON
     goldens only by inserting `Projection` at the additive property position, with independently
     derived expected descriptors/bytes/hash. Keep all earlier selected-field tests unchanged.
-    Errors added by R4/R5/R6 now prevent a resolved result; no other earlier error changes.
+    Errors added by R4/R5/R6 now make LoadResult.Rig null; no other earlier error changes.
 
 ## Rules
 
@@ -198,7 +200,7 @@ R7. Once 14-4-3's successful-load hash finalization exists, build projections af
     (not just this seat's selected repo). Bindings apply on every node, so include all bindings.
     Find the seat's original YAML mapping via its id; source is the id scalar mark in rig.yaml,
     clamped to 1-based positions just like earlier references. On success set Projection; on
-    failure keep checking remaining seats, then return Resolved=null for the whole load.
+    failure keep checking remaining seats, then return LoadResult.Rig null for the whole load.
     Append new diagnostics after the entire existing diagnostic list, one per failing seat in
     declaration order. R4 then R5 then R6 precedence holds within each seat. Warnings alone do
     not suppress projection. If any earlier stage has an error, call none of the new helpers
@@ -246,7 +248,7 @@ GUIDE-base. Renderer fixture, exact UTF-8 without BOM (every displayed line ends
 | `PLAN-size` | source rig.yaml:8:9; disjoint root; valid files sum 2097152 then 2097153 bytes, including two descriptors pointing to equal bytes; separately empty files | boundary accepted; over null, exactly `rig.yaml:8:9: error AIK3005: projection exceeds 2 MiB\n`; empty Files/Contents and Hash `sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945` |
 | `PLAN-hash` | PLAN-files | hash H(exact UTF-8 string `[{"bytes":0,"mode":"0644","path":"a.md","sha256":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},{"bytes":0,"mode":"0644","path":"z.md","sha256":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}]`); different root/input order unchanged, changed bytes/path changes hash |
 | `LOAD-plan` | valid existing fixture with culture/guidance/skills, at least human+two agent seats; bind shared checkout /checkout/repo, seat_root /seats; also test seat-worktree | each agent parameter Projection.Root equals ProjectionRoot, generated CLAUDE.md uses finalized SpecHash, exact skill paths/bytes per R3; Files/descriptors/hash/Contents per R4/R6; no human parameter, no settings file; shared/binding hashes and Canonical.Contents equal independent prior 14-4 values; a binding-only root/node/secret-reference change preserves projection files/hash |
-| `LOAD-errors` | valid fixture with two agent seat id scalars at rig.yaml:8:9 and 11:9; oversized projected snapshots for both; separately root lexical overlap with unselected bound clone or another seat checkout | Resolved null; first case appends exactly `rig.yaml:8:9: error AIK3005: projection exceeds 2 MiB\nrig.yaml:11:9: error AIK3005: projection exceeds 2 MiB\n`; overlap case appends one PLAN-overlap error per affected seat at its own id position; earlier errors remain byte-identical and no projection error is appended; earlier warnings precede new errors |
+| `LOAD-errors` | valid fixture with two agent seat id scalars at rig.yaml:8:9 and 11:9; oversized projected snapshots for both; separately root lexical overlap with unselected bound clone or another seat checkout | LoadResult.Rig is null; first case appends exactly `rig.yaml:8:9: error AIK3005: projection exceeds 2 MiB\nrig.yaml:11:9: error AIK3005: projection exceeds 2 MiB\n`; overlap case appends one PLAN-overlap error per affected seat at its own id position; earlier errors remain byte-identical and no projection error is appended; earlier warnings precede new errors |
 
 ## Tests
 
