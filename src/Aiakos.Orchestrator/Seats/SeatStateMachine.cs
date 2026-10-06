@@ -14,6 +14,12 @@ public static class SeatStateMachine
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(profile);
 
+        if (input is UpRequested up)
+            return ApplyUpRequested(state, up, profile, now);
+
+        if (input is DownRequested)
+            return ApplyDownRequested(state);
+
         if (input is EventReceived received)
             return ApplySequencedEvent(state, received, profile, now);
 
@@ -49,6 +55,106 @@ public static class SeatStateMachine
         }
 
         return Unchanged(state);
+    }
+
+    private static SeatStep ApplyUpRequested(SeatState state, UpRequested input,
+        IHarnessStateProfile profile, DateTimeOffset now)
+    {
+        if (!input.NodeConnected)
+            return Unchanged(state) with
+            {
+                Reply = new Rejected("NODE_NOT_CONNECTED"),
+                Findings = Open(SeatVocabulary.FindingNodeNotConnected)
+            };
+
+        if (state.Session is SessionValue.Starting or SessionValue.Present)
+            return Unchanged(state with { Desired = SeatDesired.Up }) with { Reply = new AlreadyUp() };
+
+        if (state.Session == SessionValue.Unknown)
+            return Unchanged(state) with { Reply = new Rejected(SeatVocabulary.RejectionSeatStateUnknown) };
+
+        if (state.Resumability == ResumabilityValue.Lost && !input.Fresh)
+            return Unchanged(state) with { Reply = new Rejected(SeatVocabulary.RejectionResumeLost) };
+
+        var mode = LaunchMode.Fresh;
+        var decision = state.Resumability == ResumabilityValue.None
+            ? SeatVocabulary.DecisionNewSession
+            : SeatVocabulary.DecisionFreshExplicit;
+        var reuseNativeSessionId = false;
+        var newNativeSession = true;
+        var abandonPreviousSession = false;
+
+        switch (state.Resumability)
+        {
+            case ResumabilityValue.None:
+                break;
+            case ResumabilityValue.FreshOnly when !input.Fresh:
+                decision = SeatVocabulary.DecisionNoConversationYet;
+                reuseNativeSessionId = profile.FreshRelaunchReusesSessionId && state.NativeSessionId is not null;
+                newNativeSession = !reuseNativeSessionId;
+                break;
+            case ResumabilityValue.FreshOnly:
+                decision = SeatVocabulary.DecisionFreshExplicit;
+                break;
+            case ResumabilityValue.Resumable when !input.Fresh:
+                mode = LaunchMode.Resume;
+                decision = SeatVocabulary.DecisionResume;
+                newNativeSession = false;
+                break;
+            case ResumabilityValue.Unknown when !input.Fresh:
+                mode = LaunchMode.Resume;
+                decision = SeatVocabulary.DecisionResumeUnverified;
+                newNativeSession = false;
+                break;
+            default:
+                decision = SeatVocabulary.DecisionFreshExplicit;
+                abandonPreviousSession = state.NativeSessionId is not null;
+                break;
+        }
+
+        var nativeSessionId = newNativeSession ? input.NewNativeSessionId : state.NativeSessionId;
+        var step = ApplySession(state, SessionValue.Starting, null, "S1", now);
+        if (newNativeSession)
+            step = SetResumability(step, ResumabilityValue.FreshOnly, null, "U1", now);
+        var next = step.State with
+        {
+            Desired = SeatDesired.Up,
+            Launch = new CurrentLaunch(input.NewLaunchId, mode, reuseNativeSessionId, false),
+            NativeSessionId = nativeSessionId,
+            ReadinessSeen = false,
+            PendingInputRequest = null,
+            PreCompactionActivity = null
+        };
+        var findings = input.Fresh
+            ? new[]
+            {
+                new FindingChange(SeatVocabulary.FindingResumeLost, false),
+                new FindingChange(SeatVocabulary.FindingSessionIdMismatch, false)
+            }
+            : Array.Empty<FindingChange>();
+        var effect = new StartLaunch(input.NewLaunchId, mode, decision, nativeSessionId!,
+            newNativeSession, abandonPreviousSession);
+        return step with
+        {
+            State = next,
+            Reply = new Accepted(),
+            Findings = [.. step.Findings, .. findings],
+            Effects = [.. step.Effects, effect]
+        };
+    }
+
+    private static SeatStep ApplyDownRequested(SeatState state)
+    {
+        var next = state with { Desired = SeatDesired.Down };
+        var effects = NoEffects;
+        if (state.Launch is not null && state.KnownSession != SessionValue.Absent)
+        {
+            next = next with { Launch = state.Launch with { StopRequested = true } };
+            effects = [new DispatchStop(state.Launch.LaunchId)];
+        }
+
+        return new SeatStep(next, new Accepted(), null, NoTransitions,
+            [new FindingChange(SeatVocabulary.FindingUnexpectedExit, false)], effects);
     }
 
     private static SeatStep ApplyObservationGap(SeatState state, DateTimeOffset now)
@@ -632,7 +738,8 @@ public static class SeatStateMachine
         {
             if (state.KnownSession == SessionValue.Absent)
                 return EmptyEvent(state, EventDisposition.Evidence);
-            return ApplySession(state, SessionValue.Absent, null, "S3", now);
+            return WithFindings(ApplySession(state, SessionValue.Absent, null, "S3", now),
+                [new FindingChange(SeatVocabulary.FindingOrphanHarness, false)]);
         }
         if (state.KnownSession is SessionValue.Starting or SessionValue.Present)
             return ApplySession(state, SessionValue.Unknown, SeatVocabulary.SessionReasonStopFailed, "S4", now);
