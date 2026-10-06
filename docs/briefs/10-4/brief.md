@@ -27,7 +27,8 @@ is deferred until 13-3 merges its committed actor ports described below.
 Maintainer decision qitem-20261006073947-480c6379: no durable transport inbox, no new tables,
 no second writer of a seat's state/findings. 13-3 owns the single transaction and actor restart/reload; 10-4 owns NodeProxy re-forwarding.
 Node buffer, normalization/bounds, cursor/interface and node source/stream stories can finish
-without 13-3; only the final orchestrator integration story waits for that external prerequisite.
+without 13-3; the real facade and retry/end-to-end stories wait for that external prerequisite. The
+acknowledgement transport story uses a fake committer and is also independent of 13-3.
 This changes no spec 0002 behavior; its durable-commit acceptance is exercised after 13-3, not
 claimed by an earlier transport-only story. The analysis PR must be marked **read this one**: per lead decision
 qitem-20261006074916-a1895c92 it includes a one-sentence spec 0006 clarification that the node
@@ -143,6 +144,10 @@ public interface ISeatInputCommitter
 {
     Task<SeatInputCommitted> ApplyAsync(Guid tenantId, Guid seatId, SeatInput input, CancellationToken ct);
 }
+public sealed class SeatCommitFailedException : InvalidOperationException
+{
+    public SeatCommitFailedException(); // Message="SEAT_COMMIT_FAILED", InnerException=null
+}
 public sealed record SeatActorReloaded(Guid TenantId, Guid SeatId, long Version);
 public interface ISeatActorLifecycle
 {
@@ -171,6 +176,11 @@ C1. 10-3 stamps ambient trace on every outgoing write. Buffered SeatEvent envelo
     the connection must not overwrite it. Hello/heartbeat/Goodbye and ordinary responses retain
     10-3 sender behavior and Consumer receive activity/callback lifetime. Existing fake sources
     lacking INodeEventSource still behave exactly as before. Update only affected link tests.
+
+C2. For SeatEvent callbacks routed through INodeEventApplication only, 10-3 liveness expiry now
+    ends a pending event commit after reporting Unknown, instead of continuing indefinitely.
+    Existing ordinary applications and non-event callbacks retain 10-3 behavior. Supersession,
+    shutdown and context cancellation remain authoritative; no late ack follows termination.
 
 ## Rules
 
@@ -220,9 +230,12 @@ R4. Before admission, clone HarnessEvent and truncate Raw above 262144 bytes, se
 
 R5. Snapshot options at construction. Require MaxEventsPerSeat>=2, MaxEvents>=2, MaxBytes>=1024;
     otherwise ArgumentException("Invalid event buffer options."). After every operation the
-    retained counts/serialized bytes satisfy all three limits. When exceeded, first remove all
-    but the newest retained Telemetry per seat (never another harness kind). If still exceeded,
-    drop globally oldest retained envelope until bounds hold. Count every removed unacked
+    retained counts/serialized bytes satisfy all three limits. When a per-seat limit is exceeded, process violating seats in ordinal SeatId order:
+    first coalesce only that seat's retained Telemetry to its newest (never another harness kind),
+    then drop only that seat's oldest retained envelope until its per-seat limit holds. Other
+    seats' events are untouched by a per-seat violation. Then, if either node count/bytes limit
+    is exceeded, coalesce Telemetry across all seats, keeping each seat's newest; if still over
+    either node limit, drop the globally oldest retained envelope until both hold. Count every removed unacked
     envelope, including coalesced telemetry, by its seat; never change its allocated seq.
     Add that count to a per-seat arbitrary-precision nonnegative pending overflow accumulator; it is scalar bookkeeping, not
     a retained envelope and has no seq. If a dropped envelope is a BufferOverflow gap, carry its
@@ -300,22 +313,29 @@ R11. EventNodeLinkApplication delegates replay/state to the committer with authe
     Replay entries require unique valid UUID seats and NextSeq1..long.MaxValue, otherwise
     InvalidOperationException("Invalid committed event replay."). No fallback checkpoint.
 
-R12. Final orchestrator integration is externally blocked until 13-3 is merged and supplies its
-    ISeatEventCommitter postcommit/failure/reload port. Implement the R9 facade using that port;
-    authenticated assignment and replay reads use existing seat/seat_state rows, never a new table. Register SeatNodeEventCommitter as singleton INodeEventCommitter and
-    EventNodeLinkApplication as the production
-    INodeLinkApplication; preserve explicit test/custom registrations with TryAdd conventions.
-    NodeProxyActor/registry detect optional INodeEventApplication for SeatEvent and propagate
-    its nullable EventAck after the awaited commit callback to NodeLinkService. Other messages,
-    ordinary applications and 10-3 Consumer activity lifetime remain unchanged. NodeLinkService
-    emits returned ack through its existing single serialized response writer, with current
-    sender trace; null/failed/canceled callbacks emit none. Immediate cumulative ack satisfies
-    the 1s/100-event maximum wait. On callback/protocol failure use fixed FailedPrecondition
-    without exception/input detail; retain node unacked data for reconnect. Await each inbound
-    callback before reading another application envelope: at most one pending event per node,
-    backpressure via gRPC; heartbeats/liveness still governed by existing 10-3 budgets. Awaiting
-    provider restart recovery never means successful receipt. Supersession/cancellation stops
-    old writes and preserves existing link replacement behavior. No transport seat-state or event writer.
+R12. Acknowledgement transport needs only S3's optional INodeEventApplication; use a fake
+    committer in this story, no actor facade registration. NodeProxyActor/registry detect that
+    optional interface for SeatEvent and propagate its nullable EventAck after the awaited
+    callback to NodeLinkService. Other messages, ordinary applications and 10-3 Consumer activity
+    lifetime remain unchanged. Emit returned ack through the existing single serialized response
+    writer with current sender trace; null/failed/canceled callbacks emit none. Immediate
+    cumulative ack satisfies the 1s/100-event maximum wait. On callback/protocol failure use
+    fixed FailedPrecondition("Node event processing failed.") with no input/exception detail.
+    Await each application callback before reading another envelope: at most one pending event
+    per node, backpressure via gRPC; all other seats on that node wait behind it. The existing
+    last-received-message liveness clock keeps running during the callback. On its expiry report
+    Unknown once, cancel the callback/reload wait and close with
+    Unavailable("Node event commit timed out.") without ack. No further read or event from that
+    connection is accepted. Supersession cancels pending work, emits existing Superseded Goodbye
+    and Aborted("Node link superseded."); shutdown cancels pending work, emits existing Shutdown
+    Goodbye and Unavailable("Orchestrator shutting down."); request cancellation cancels pending
+    work and returns Cancelled with empty detail. Priority if simultaneous: supersession,
+    shutdown, request cancellation, liveness expiry, callback success. Late callback completions
+    are observed but cannot ack or retry. For event applications only, each state notification
+    (including final Disconnected cleanup) gets a linked provider-backed LivenessTimeout budget;
+    cancel on expiration, observe any late fault, and finish cleanup without awaiting it forever.
+    A state callback failure cannot create an event ack. Previous ordinary-application state
+    callback behavior stays unchanged. No transport event/state writer or actor assumption.
 
 R13. In the independent node integration story register singleton NodeEventBuffer and
     EventNodeLinkSource by existing TryAdd conventions; source and hosted connection share
@@ -329,7 +349,10 @@ R14. The final orchestrator story exercises the real 13-3 provider and Postgres 
     pending commit, real actor failure/reload/re-forwarding and original trace replay. No real
     Claude/tmux dependency. If 13-3 lacks this seam, stop/report; do not fill it in here.
 
-R15. Final facade implementation lives in Orchestrator.Link; Data.Link supplies only a read query
+R15. Facade integration requires 13-3 merged with ISeatInputCommitter/ISeatEventCommitter.
+    Register SeatNodeEventCommitter as singleton INodeEventCommitter and EventNodeLinkApplication
+    as production INodeLinkApplication using TryAdd conventions preserving explicit custom/test
+    registrations. Facade implementation lives in Orchestrator.Link; Data.Link supplies only a read query
     and node-finding writer, with NpgsqlDataSource constructor injection and parameterized SQL.
     Validate the entire Hello before writes: nonempty UUID epoch, unique nonempty UUID inventory
     SeatIds, empty/nonempty UUID LaunchIds, FirstBufferedSeq<=LastSeq<=long.MaxValue-1 (First=0
@@ -345,13 +368,20 @@ R15. Final facade implementation lives in Orchestrator.Link; Data.Link supplies 
     Map empty LaunchId to null; preserve Lifecycle/LastSeq in SeatInventoryEntry. Connected needs
     no extra synthetic input; Unknown/Disconnected await NodeLinkLost for all assigned seats.
     Unknown/unassigned/foreign/retired Hello inventory yields a node finding, no replay entry.
-    Per unknown entry insert one open warning kind `unknown-node-seat`, summary
+    Per unknown entry maintain one open warning kind `unknown-node-seat`, summary
     `Node reported an unassigned seat.`; evidence JSON stores original inventory protobuf bytes
-    as base64 under `inventory_proto`. Per rejected event insert one open error kind
+    as base64 under `inventory_proto` and its canonical `seat_id`. Per rejected event maintain
+    one open error kind
     `unassigned-seat-event`, summary `Node sent an event for an unassigned seat.`; evidence JSON
     contains only canonical `seat_id`. These rows have authenticated tenant/node_name, seat_id
-    and launch_id null, fresh UUID finding_id, occurrences1, database UTC timestamps. Separate
-    notifications create separate rows; no invented uniqueness/migration. On canceled/failed
+    and launch_id null. Key the open row by authenticated tenant, exact node_name, kind and
+    evidence.seat_id. In one transaction take a transaction-scoped PostgreSQL advisory lock on
+    that key (parameterized hash of its canonical text), then update the existing open row's
+    occurrences=min(previous+1,int.MaxValue), last_seen_at=current database UTC and latest
+    evidence, preserving finding_id/first_seen_at. When absent insert a fresh UUID, occurrences1,
+    first/last_seen_at=current database UTC. Resolved rows are not reused. Concurrent repeats
+    create exactly one open row without a new index/table; no unbounded duplicate rows from
+    reconnect. Neither summary nor evidence key ever uses supplied unvalidated strings. On canceled/failed
     finding write no ack/replay success; no raw content in summary/logs. Authorized CommitAsync
     passes a one-event cloned batch plus original Trace.Traceparent (empty becomes null) to
     ISeatEventCommitter and maps the returned trusted SeatId/epoch/ThroughSeq to EventAck; validate
@@ -361,11 +391,15 @@ R15. Final facade implementation lives in Orchestrator.Link; Data.Link supplies 
 R16. Before the first event commit subscribe to ISeatActorLifecycle and retain one immutable
     request until success/null/cancellation; dispose subscription when callback completes or session ends. Snapshot
     matching tenant/seat reload notification generation before each attempt, so a notification
-    racing with the fault is retained. Only InvalidOperationException with exact message
-    `SEAT_COMMIT_FAILED` and no inner exception triggers re-forwarding: await a matching later
+    racing with the fault is retained. Only the public 13-3 SeatCommitFailedException type triggers re-forwarding (never inspect
+    Message or treat a different InvalidOperationException as this signal): await a matching later
     SeatActorReloaded, then send the same event/seq/trace again while session is current. Other
     exceptions terminate via R12 fixed failure without ack/retry. No busy loop/timer polling,
     unrelated/initial-load notices do not release retry, canceled/superseded sessions never retry.
+    The same event callback liveness budget R12 covers initial commit, reload wait and every
+    re-forward attempt, without resetting at a reload. Liveness expiry/supersession/shutdown/
+    request cancellation end the wait as R12 specifies, dispose the subscription and never retry
+    or ack afterwards; another seat remains queued until success or that bounded failure.
     Actor notification is post-reload, not proof of commit; eventual receipt alone releases ack.
     Ambiguous postcommit failure re-forwarding is safe through actor DB dedupe. The facade uses
     no unbounded pending batch collection; the existing one-event per-node backpressure holds.
@@ -373,7 +407,10 @@ R16. Before the first event commit subscribe to ISeatActorLifecycle and retain o
 ## Expected outputs: exact text
 
 Base fixture: two registered UUID seats A=11111111-1111-1111-1111-111111111111 and
-B=22222222-2222-2222-2222-222222222222; no harness exists. Provider UTC begins
+B=22222222-2222-2222-2222-222222222222; no harness exists. E1–E3 harness events use
+HarnessEventKind.Other (never Telemetry), Attributes values at most 16 UTF-8 bytes, Raw at most
+16 bytes; exit/unknown-body variants are named in E1. No rate or admission limit can change
+these sequencing fixtures when S2 merges. Provider UTC begins
 2026-10-06T00:00:00Z. A new buffer starts with no inventory until registration.
 
 | ID | Change | Expected |
@@ -382,19 +419,19 @@ B=22222222-2222-2222-2222-222222222222; no harness exists. Provider UTC begins
 | `E2` | ack 1 twice; replay next 2; invalid cumulative ack and duplicate/out-of-range replay | only seq 2 remains; LastSeq unchanged; invalid checkpoint/ack fixed R2 ArgumentException with no partial deletion; omitted seats retained/ineligible |
 | `E3` | retained A1,A2,B1; Welcome then A3 arrives mid-replay; cancellation/reconnect; recovered registration | A1 before A2 before A3; B preserves its order; replay repeats unacked data; no pre-Welcome send; cancellation preserves data; recovered A has NodeRestarted seq1 before live seq2, no guessed process/input |
 | `E4` | raw at cap/cap+1; 1024/1025-byte attribute; NUL,U+FFFE,lone surrogate body values; unknown oneof | cap retained unchanged, cap+1 raw bytes clipped with true flag/original RawSize; normalized fields retained; 1025-byte attribute rejected before allocation; NUL/U+FFFE preserved in protobuf bytes, surrogate becomes U+FFFD without exception; oversized envelope fixed Invalid seat event.; unknown bytes retained |
-| `E5` | small limits, telemetry coalescing, oldest drops, many affected seats | retained count/bytes stay within configured bounds; allocated numbers never reused; lost count per seat eventually emitted as BufferOverflow when capacity returns; coalesced telemetry counted; no recursive gap storm; non-telemetry kinds not coalesced; invalid options fixed R5 error |
+| `E5` | small limits, telemetry coalescing, oldest drops, many affected seats | A-only per-seat overflow never evicts B; node count/byte overflow evicts globally oldest after all-seat telemetry coalescing; retained count/bytes stay within configured bounds; allocated numbers never reused; lost count per seat eventually emitted as BufferOverflow when capacity returns; coalesced telemetry counted; no recursive gap storm; non-telemetry kinds not coalesced; invalid options fixed R5 error |
 | `E6` | Telemetry A1,A2 plus B event; advance 999ms then 1ms; disconnect | A1 immediately, A2 only at 1s; B may send while A is held; no producer delay or hidden rate-drop; provider-only timing; reader cancellation leaves retained data |
 | `E7` | source creates Hello/heartbeat, handles Welcome/EventAck; unknown inventory omitted from replay | real inventory/ranges and BufferedCount; replay releases only listed seats; ack drops committed range; unknown inventory retained; no invented capabilities or command/session effects |
 | `E8` | held Welcome; blocked/failing event writer, heartbeat, host stop and reconnect under another ambient trace | no event before Welcome callback completes; single writer, no overlapping sends; unacked replay preserves original trace; reader/write canceled and awaited before replacement; shutdown finishes within existing host budget with no retry or data clear; earlier 10-3 tests stay green |
 | `E9` | compile a fake committer and inspect interface | exact R9 signatures; no transport storage/provider registration; fake can delay/null/fail commit, and no ack is implied by receipt |
 | `E10` | absent/same/changed epoch, duplicate, skip, invalid cursor | exact R10 Duplicate/Gap/epoch/NextSeq tuples; no mutation/I/O; fixed Invalid event cursor. for invalid bounds/UUID |
 | `E11` | fake provider delayed/null/invalid ack, mutable args/results, invalid event/replay | awaiting completion; null remains null; clones preserve bytes/trace; exact R11 fixed errors including direct ReceiveAsync rejection before invalid event provider call; no successful ack on failure/cancellation |
-| `E12` | blocked commit, supersession, repeated event, ordinary application, failed callback | no ack before commit; one serialized ack after commit; null/failure/cancel produces no ack; no reads ahead of pending callback; old application and Consumer lifetime preserved; fixed FailedPrecondition without peer detail |
+| `E12` | blocked commit, supersession, repeated event, ordinary application, failed callback | no ack before commit; one serialized ack after commit; null/failure/cancel produces no ack; no reads ahead of pending callback; old application and Consumer lifetime preserved; fixed FailedPrecondition Node event processing failed.; pending event liveness expiry reports Unknown then fixed Unavailable Node event commit timed out., cancels callback/no ack; supersession/shutdown/context cancellation terminate as R12; other seats wait behind pending event; cleanup bounded |
 | `E13` | production node composition | one buffer/source singleton shared by connection and producer; reconnect retains events; explicit source test registration preserved |
 | `E14` | 1000 events, two orchestrator restarts/lost acks; epoch change; real actor failure | node singleton survives reconnect; exactly 1000 unique committed rows, per-seat seq order and no false gap; original trace preserved; actor restart re-forwards pending data before ack; unavailable old-epoch data yields gap/resync, no invented rows; unauthorized event has finding/no ack and unknown inventory finding/no stop |
 
-| `E15` | assigned/missing-state/unknown/foreign/retired inventory and event; overlay input | only authenticated active bindings replay; actor NodeAttached committed before checkpoint read; unknown inventory/open warning and rejected event/open error have exact R15 summary and seat_id null; no event/seat-state write; failed finding write never becomes successful ack |
-| `E16` | controlled commit failure; reload before/after fault; unrelated notice; cancellation; postcommit ambiguity | one retained identical event re-forwarded only after matching later reload; no ack on fault/reload; one ack after receipt; duplicate row/transition suppressed; unrelated notice does not retry; cancellation disposes subscription and prevents retry; generic exception fixed failure |
+| `E15` | assigned/missing-state/unknown/foreign/retired inventory and event; overlay input | only authenticated active bindings replay; actor NodeAttached committed before checkpoint read; unknown inventory/open warning and rejected event/open error have exact R15 summary and seat_id null; repeated/concurrent notifications update one open row per tenant/node/kind/evidence seat with occurrences/last_seen_at and preserve first_seen_at/id; no event/seat-state write; failed finding write never becomes successful ack |
+| `E16` | controlled commit failure; reload before/after fault; unrelated notice; cancellation; postcommit ambiguity | one retained identical event re-forwarded only after matching later reload; no ack on fault/reload; one ack after receipt; duplicate row/transition suppressed; unrelated notice does not retry; cancellation disposes subscription and prevents retry; typed failure only; ordinary InvalidOperationException never retries; liveness expiry/supersession/shutdown/cancellation dispose subscription and never late-ack/retry; generic exception fixed failure |
 
 ## Tests
 
@@ -415,9 +452,20 @@ fixtures use isolated loopback Kestrel and scripted callbacks, no tmux/harness/o
 
 - T4. Commit E9–E11 interface/cursor/adapter tests with delayed/cancelable fake committer and
     immutable snapshots. No SQL, actor or storage substitute is needed by this story.
-- T5. Commit E12 and E14–E16 real-provider integration tests using existing isolated
-    Testcontainers/Postgres fixtures, loopback/scripted node and deterministic provider fault
-    seam supplied by 13-3; no production fault toggle. Lost ack/restart tests use barriers.
+- T5. Commit E12/C2 acknowledgement path tests with a fake delayed/cancelable/failing committer,
+    isolated scripted stream and TimeProvider. No actor/SQL required. Assert pending event
+    liveness expiry, simultaneous termination priority, bounded state cleanup, late task fault
+    observation, serialized writes, other-seat head-of-line wait and ordinary-source regression.
+- T6. Commit E15 real actor-facade/assignment/finding tests using isolated Testcontainers
+    Postgres; repeated and concurrent unknown inventory/rejected events leave one open row
+    for each complete key, no cross-tenant updates, no seat/event/state SQL writer. Fake
+    immutable IHarnessStateProfile is injected into the real 13-3 provider; never create a
+    production fallback profile. HARNESS_PROFILE_UNAVAILABLE produces no ack/retry.
+- T7. Commit E14/E16 real-provider retry/end-to-end tests using isolated Testcontainers,
+    loopback/scripted node and deterministic commit/load TaskCompletionSources and lifecycle
+    callback supplied by 13-3; no production fault toggle. Test reload-before-fault race,
+    unrelated notification, typed versus same-message untyped failures, liveness expiry and
+    late recovery after cancellation. Lost ack/restart tests use barriers, no sleeping.
 
 ## Definition of done
 
