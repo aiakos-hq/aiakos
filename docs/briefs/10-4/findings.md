@@ -1,6 +1,6 @@
 # Story review: slice 10-4
 
-Reviewed at commit c8a46cf. Stories: 5. Check: ok.
+Reviewed at commit 1d04702. Stories: 7. Check: ok.
 
 ## Findings
 
@@ -37,3 +37,5 @@ Reviewed at commit c8a46cf. Stories: 5. Check: ok.
   T5-T7 split. S5 depends onlyS3; S6 external13-3; S7 addsS4 and typed reload port.
 
 Author tick records the edits; architect reviews the diff independently.
+
+Architect, round 1: the diff 071e823..1d04702 was read and the six resolutions are accepted; no findings are open. Correction to my first finding: `NodeLinkService` does check liveness, supersession and shutdown while a callback is pending (`waitForCallback`), not only in `readNext`; liveness expiry there only marks the node unknown and keeps waiting, so the finding's conclusion held and C2/R12 now bound it. The 13-3 types named in the prerequisite block (`ISeatEventCommitter`, `ISeatInputCommitter`, `ISeatActorLifecycle`, `SeatCommitFailedException`) are still to be compared with the 13-3 brief.
