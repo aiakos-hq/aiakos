@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup Label="Orchestrator">
+    <PackageVersion Include="Akka.TestKit" Version="1.5.71" />
     <PackageVersion Include="Akka.Hosting" Version="1.5.71" />
     <PackageVersion Include="Grpc.AspNetCore" Version="2.84.0" />
     <PackageVersion Include="Grpc.AspNetCore.HealthChecks" Version="2.84.0" />

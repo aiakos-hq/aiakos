@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Akka.TestKit" />
     <PackageReference Include="Grpc.HealthCheck" />
     <PackageReference Include="Grpc.Net.Client" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
