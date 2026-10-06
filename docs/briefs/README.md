@@ -35,6 +35,7 @@ Acceptance tests are not here: they stay local, so that an implementer cannot re
 | [10-4 Buffered node events](10-4/brief.md) | #10 | `impl` | approved | [7](10-4/stories.md) | | |
 | [10-3 Authenticated node link](10-3/brief.md) | #10 | `impl` | approved | [10](10-3/stories.md) | | |
 | [10-2 Contract helpers and contract tests](10-2/brief.md) | #10 | `impl/opencode` | approved | [1](10-2/stories.md) | | |
+| [12-1 Claude orchestrator adapter](12-1/brief.md) | #12 | `impl` | approved | [5](12-1/stories.md) | | |
 | [11-2 Tmux runner and start](11-2/brief.md) | #11 | `impl` | approved | [8](11-2/stories.md) | | |
 | [11-1 Session host interface, validators and the fake](11-1/brief.md) | #11 | `impl/sonnet` | draft | [4](11-1/stories.md) | [2](11-1/findings.md) | |
 | [13-1 Pure seat state machine and harness state profile](13-1/brief.md) | #13 | `impl/sonnet` | approved | [12](13-1/stories.md) |  | |
@@ -56,7 +57,7 @@ the new gate.
 |---|---|
 | #10 gRPC contract | 10-5 commands |
 | #11 tmux session host | 11-3 delivery and capture, 11-4 stop and watcher, 11-5 adoption |
-| #12 Claude Code adapter | 12-1 orchestrator half, 12-2 relay and ingest, 12-3 normalizer, 12-4 node driver, 12-5 end to end |
+| #12 Claude Code adapter | 12-2 relay and ingest, 12-3 normalizer, 12-4 node driver, 12-5 end to end |
 | #13 SeatActor | 13-3 actor shell, 13-4 lifecycle and delivery, 13-5 restart and integration |
 | #15 CLI and released instance | 15-1 skeleton and dry run, 15-2 local API, 15-3 client commands, 15-4 instance host, 15-5 release |
 | #16 aiakos-dev rig, M1 acceptance | 16-1 rig files, 16-2 pin and rig-compat, 16-3 acceptance run |
