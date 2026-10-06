@@ -1,5 +1,5 @@
-using System.Diagnostics.Metrics;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Globalization;
 using System.Text;
 using Aiakos.Node.Sessions;
@@ -133,7 +133,10 @@ public sealed class TmuxInitializationRealTests
             var result = await RunRawAsync(["-u", "-f", Path.Combine(Home, "tmux", "tmux.conf"), "-L", Socket,
                 "show-options", "-g", "window-size"]);
             Assert.Equal(0, result.ExitCode);
-            return Encoding.UTF8.GetString(result.Stdout).Trim();
+            var output = Encoding.UTF8.GetString(result.Stdout).Trim();
+            const string prefix = "window-size ";
+            Assert.StartsWith(prefix, output, StringComparison.Ordinal);
+            return output[prefix.Length..];
         }
 
         public async Task<SessionState> GetSessionStateAsync(string session)
