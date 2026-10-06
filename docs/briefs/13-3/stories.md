@@ -28,7 +28,7 @@ depends: S2
 owns: R5, R6
 outputs: WRITE-atomic, WRITE-conflict, WRITE-evidence
 tests: T4
-notes: Separate writer class; supplied snapshots/steps need no S3 reader or actor. G2 stages unsupported findings/rotation/results with explicit failure until owner lands. No schema edits; SQL rollback test after event inserts. NUL raw storage is R6, full gap finding/receipt tested later.
+notes: Separate writer class; supplied snapshots/steps need no S3 reader or actor. G2 stages unsupported findings/rotation/results with explicit failure until owner lands. No schema edits; SQL rollback test after event inserts. NUL/invalid-body-timestamp opaque storage and raw_size null bound are R6; envelope timestamp safe rejection is R5. Full gap finding/receipt tested later.
 
 ## S5: Atomic finding and session rotation persistence
 goal: Extend the writer transaction with recurring/resolved findings and new or reused native-session pointers.
@@ -44,7 +44,7 @@ depends: S5
 owns: R8
 outputs: WRITE-results
 tests: T9
-notes: Same writer class after S5; remove G2 result guard. R8 uses existing DeliveryStateMachine and R7 finding semantics. Expand rollback coverage; no commands sent or tokens changed.
+notes: Same writer class after S5; remove G2 result guard. R8 uses existing DeliveryStateMachine and R7 finding semantics. Expand rollback coverage; skip result metadata for R6 opaque NUL/invalid-body-timestamp evidence. No commands sent or tokens changed.
 
 ## S7: Serialized seat apply and commit actor
 goal: Apply normalized events/link inputs serially and return success only after committing; fail safely and reload on restart.
@@ -52,7 +52,7 @@ depends: S1, S2
 owns: R9, R10
 outputs: ACTOR-commit, ACTOR-reject, ACTOR-fail
 tests: T5
-notes: Fake reader/writer/profile and named S2 requests/SeatChildLoaded allow real actor tests without S3/S4 or the S8 gateway. No production harness profile exists; reject its absence. Actual public observer and gateway cancellation assertions belong to S8. External RequestCapture effects only return after commit.
+notes: Fake reader/writer/profile and named S2 requests/SeatChildLoaded allow real actor tests without S3/S4 or the S8 gateway. No production harness profile exists; reject its absence. Actual public observer and gateway cancellation assertions belong to S8. External RequestCapture effects only return after commit. Invalid body timestamps are terminal R9 ingest gaps; invalid envelope timestamps retain fixed rejection.
 
 ## S8: Seat region routing, gateway and reload notification
 goal: Route eligible tenant seats to supervised children, expose the three commit ports, and notify node consumers only after successful restart reload.
