@@ -1,6 +1,6 @@
 # Story review: slice 10-4
 
-Reviewed at commit 1d04702. Stories: 7. Check: ok.
+Reviewed at commit 5b8a243. Stories: 7. Check: ok.
 
 ## Findings
 
@@ -39,3 +39,5 @@ Reviewed at commit 1d04702. Stories: 7. Check: ok.
 Author tick records the edits; architect reviews the diff independently.
 
 Architect, round 1: the diff 071e823..1d04702 was read and the six resolutions are accepted; no findings are open. Correction to my first finding: `NodeLinkService` does check liveness, supersession and shutdown while a callback is pending (`waitForCallback`), not only in `readNext`; liveness expiry there only marks the node unknown and keeps waiting, so the finding's conclusion held and C2/R12 now bound it. The 13-3 types named in the prerequisite block (`ISeatEventCommitter`, `ISeatInputCommitter`, `ISeatActorLifecycle`, `SeatCommitFailedException`) are still to be compared with the 13-3 brief.
+
+Architect, amendment (late registration and launch UUID): the diff of 5b8a243 against main was read (R7, R11, E7, E8, T3, the paragraph under Changes and S4's notes). No findings are open. The design was authorized by lead (qitem-20261006144648-82a612e4): a seat first registered after Hello ends the connection with a fixed error, and only the next Hello and Welcome make its events eligible. Read in the source: `OrchestratorConnection` resets the reconnect delay after each valid Welcome, so one such reconnect waits a random time below half a second, and the 300 second ceiling for `FailedPrecondition` is reached only by consecutive failures without a Welcome. Consequence not raised, because it was decided: every seat launch on a connected node drops that node's link once, so every other seat on the node gets the link-lost overlay and a replay for that moment. R11's zero-UUID rule now differs from what merged S3 may do; the brief leaves that to lead as a separate fix and no story of this slice implements it.

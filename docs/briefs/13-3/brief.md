@@ -161,7 +161,9 @@ G1. Tenant/seat identity comes from trusted routing arguments, never protobuf bo
     a supplied profile, with no harness-name special cases. No raw harness JSON parsing.
     Persist strings exactly, with no NFC/Normalize/platform path calls. Unicode scalars including
     U+FFFE/U+FFFF and supplementary characters are preserved. Body text containing NUL becomes terminal opaque evidence, per R3/R6/R9, not unacked
-    rejection. Isolated UTF-16 surrogates in fabricated in-memory inputs are rejected before
+    rejection. Invalid known-body timestamps likewise become terminal opaque evidence and
+    IngestUnavailable per R6/R9. Unrepresentable harness raw_size is null per R6, without
+    making a gap. Invalid envelope observed_at keeps R9 rejection. Isolated UTF-16 surrogates in fabricated in-memory inputs are rejected before
     serialization (valid received protobuf strings cannot contain them). Binary raw permits
     any bytes. Never pass NUL-bearing text to PostgreSQL text/jsonb.
     Use TimeProvider.GetUtcNow for actor apply/record times, never node observed_at for ordering.
@@ -178,7 +180,12 @@ G2. Inputs and effects are plain existing types. Supported ApplyAsync inputs are
     Writer stages are consecutive: R5/R6 first, R7 second, R8 third. Earlier fixtures omit later
     finding/rotation/result behavior. Such input reaching the incomplete writer fails with
     SeatStoreRejectedException, never silently ignores metadata or uses a placeholder. Remove
-    that stage guard when the owner lands. Production hosting waits for all writer stages.
+    that stage guard when the owner lands. A resolving/closing FindingChange still counts as
+    finding metadata even when no open row exists, so S4 rejects it until S5. S4 is a store
+    foundation with supplied steps omitting later-stage metadata, not yet an end-to-end
+    writer for ordinary pure-machine steps. R6 opaque-body classification precedes result
+    stage checks: the original malformed result requires no R8 result metadata. Supplied
+    later-stage Findings/Effects still follow the guard. Production hosting waits for all writer stages.
 
 ## Changes to earlier behavior
 
@@ -269,16 +276,33 @@ R5. Writer CommitAsync processes the supplied already-applied steps in order in 
     PostgreSQL check/not-null/foreign-key failures (23514/23502/23503) roll back and become
     SeatStoreRejectedException, not the retry signal. Unique-key/version races are retryable
     after rollback/reload; native id races follow R7/R9. No partially committed subset.
+    Before opening the write transaction, validate present envelope ObservedAt of each
+    nonduplicate event. Valid means Seconds in -62135596800..253402300799 inclusive and
+    Nanos in 0..999999999 inclusive. Invalid gives SeatStoreRejectedException (fixed
+    SEAT_COMMIT_REJECTED/no inner), no writes, no value echo, not a framework exception or
+    retry signal. Skip already Duplicate steps before this validation.
 
 R6. For each nonduplicate wire event insert one seat_event with a fresh event_id, trusted ids,
     seq, SourceSeq null when zero, valid nullable launch UUID, observed_at (null if absent),
     received_at=At and TraceParent. Event body_type is harness/command-result/session-observed/
     process-exited/gap or unknown. Harness kind uses SeatVocabulary.ToStored; persist native_name,
     native_session_id, attributes JSON object, usage JSON, raw byte-exact, raw_content_type,
-    raw_truncated/raw_size, origin live/resync or null for other enum values.
-    A known BODY containing NUL uses UnknownBody opaque storage below: body_type unknown, no
-    text/kind/native/attribute/usage fields, original protobuf bytes as raw. Step still records
-    R3's gap. TraceParent is persisted only when ActivityContext.TryParse(traceParent, null,
+    raw_truncated/raw_size, origin live/resync or null for other enum values. Nonopaque
+    harness raw_size 0..2147483647 is stored exactly; 2147483648..4294967295 is SQL null
+    (original size is unrepresentable). Never clamp or substitute Raw.Length. Preserve all
+    other harness fields; this metadata bound causes no gap. Proto3 cannot distinguish
+    absent from explicitly empty bytes/string or zero raw_size: default/absent raw stores
+    zero-length bytea, empty-string raw_content_type and raw_size 0, not SQL nulls. Supplied
+    metadata follows the rules above even when raw is empty.
+    A known BODY containing NUL or any present Timestamp anywhere in its current known
+    message tree outside R5's inclusive Seconds/Nanos bounds uses UnknownBody opaque storage
+    below: body_type unknown, no text/kind/native/attribute/usage fields, original protobuf
+    bytes as raw. Current nested timestamp paths include CommandResult.Capture.CapturedAt,
+    CommandResult.Launch.Evidence.CapturedAt and ObservationGap.From/To. Absent nested
+    timestamps are not invalid; valid boundaries retain ordinary known-body storage.
+    Classify before JSON formatting; never invoke JsonFormatter for that opaque body.
+    Retain the envelope/trusted attribution. NUL records R3's gap; invalid body timestamp
+    records R9's gap. Binary raw containing NUL is not body text. TraceParent is persisted only when ActivityContext.TryParse(traceParent, null,
     isRemote:true, out _) succeeds; otherwise null, including NUL/malformed trace. Never reject
     an otherwise valid event for trace metadata or log the malformed value. Non-harness known
     body is Google.Protobuf JsonFormatter JSON; raw=null. Unknown body has body=null and raw equal
@@ -320,7 +344,11 @@ R7. Apply finding changes in input order. An open creates an open finding or inc
     when it changes to Lost set lost_at if null; other session history is unchanged. A late
     rotation is still consumed; duplicate rotation is not. No new launch/session for other inputs.
 
-R8. A nonduplicate CommandResult updates an EXISTING command with matching tenant/seat and UUID
+R8. An event made opaque by R6 (body NUL or invalid body timestamp) skips all command/
+    delivery/launch result metadata and its finding changes. Do not JSON-format that
+    malformed result or derive conclusions from it; retain R6 evidence and the pure gap/
+    finding. Opaque ProcessExited/StopResult cannot end a launch. Otherwise a nonduplicate
+    CommandResult updates an EXISTING command with matching tenant/seat and UUID
     only (never manufacture one). Set status via SeatVocabulary, completed_at=At, error_reason
     to error.Reason or null, result to JsonFormatter JSON of the full CommandResult. Kind-specific
     outcome: deliver typed DeliveryResult uses DeliveryStateMachine from stored Pending/Sent/
@@ -343,7 +371,14 @@ R9. SeatActor loads its snapshot before processing requests (asynchronously, mai
     reloads on every restart. For valid events request: select a matching injected profile once,
     query committed sequences for the trusted key/epoch once per batch, then apply events in
     supplied order using SeatWireInput and SeatStateMachine.Apply, At from provider
-    once for the entire batch. An already persisted event key becomes an unchanged Duplicate
+    once for the entire batch. Before applying each nonduplicate event inspect present
+    timestamps recursively in its known body using R5's exact Seconds/Nanos bounds. Any
+    invalid body timestamp replaces SeatWireInput's body with ObservationGapBody(IngestUnavailable),
+    retaining trusted epoch/seq/source_seq/launch and original event. Apply the gap with
+    the existing pure machine, commit its cursor/state/finding and opaque R6 evidence,
+    then return a normal receipt: neither INVALID_SEAT_EVENT nor retryable. R9 owns this
+    classification; do not change the already merged SeatWireInput API/behavior. Unknown
+    body fields remain opaque, not interpreted. An already persisted event key becomes an unchanged Duplicate
     step without applying or adopting its epoch, even if the current snapshot has another epoch.
     Before accepting a proposed AdoptRotatedSession step, query FindNativeSessionAsync. Same-seat
     existing row is reusable under R7. Foreign owner replaces the proposed step by pure Apply on
@@ -363,7 +398,7 @@ R9. SeatActor loads its snapshot before processing requests (asynchronously, mai
     command outcomes. This metadata refresh sends no SeatChildLoaded/reload notification.
     Validate before apply: empty tenant/seat/epoch UUID, null/empty nodeName, null events/entry,
     event SeatId not the trusted seat UUID, seq outside 1..long.MaxValue-1, SourceSeq>long.MaxValue,
-    nonempty invalid LaunchId, invalid observed Timestamp or isolated-surrogate text anywhere
+    nonempty invalid LaunchId, invalid envelope observed Timestamp (exact R5 bounds) or isolated-surrogate text anywhere
     in a known protobuf string/map causes a faulted Task with InvalidOperationException message
     `INVALID_SEAT_EVENT`, no inner exception, commit, receipt or restart. Valid U+FFFE/U+FFFF/
     supplementary scalars pass unchanged. Clone all mutable proto events/maps/byte buffers at the
@@ -380,7 +415,10 @@ R10. Only one request may apply/commit per seat at a time. Hold the actor mailbo
     sends no receipt/effects, and throws a fresh exception of that same type to trigger
     supervision. Validation failures never use this retry type. SeatStoreRejectedException faults
     caller with ordinary InvalidOperationException SEAT_COMMIT_REJECTED/no inner, no receipt and
-    no restart. Unique/version races and SQL/IO availability failures remain retryable; do not
+    no restart. R6 raw_size null and R9 invalid-body-timestamp gaps are committed successes,
+    never converted to the retry exception. R5 invalid envelope ObservedAt is an ordinary
+    SEAT_COMMIT_REJECTED/no restart; actor prevalidation still uses INVALID_SEAT_EVENT.
+    Unique/version races and SQL/IO availability failures remain retryable; do not
     relabel deterministic check/FK violations transient. Do not publish prospective
     snapshot or catch failure and continue from it. After reload, queued requests apply to the
     persisted state. On every successful initial/restart load send SeatChildLoaded to Parent
@@ -470,12 +508,12 @@ No secret-shaped fixture strings. H below means human kind, not a hash.
 | `READ-startup` | nonretired agent A desired up/no launch, B desired down/current launch, C down/no launch; H, retired, second tenant | keys A/B plus eligible second-tenant key ordered tenant/seat; omit C/H/retired; no duplicate or event replay |
 | `WRITE-atomic` | two legal EventReceived steps plus transitions, no findings/rotation/results | one transaction; two unique event rows, exact final state, version8, transition links to their own evidence; no partial state/evidence on forced failure after event inserts |
 | `WRITE-conflict` | before version7, database version8 | throws SEAT_VERSION_CONFLICT with no inner/value; event/transition counts and state unchanged; all-duplicate request returns old version and no new rows |
-| `WRITE-evidence` | harness raw binary/attributes/usage, known non-harness, protobuf unknown fields, duplicate | exact R6 body_type/vocabulary/nullable fields; unknown raw bytes exactly ToByteArray, content type application/x-protobuf; duplicate adds nothing; native Unicode U+FFFE preserved; NUL body opaque raw fields exact, malformed/NUL trace persisted null |
+| `WRITE-evidence` | harness raw binary/attributes/usage, known non-harness, protobuf unknown fields, duplicate | exact R6 body_type/vocabulary/nullable fields; unknown raw bytes exactly ToByteArray, content type application/x-protobuf; duplicate adds nothing; native Unicode U+FFFE preserved; NUL/invalid-body-timestamp opaque raw fields exact, malformed/NUL trace null; raw_size 0/2147483647 exact and 2147483648/4294967295 null; default raw empty bytea/content type empty/size0; valid nested timestamp boundaries known; invalid envelope ObservedAt SEAT_COMMIT_REJECTED/no inner/no writes |
 | `WRITE-findings` | open observation-gap twice, close twice, open again; actor-stopped then successful work | first occurrence counts1 then2, only one open row; resolved_reason state-changed; close nonexistent no row; recurrence creates new open1; actor-stopped resolved on successful commit, no node-scoped rows |
 | `WRITE-session` | current session old -> valid late rotation new -> replay, then conversation and lost transition | new session decision harness-cleared, previous points old, old row unchanged, state pointer new, launch pointer old; replay no second session; conversation_at/lost_at set once, receipt new pointer; same-seat existing native row reused unchanged; foreign-owner race rolls back SEAT_SESSION_CONFLICT/no mutation; terminal actor handling is ACTOR-reject |
 | `WRITE-results` | command result each kind/status; absent/zero exit; foreign/missing ids; process exit and stop | exact R8 metadata and existing delivery machine outcome/finding; foreign/missing no row manufacture; duplicate no mutation; no command send or token change |
 | `ACTOR-commit` | blocked writer, two inputs to same seat; release first then second | second not applied while first awaits; no receipt/effect before release; first version8 then second9, pure sequential final state; valid unicode no exception, applied proto attributes copied; gateway clone is REGION-route |
-| `ACTOR-reject` | each R9 malformed input/routing/profile/unsupported case; NUL body then valid event | malformed cases faulted Task with exactly corresponding R9 fixed InvalidOperationException message and no inner; zero writes/receipts/restarts; NUL then valid event commits 2 rows, gap/finding once, NextSeq3 and ThroughSeq2 without restart or poison replay; foreign session owner terminal gap/mismatch receipt preserves native pointer; human creation exclusion is REGION-route |
+| `ACTOR-reject` | each R9 malformed input/routing/profile/unsupported case; NUL or invalid nested body timestamp then valid event | malformed cases faulted Task with exactly corresponding R9 fixed InvalidOperationException message and no inner; zero writes/receipts/restarts; NUL or invalid body timestamp then valid event commits 2 rows, gap/finding once, NextSeq3 and ThroughSeq2 without restart or poison replay; oversized raw_size remains ordinary input without added gap; foreign session owner terminal gap/mismatch receipt preserves native pointer; human creation exclusion is REGION-route |
 | `ACTOR-fail` | writer throws once, then reader reload barrier; resend only after lifecycle notification | first request faults with SeatCommitFailedException, exactly SEAT_COMMIT_FAILED/no inner, no success; no prospective state; one SeatChildLoaded notice after restart load barrier; caller replay commits once, duplicate replay no additional rows |
 | `ACTOR-cancel` | pre-cancel, after-admission cancel, closed/unread response, actor/host stop | pre-cancel no writer; admitted canceled wait may commit once; closed response doesn't undo commit; all waits/shutdown bounded; no internal resend or fabricated ack |
 | `REGION-route` | two seats with writer A blocked, B succeeds; duplicate A key; wrong tenant/H/retired/missing; startup eligible list | /user/seats/<uuid-D> once per eligible seat; B independent, same A reuses actor, rejected ids no new child; startup creates only R4 eligible keys |
@@ -500,13 +538,19 @@ T4. Commit R5/R6 real database atomicity for evidence/transitions/state only. Fo
     after event inserts with forged final state (unknown session missing its required reason),
     assert rollback and SeatStoreRejectedException. Race two version7 commits: exactly one
     version8 succeeds. Include duplicate-only/mixed new, opaque unknown/NUL bodies and invalid
-    trace metadata. Independent row goldens; no production failure hook/schema change. Later
+    trace metadata. Pin raw_size 0/int.MaxValue versus int.MaxValue+1/uint.MaxValue (null),
+    default raw fields, each current nested timestamp path and safe invalid envelope
+    timestamp rejection. Seconds min/max and Nanos 0/999999999 remain known storage;
+    Nanos -1/1000000000 and seconds outside bounds become opaque body evidence. Independent row goldens; no production failure hook/schema change. Later
     writer-stage fixtures excluded until owner lands, per G2.
 
 T5. Commit real actor probe tests with controlled reader/writer tasks, immutable fake profile
     and injected TimeProvider: serial commit, cross-seat concurrency, failure/reload/replay,
     invalid input, missing profile and no precommit effects. Include foreign native-id ownership
-    and safe typed-versus-permanent store failure classification.
+    and safe typed-versus-permanent store failure classification. Include invalid nested
+    body timestamp then valid event: one ingest gap/finding, two committed evidence rows,
+    NextSeq3/ThroughSeq2, no restart/retry. Oversized raw_size stays ordinary input. Envelope
+    timestamp violations keep INVALID_SEAT_EVENT/no write/no restart.
     Model expected State through existing pure Apply in actor tests but pin independent receipts/
     row counts/order/failure messages; never derive both sides through the actor under test.
 T6. Commit region/gateway tests for tenant isolation, routing/startup/human checks, supervision
@@ -522,7 +566,9 @@ T8. Commit R7 finding/session tests and expand rollback coverage to finding/sess
     New, same-seat existing, late/duplicate rotations; foreign-owner race rolls back without
     mutation, actor re-forward then terminal gap (T5/T7). Exact fixed messages and row goldens.
 T9. Commit R8 command/delivery/launch tests; expand rollback coverage to results. Existing writer
-    tests stay unchanged. No row manufacture/dispatch; optional absence null, foreign ids safe.
+    tests stay unchanged. R6 opaque NUL/invalid-body-timestamp results leave existing
+    command/launch metadata (including result/outcome/ended_at) unchanged; never JSON-format
+    those bodies. No row manufacture/dispatch; optional absence null, foreign ids safe.
 
 ## Definition of done
 
