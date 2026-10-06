@@ -2,7 +2,7 @@
 id: 15-1
 title: "#15 slice 1 — CLI skeleton and local dry run"
 issue: 15
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Cli/, tests/Aiakos.Cli.Tests/, Directory.Packages.props, Aiakos.slnx]
 date: 2026-10-06
