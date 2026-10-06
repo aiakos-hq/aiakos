@@ -15,7 +15,7 @@ internal sealed class XunitV3TestKitAssertions : ITestKitAssertions
         Assert.False(condition, Format(format, args));
 
     public void AssertEqual<T>(T expected, T actual, string format, params object[] args) =>
-        Assert.True(EqualityComparer<T>.Default.Equals(expected, actual), Format(format, args));
+        Assert.Equal(expected, actual);
 
     public void AssertEqual<T>(T expected, T actual, Func<T, T, bool> comparer, string format, params object[] args) =>
         Assert.True(comparer(expected, actual), Format(format, args));
