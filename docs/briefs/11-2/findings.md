@@ -1,6 +1,6 @@
 # Story review: slice 11-2
 
-Reviewed at commit d7fd9a6. Stories: 8. Check: ok.
+Reviewed at commit ba9f626. Stories: 9. Check: ok.
 
 ## Findings
 
@@ -42,3 +42,5 @@ Author amendment resolution: R23 now classifies any IOException from started-chi
 Architect, amendment round 1: the resolution was read at 65a6442 and is accepted; no findings are open.
 
 Architect, re-cut: the branch was rebuilt on main as d7fd9a6; its brief, items and stories are byte-identical to 65a6442 and it differs from main only in these four files. No findings are open.
+
+Architect, amendment for #230 (window size): the diff of ba9f626 against main was read (C1, R24, E24, T10 and story S9; R7, R8, R15, R16, E16, T5 changed; spec 0004 R10, R12, the sample configuration and D6). No findings are open. I ran the claims on the installed tmux 3.6 with private sockets and throwaway configurations, not through the product code: with global `window-size manual` a detached `new-session -x -y` ends with "server exited unexpectedly", on a cold server and on a running one; with global `largest` it succeeds and keeps 160x45; `set-option -w -t <pane-id> window-size manual` succeeds on a live pane and on a dead one, leaves the global value `largest` and the size unchanged; a second detached creation then succeeds and the first pane stays alive; a running server set to global `manual` converges with `set-option -g window-size largest` and then creates. Not checked: tmux 3.4 and 3.5, whether an attaching client leaves a `manual` window's size alone, and the acceptance tests in `artifacts/trials/`. S5 needs S9 merged first; that tie is in S5's notes only, because the check allows no dependency on a later story.
