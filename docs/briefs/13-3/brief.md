@@ -2,7 +2,7 @@
 id: 13-3
 title: "#13 slice 3 — transactional SeatActor shell"
 issue: 13
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Orchestrator/, tests/Aiakos.Orchestrator.Tests/, Directory.Packages.props]
 date: 2026-10-06
