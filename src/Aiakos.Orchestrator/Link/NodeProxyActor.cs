@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Akka.Actor;
 
 using Aiakos.Contracts.Node.V1;
@@ -28,6 +29,8 @@ public sealed class NodeProxyActor : ReceiveActor
 
     private async Task ReceiveAsync(ReceiveNodeMessage message)
     {
+        var previousActivity = Activity.Current;
+        Activity.Current = message.ReceiveActivity;
         try
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(message.CancellationToken, _sessionToken);
@@ -39,10 +42,15 @@ public sealed class NodeProxyActor : ReceiveActor
         {
             message.Completion.TrySetException(exception);
         }
+        finally
+        {
+            Activity.Current = previousActivity;
+        }
     }
 }
 
 internal sealed record ReceiveNodeMessage(
     ConnectRequest Request,
     TaskCompletionSource Completion,
+    Activity? ReceiveActivity,
     CancellationToken CancellationToken);

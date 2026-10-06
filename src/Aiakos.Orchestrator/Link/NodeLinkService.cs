@@ -28,30 +28,36 @@ public sealed class NodeLinkService(
         if (identity is null)
             throw Failure(StatusCode.Unauthenticated, "Node authentication failed.");
 
-        var hello = await ReadHelloAsync(requestStream, context, options.Value.HelloTimeout).ConfigureAwait(false);
-        if (!string.Equals(hello.NodeName, identity.NodeName, StringComparison.Ordinal))
-            throw Failure(StatusCode.PermissionDenied, "Node name does not match registration.");
-
-        var protocol = NodeProtocol.Negotiate(hello.Protocol, NodeProtocol.Current);
-        if (protocol is null)
-            throw Failure(StatusCode.FailedPrecondition, "Unsupported node protocol.");
-
-        if (!Guid.TryParse(hello.NodeInstanceId, out var instanceId) || instanceId == Guid.Empty)
-            throw Failure(StatusCode.FailedPrecondition, "Invalid node instance ID.");
-        hello.NodeInstanceId = instanceId.ToString("D");
-
+        var firstEnvelope = await ReadHelloAsync(requestStream, context, options.Value.HelloTimeout).ConfigureAwait(false);
+        var hello = firstEnvelope.Hello;
+        ProtocolVersion protocol;
         IReadOnlyList<ReplayFrom> replay;
-        try
+        using (NodeLinkTelemetry.StartReceiveActivity(firstEnvelope.Trace))
         {
-            replay = await application.GetReplayAsync(identity, hello, context.CancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception) when (context.CancellationToken.IsCancellationRequested)
-        {
-            throw Failure(StatusCode.Cancelled, string.Empty);
-        }
-        catch (Exception)
-        {
-            throw Failure(StatusCode.Internal, "Node link processing failed.");
+            if (!string.Equals(hello.NodeName, identity.NodeName, StringComparison.Ordinal))
+                throw Failure(StatusCode.PermissionDenied, "Node name does not match registration.");
+
+            var negotiatedProtocol = NodeProtocol.Negotiate(hello.Protocol, NodeProtocol.Current);
+            if (negotiatedProtocol is null)
+                throw Failure(StatusCode.FailedPrecondition, "Unsupported node protocol.");
+            protocol = negotiatedProtocol;
+
+            if (!Guid.TryParse(hello.NodeInstanceId, out var instanceId) || instanceId == Guid.Empty)
+                throw Failure(StatusCode.FailedPrecondition, "Invalid node instance ID.");
+            hello.NodeInstanceId = instanceId.ToString("D");
+
+            try
+            {
+                replay = await application.GetReplayAsync(identity, hello, context.CancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception) when (context.CancellationToken.IsCancellationRequested)
+            {
+                throw Failure(StatusCode.Cancelled, string.Empty);
+            }
+            catch (Exception)
+            {
+                throw Failure(StatusCode.Internal, "Node link processing failed.");
+            }
         }
 
         context.CancellationToken.ThrowIfCancellationRequested();
@@ -74,10 +80,12 @@ public sealed class NodeLinkService(
             await writeGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
             try
             {
-                await responseStream.WriteAsync(new ConnectResponse
+                var response = new ConnectResponse
                 {
                     Goodbye = new Goodbye { Reason = reason, Message = message },
-                }).ConfigureAwait(false);
+                };
+                NodeLinkTelemetry.SetTrace(response);
+                await responseStream.WriteAsync(response).ConfigureAwait(false);
             }
             finally { writeGate.Release(); }
         }
@@ -216,7 +224,9 @@ public sealed class NodeLinkService(
                 Limits = new Limits { MaxMessageBytes = 4194304, MaxInflightCommands = 64, EventBufferCapacity = 10000 },
             };
             welcome.Replay.AddRange(replay);
-            await responseStream.WriteAsync(new ConnectResponse { Welcome = welcome }).ConfigureAwait(false);
+            var response = new ConnectResponse { Welcome = welcome };
+            NodeLinkTelemetry.SetTrace(response);
+            await responseStream.WriteAsync(response).ConfigureAwait(false);
             session = registry.Register(identity, hello.NodeInstanceId);
             callbackCancellation = CancellationTokenSource.CreateLinkedTokenSource(
                 context.CancellationToken, session.CallbackToken);
@@ -236,28 +246,31 @@ public sealed class NodeLinkService(
                     return;
                 }
 
-                resetLiveness();
-                if (unknown)
-                {
-                    unknown = false;
-                    _ = stateChanged(NodeLinkState.Connected);
-                }
-
                 var request = requestStream.Current;
-                if (request.BodyCase == ConnectRequest.BodyOneofCase.Goodbye)
+                using (NodeLinkTelemetry.StartReceiveActivity(request.Trace))
                 {
-                    disconnected = true;
-                    await stateChanged(NodeLinkState.Disconnected).ConfigureAwait(false);
-                    await stateTail.ConfigureAwait(false);
-                    return;
-                }
-                if (request.BodyCase == ConnectRequest.BodyOneofCase.Heartbeat)
-                    continue;
-                if (request.BodyCase is not (ConnectRequest.BodyOneofCase.CommandAck or ConnectRequest.BodyOneofCase.SeatEvent))
-                    throw Failure(StatusCode.FailedPrecondition, "Unexpected node message.");
+                    resetLiveness();
+                    if (unknown)
+                    {
+                        unknown = false;
+                        _ = stateChanged(NodeLinkState.Connected);
+                    }
 
-                var callbackTask = NodeLinkRegistry.ReceiveAsync(activeSession, request, callbackCancellation!.Token);
-                await waitForCallback(callbackTask, activeSession).ConfigureAwait(false);
+                    if (request.BodyCase == ConnectRequest.BodyOneofCase.Goodbye)
+                    {
+                        disconnected = true;
+                        await stateChanged(NodeLinkState.Disconnected).ConfigureAwait(false);
+                        await stateTail.ConfigureAwait(false);
+                        return;
+                    }
+                    if (request.BodyCase == ConnectRequest.BodyOneofCase.Heartbeat)
+                        continue;
+                    if (request.BodyCase is not (ConnectRequest.BodyOneofCase.CommandAck or ConnectRequest.BodyOneofCase.SeatEvent))
+                        throw Failure(StatusCode.FailedPrecondition, "Unexpected node message.");
+
+                    var callbackTask = NodeLinkRegistry.ReceiveAsync(activeSession, request, callbackCancellation!.Token);
+                    await waitForCallback(callbackTask, activeSession).ConfigureAwait(false);
+                }
             }
         }
         catch (RpcException) { throw; }
@@ -280,7 +293,7 @@ public sealed class NodeLinkService(
         }
     }
 
-    private async Task<Hello> ReadHelloAsync(IAsyncStreamReader<ConnectRequest> requestStream,
+    private async Task<ConnectRequest> ReadHelloAsync(IAsyncStreamReader<ConnectRequest> requestStream,
         ServerCallContext context, TimeSpan timeout)
     {
         using var deadlineSource = new CancellationTokenSource(timeout, timeProvider);
@@ -297,7 +310,7 @@ public sealed class NodeLinkService(
         { throw Failure(StatusCode.Unavailable, "Node link unavailable."); }
         if (!hasFirstMessage || requestStream.Current.BodyCase != ConnectRequest.BodyOneofCase.Hello)
             throw Failure(StatusCode.FailedPrecondition, "Hello must be the first node message.");
-        return requestStream.Current.Hello;
+        return requestStream.Current;
     }
 
     private static RpcException Failure(StatusCode code, string detail) => new(new Status(code, detail));

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Akka.Actor;
 
 using Aiakos.Contracts.Node.V1;
@@ -28,7 +29,7 @@ public sealed class NodeLinkRegistry(ActorSystem actorSystem, INodeLinkApplicati
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, session.CallbackToken);
-        session.Actor.Tell(new ReceiveNodeMessage(request, completion, linked.Token));
+        session.Actor.Tell(new ReceiveNodeMessage(request, completion, Activity.Current, linked.Token));
         await completion.Task.WaitAsync(linked.Token).ConfigureAwait(false);
     }
 

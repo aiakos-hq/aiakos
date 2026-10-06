@@ -70,13 +70,16 @@ public sealed partial class OrchestratorConnection(
                     break;
                 }
 
-                if (firstResponse.BodyCase != ConnectResponse.BodyOneofCase.Welcome || !ValidWelcome(firstResponse.Welcome))
+                using (NodeLinkTelemetry.StartReceiveActivity(firstResponse.Trace))
                 {
-                    statusCode = StatusCode.FailedPrecondition;
-                    throw new RpcException(new Status(statusCode, "Invalid Connect welcome."));
-                }
+                    if (firstResponse.BodyCase != ConnectResponse.BodyOneofCase.Welcome || !ValidWelcome(firstResponse.Welcome))
+                    {
+                        statusCode = StatusCode.FailedPrecondition;
+                        throw new RpcException(new Status(statusCode, "Invalid Connect welcome."));
+                    }
 
-                await source.WelcomeAsync(firstResponse.Welcome, stoppingToken).ConfigureAwait(false);
+                    await source.WelcomeAsync(firstResponse.Welcome, stoppingToken).ConfigureAwait(false);
+                }
                 reconnectDelay.Reset();
                 if (connectedBefore)
                 {
@@ -184,12 +187,15 @@ public sealed partial class OrchestratorConnection(
                 return;
             }
 
-            if (response.BodyCase == ConnectResponse.BodyOneofCase.Welcome || response.BodyCase == ConnectResponse.BodyOneofCase.None)
-                throw new RpcException(new Status(StatusCode.FailedPrecondition, "Invalid Connect response."));
+            using (NodeLinkTelemetry.StartReceiveActivity(response.Trace))
+            {
+                if (response.BodyCase == ConnectResponse.BodyOneofCase.Welcome || response.BodyCase == ConnectResponse.BodyOneofCase.None)
+                    throw new RpcException(new Status(StatusCode.FailedPrecondition, "Invalid Connect response."));
 
-            await source.ReceiveAsync(response, stoppingToken).ConfigureAwait(false);
-            if (response.BodyCase == ConnectResponse.BodyOneofCase.Goodbye)
-                return;
+                await source.ReceiveAsync(response, stoppingToken).ConfigureAwait(false);
+                if (response.BodyCase == ConnectResponse.BodyOneofCase.Goodbye)
+                    return;
+            }
         }
     }
 
@@ -205,7 +211,11 @@ public sealed partial class OrchestratorConnection(
     private async Task WriteAsync(AsyncDuplexStreamingCall<ConnectRequest, ConnectResponse> call, ConnectRequest request, CancellationToken ct)
     {
         await _writer.WaitAsync(ct).ConfigureAwait(false);
-            try { await call.RequestStream.WriteAsync(request, ct).ConfigureAwait(false); }
+        try
+        {
+            NodeLinkTelemetry.SetTrace(request);
+            await call.RequestStream.WriteAsync(request, ct).ConfigureAwait(false);
+        }
         finally { _writer.Release(); }
     }
 
@@ -218,10 +228,12 @@ public sealed partial class OrchestratorConnection(
             {
                 if (sendGoodbye)
                 {
-                    await call.RequestStream.WriteAsync(new ConnectRequest
+                    var request = new ConnectRequest
                     {
                         Goodbye = new Goodbye { Reason = GoodbyeReason.Shutdown, Message = "Node shutting down." },
-                    }).ConfigureAwait(false);
+                    };
+                    NodeLinkTelemetry.SetTrace(request);
+                    await call.RequestStream.WriteAsync(request).ConfigureAwait(false);
                 }
                 await call.RequestStream.CompleteAsync().ConfigureAwait(false);
             }
