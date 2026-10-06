@@ -4,7 +4,7 @@ title: "#15 slice 2 — local API contracts, authentication and rig revisions"
 issue: 15
 status: draft
 route: impl
-paths: [src/Aiakos.Api.Contracts/, src/Aiakos.Orchestrator/, src/Aiakos.Data/, tests/Aiakos.Orchestrator.Tests/, tests/Aiakos.Data.Tests/, Aiakos.slnx]
+paths: [src/Aiakos.Spec/, tests/Aiakos.Spec.Tests/, src/Aiakos.Api.Contracts/, src/Aiakos.Orchestrator/, src/Aiakos.Data/, tests/Aiakos.Orchestrator.Tests/, tests/Aiakos.Data.Tests/, Aiakos.slnx]
 date: 2026-10-06
 ---
 
@@ -185,7 +185,7 @@ It never exports body/token attributes; this slice does not add OTLP export.
 
 `RegisterRigRequest` carries `IReadOnlyDictionary<string,byte[]> FilesBySha256`, with lowercase SHA-256 hex keys and raw UTF-8 bytes. Each file is at most 1 MiB and the total is at most 16 MiB. Every canonical path/hash/size entry must have exactly one matching map entry; verify byte length and SHA-256 before any write. Reject violations with fixed `FILE_CONTENT_INVALID` and detail `Rig file contents do not match the canonical form.`; never include file bytes in errors.
 
-`Aiakos.Spec.RigHashVerifier.Verify(string resolvedJson, string specHash, string bindingHash)` returns `RigHashVerification(bool Valid,string SpecHash,string BindingHash,ResolvedRig Rig)`. It parses and validates the request's canonical JSON and recomputes both hashes through the existing `RigCanonicalizer`/`CanonicalJson`; no orchestrator hash implementation is permitted. `RigRegistration` is `(string Rig,string Resolved,string ToolVersion,string SourcePath,string? SourceCommit,bool SourceDirty,string SpecHash,string BindingHash,IReadOnlyDictionary<string,byte[]> FilesBySha256)`; `RigRevisionReceipt` is `(Guid RevisionId,int Revision,bool SpecChanged,bool BindingChanged,IReadOnlyList<SeatRegistrationResponse> Seats)`.
+`Aiakos.Spec.RigHashVerifier.Verify(string resolvedJson, string specHash, string bindingHash)` returns `RigHashVerification(bool Valid,string SpecHash,string BindingHash)`. It parses and validates the request's canonical JSON and recomputes both hashes through the existing `RigCanonicalizer`/`CanonicalJson`; no orchestrator hash implementation is permitted. `RigRegistration` is `(string Rig,string Resolved,string ToolVersion,string SourcePath,string? SourceCommit,bool SourceDirty,string SpecHash,string BindingHash,IReadOnlyDictionary<string,byte[]> FilesBySha256)`; `RigRevisionReceipt` is `(Guid RevisionId,int Revision,bool SpecChanged,bool BindingChanged,IReadOnlyList<SeatRegistrationResponse> Seats)`.
 
 Item ownership additions: C3 and R10 belong to S1; E8 is the exact verifier result described above; T8 pins verifier hashes to the 14-4 loader goldens.
 
@@ -193,3 +193,7 @@ C3. The public verifier is implemented only in Aiakos.Spec.
 R10. The verifier returns the typed result and uses the existing canonicalizer.
 E8. The verifier returns the loader-golden hash pair.
 T8. Tests pin verifier output to the 14-4 goldens.
+
+E8 uses the 14-4 minimal canonical JSON and its published `spec_hash` and `binding_hash`: matching values return `Valid=true` and the two recomputed hashes; changing either submitted hash returns `Valid=false` with the same recomputed pair. Malformed JSON returns the fixed validation failure without constructing a `ResolvedRig`.
+
+Registration file values are arbitrary binary bytes (not UTF-8); keys are lowercase SHA-256 hex. `FILE_CONTENT_INVALID` is HTTP 400, non-retryable, with detail `Rig file contents do not match the canonical form.`. The revision migration uses explicit PostgreSQL types: tenant_id/rig_id/revision_id uuid, revision integer, hashes/tool_version/source_path/source_commit/created_by text, resolved jsonb, source_dirty boolean, created_at timestamptz. The transaction upserts `aiakos.seat(tenant_id,rig_id,seat_id,address,kind,desired_json,params_json,spec_hash,binding_hash,retired)` and updates only desired metadata; retirement is guarded by the current session state.
