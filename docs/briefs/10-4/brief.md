@@ -171,6 +171,11 @@ G2. Input validation happens before mutation. No message-text parsing or culture
 
 ## Changes to earlier behavior
 
+The approved amendment after PR223/PR224 adds late-registration behavior to R7/E7/E8/T3
+(S4) and clarifies R11's nonempty launch UUID consistently with R1. S3 is already merged:
+lead routes any zero-UUID implementation gap separately; do not retroactively apply a new
+acceptance version to its completed run. R12/G2 exception-boundary behavior is unchanged.
+
 C1. 10-3 stamps ambient trace on every outgoing write. Buffered SeatEvent envelopes now keep the
     W3C trace captured when first enqueued, including during replay under another ambient activity;
     the connection must not overwrite it. Hello/heartbeat/Goodbye and ordinary responses retain
@@ -261,6 +266,28 @@ R7. EventNodeLinkSource retains DefaultNodeLinkSource's Hello platform/protocol/
     is added. WelcomeAsync applies replay before releasing event enumeration; EventAck invokes
     Acknowledge. Other responses retain the existing no-op callbacks until 10-5 provides command
     consumers. Unknown seat inventory is retained, never killed, silently adopted or discarded.
+    Remember the exact seat-ID set supplied by the most recent CreateHello. A seat first
+    registered after that Hello invalidates that connection, including registration while
+    Welcome is pending: WelcomeAsync or the current/next event MoveNextAsync throws exactly
+    InvalidOperationException("Node event inventory changed."). During active enumeration,
+    registration wakes/cancels the blocked reader so that failure is observed promptly without
+    waiting for another event. Check the captured Hello set before releasing Welcome and before
+    yielding any event; do not fabricate replay/eligibility for the new seat. R8 maps the failure
+    to FailedPrecondition and reconnects with a refreshed Hello; only its new Welcome grants
+    eligibility. Dispose registration observation with the connection/enumeration; listeners
+    must not accumulate across attempts. A registration before CreateHello is included normally.
+    Updating an already registered seat's inventory does not invalidate the connection. A seat
+    present in Hello but omitted from Welcome remains buffered/ineligible and never triggers
+    an inventory-change reconnect loop.
+    Each new seat on an otherwise connected node causes one reconnect; additions before the
+    replacement Hello may share that reconnect. All seats on the node pause during cancellation
+    and ordinary R8 reconnect/backoff. Cancel and await the old enumeration/in-flight writes
+    before replacement. Other seats retain inventory and unacknowledged buffers. A commit may
+    have succeeded before its ack was lost: replacement Welcome supplies cumulative replay
+    checkpoints, dropping committed evidence and resending uncommitted evidence with its original
+    seq/body/trace. Reconnect allocates no new seq, clears no buffer, adds no retry loop, and
+    restarts no pane. The orchestrator observes ordinary disconnect/connect overlays; no stop,
+    adoption, or fresh readiness is inferred.
 
 R8. OrchestratorConnection detects optional INodeEventSource after valid Welcome and its awaited
     callback; starts exactly one event enumeration alongside heartbeat/response receive. Every
@@ -301,7 +328,7 @@ R10. NodeEventCursor is pure, owns no durable/live storage and does not apply Se
 R11. EventNodeLinkApplication delegates replay/state to the committer with authenticated identity,
     awaited cancellation and cloned mutable proto arguments/results. ReceiveEventAsync accepts
     only SeatEvent with nonempty UUID epoch/seat, seq1..long.MaxValue-1, valid ObservedAt,
-    SourceSeq<=long.MaxValue, empty/UUID launch; invalid throws
+    SourceSeq<=long.MaxValue, empty/nonempty UUID launch (a supplied UUID must not equal Guid.Empty); invalid throws
     ArgumentException("Invalid seat event.") before provider invocation. Accept unknown oneof.
     It does not mutate the event or original Trace, normalize/truncate received evidence, or
     derive state. Validate returned ack names the same seat and ThroughSeq>=received Seq and
@@ -421,8 +448,8 @@ these sequencing fixtures when S2 merges. Provider UTC begins
 | `E4` | raw at cap/cap+1; 1024/1025-byte attribute; NUL,U+FFFE,lone surrogate body values; unknown oneof | cap retained unchanged, cap+1 raw bytes clipped with true flag/original RawSize; normalized fields retained; 1025-byte attribute rejected before allocation; NUL/U+FFFE preserved in protobuf bytes, surrogate becomes U+FFFD without exception; oversized envelope fixed Invalid seat event.; unknown bytes retained |
 | `E5` | small limits, telemetry coalescing, oldest drops, many affected seats | A-only per-seat overflow never evicts B; node count/byte overflow evicts globally oldest after all-seat telemetry coalescing; retained count/bytes stay within configured bounds; allocated numbers never reused; lost count per seat eventually emitted as BufferOverflow when capacity returns; coalesced telemetry counted; no recursive gap storm; non-telemetry kinds not coalesced; invalid options fixed R5 error |
 | `E6` | Telemetry A1,A2 plus B event; advance 999ms then 1ms; disconnect | A1 immediately, A2 only at 1s; B may send while A is held; no producer delay or hidden rate-drop; provider-only timing; reader cancellation leaves retained data |
-| `E7` | source creates Hello/heartbeat, handles Welcome/EventAck; unknown inventory omitted from replay | real inventory/ranges and BufferedCount; replay releases only listed seats; ack drops committed range; unknown inventory retained; no invented capabilities or command/session effects |
-| `E8` | held Welcome; blocked/failing event writer, heartbeat, host stop and reconnect under another ambient trace | no event before Welcome callback completes; single writer, no overlapping sends; unacked replay preserves original trace; reader/write canceled and awaited before replacement; shutdown finishes within existing host budget with no retry or data clear; earlier 10-3 tests stay green |
+| `E7` | source creates Hello/heartbeat, handles Welcome/EventAck; unknown inventory omitted from replay | real inventory/ranges and BufferedCount; replay releases only listed seats; ack drops committed range; unknown inventory retained; post-Hello new registration fails with Node event inventory changed.; refreshed Hello and new Welcome alone grant eligibility; existing-seat updates and known omitted seats cause no inventory reconnect; no invented capabilities or command/session effects |
+| `E8` | held Welcome; blocked/failing event writer, heartbeat, host stop and reconnect under another ambient trace | no event before Welcome callback completes; single writer, no overlapping sends; unacked replay preserves original trace; reader/write canceled and awaited before replacement; shutdown finishes within existing host budget with no retry or data clear; registration during pending Welcome or connected enumeration forces one reconnect with refreshed inventory; all seats pause and unacked replay keeps original seq/body/trace; earlier 10-3 tests stay green |
 | `E9` | compile a fake committer and inspect interface | exact R9 signatures; no transport storage/provider registration; fake can delay/null/fail commit, and no ack is implied by receipt |
 | `E10` | absent/same/changed epoch, duplicate, skip, invalid cursor | exact R10 Duplicate/Gap/epoch/NextSeq tuples; no mutation/I/O; fixed Invalid event cursor. for invalid bounds/UUID |
 | `E11` | fake provider delayed/null/invalid ack, mutable args/results, invalid event/replay | awaiting completion; null remains null; clones preserve bytes/trace; exact R11 fixed errors including direct ReceiveAsync rejection before invalid event provider call; no successful ack on failure/cancellation |
@@ -449,6 +476,10 @@ fixtures use isolated loopback Kestrel and scripted callbacks, no tmux/harness/o
 - T3. Commit source/stream E7/E8 and E13 node composition tests with a scripted peer, blocked Welcome and cancellable writer,
     full loopback trace replay and controlled dropped acks. Test old sources lacking the optional
     interface so the prior connection contract remains usable by 10-5 and existing consumers.
+    Add controlled post-Hello registration during held Welcome and blocked connected enumeration;
+    assert the fixed inventory-change failure, refreshed Hello/new Welcome eligibility, retained
+    other-seat unacknowledged seq/body/trace, no reconnect for existing-seat updates, and known
+    omitted inventory remains ineligible without a reconnect loop. Observe barriers, not sleeps.
 
 - T4. Commit E9–E11 interface/cursor/adapter tests with delayed/cancelable fake committer and
     immutable snapshots. No SQL, actor or storage substitute is needed by this story.

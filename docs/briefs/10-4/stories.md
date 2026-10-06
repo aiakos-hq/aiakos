@@ -28,7 +28,7 @@ depends: S2
 owns: C1, R7, R8, R13
 outputs: E7, E8, E13
 tests: T3
-notes: No actor prerequisite. S2 supplies the complete buffer; C1 changes only buffered SeatEvent sender tracing. Existing sources without INodeEventSource remain supported.
+notes: No actor prerequisite. S2 supplies the complete buffer; C1 changes only buffered SeatEvent sender tracing. Existing sources without INodeEventSource remain supported. R7 amendment requires refreshed Hello after post-Hello new registration, including held Welcome; E7/E8/T3 cover node-wide reconnect costs and retained original replay.
 
 ## S5: Acknowledgement transport and bounded callbacks
 goal: NodeProxy and the stream emit acknowledgements only after an optional event application completes, and end stalled event callbacks on liveness expiry.
