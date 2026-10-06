@@ -20,6 +20,9 @@ public static class SeatStateMachine
         if (input is DownRequested)
             return ApplyDownRequested(state);
 
+        if (input is SendRequested send)
+            return ApplySendRequested(state, send);
+
         if (input is EventReceived received)
             return ApplySequencedEvent(state, received, profile, now);
 
@@ -32,6 +35,26 @@ public static class SeatStateMachine
         if (input is OrchestratorRestarted)
             return ApplyOverlay(state, SeatOverlay.OrchestratorRestarted,
                 SeatVocabulary.SessionReasonOrchestratorRestarted, now);
+
+        if (input is QuietTimeoutFired)
+        {
+            if (state.KnownSession != SessionValue.Present || state.KnownActivity != ActivityValue.Working ||
+                state.LastEventAt is not { } lastEventAt || now - lastEventAt < profile.QuietTimeout)
+                return Unchanged(state);
+
+            var quiet = SetActivity(state, ActivityValue.Unknown, null, SeatVocabulary.ActivityReasonQuietTimeout,
+                state.PendingInputRequest, now, "A15");
+            return WithFindings(quiet, Open(SeatVocabulary.FindingActivityStale));
+        }
+
+        if (input is UnknownProlongedFired)
+        {
+            if (state.Session != SessionValue.Unknown)
+                return WithFindings(Unchanged(state), [new FindingChange(SeatVocabulary.FindingStateUnknownProlonged, false)]);
+            if (state.SessionSince is not { } sessionSince || now - sessionSince < TimeSpan.FromMinutes(5))
+                return Unchanged(state);
+            return WithFindings(Unchanged(state), Open(SeatVocabulary.FindingStateUnknownProlonged));
+        }
 
         if (input is CommandDispatchFailed dispatchFailed)
         {
@@ -158,6 +181,31 @@ public static class SeatStateMachine
             [new FindingChange(SeatVocabulary.FindingUnexpectedExit, false)], effects);
     }
 
+    private static SeatStep ApplySendRequested(SeatState state, SendRequested input)
+    {
+        if (!input.NodeConnected)
+            return Unchanged(state) with
+            {
+                Reply = new Rejected("NODE_NOT_CONNECTED"),
+                Findings = Open(SeatVocabulary.FindingNodeNotConnected)
+            };
+
+        if (state.Session == SessionValue.Unknown)
+            return Unchanged(state) with { Reply = new Rejected(SeatVocabulary.RejectionSeatStateUnknown) };
+        if (state.Session != SessionValue.Present)
+            return Unchanged(state) with { Reply = new Rejected("SEAT_NOT_PRESENT") };
+        if (input.DeliveryInFlight)
+            return Unchanged(state) with { Reply = new Rejected("DELIVERY_IN_FLIGHT") };
+        if (state.Activity == ActivityValue.Working)
+            return Unchanged(state) with { Reply = new Rejected("SEAT_WORKING") };
+        if (state.Activity == ActivityValue.NeedsInput)
+            return Unchanged(state) with { Reply = new Rejected("SEAT_NEEDS_INPUT") };
+        if (state.Activity == ActivityValue.Unknown && !input.Force)
+            return Unchanged(state) with { Reply = new Rejected("SEAT_ACTIVITY_UNKNOWN") };
+
+        return Unchanged(state) with { Reply = new Accepted(Forced: state.Activity == ActivityValue.Unknown) };
+    }
+
     private static SeatStep ApplyObservationGap(SeatState state, DateTimeOffset now)
     {
         var step = Unchanged(state);
@@ -236,7 +284,10 @@ public static class SeatStateMachine
         if (activityChanged)
             transitions.Add(new SeatTransition("activity", true, SeatVocabulary.ToStored(state.Activity),
                 SeatVocabulary.ToStored(state.KnownActivity), state.KnownActivityReason, "R17"));
-        return new SeatStep(next, null, null, transitions, NoFindings, NoEffects);
+        var findings = state.Session == SessionValue.Unknown && next.Session != SessionValue.Unknown
+            ? [new FindingChange(SeatVocabulary.FindingStateUnknownProlonged, false)]
+            : NoFindings;
+        return new SeatStep(next, null, null, transitions, findings, NoEffects);
     }
 
     private static SeatStep AttachNode(SeatState state, NodeAttached input, DateTimeOffset now)
@@ -377,7 +428,18 @@ public static class SeatStateMachine
         }
 
         if (input.Body is HarnessBody harness)
-            return ApplyCurrentHarnessEvent(state, input, harness, profile, now);
+        {
+            var harnessResult = ApplyCurrentHarnessEvent(state, input, harness, profile, now);
+            if (state.Session == SessionValue.Unknown && harnessResult.State.Session != SessionValue.Unknown &&
+                !harnessResult.Findings.Any(finding =>
+                    finding.Kind == SeatVocabulary.FindingStateUnknownProlonged && !finding.Open))
+                harnessResult = harnessResult with
+                {
+                    Findings = [.. harnessResult.Findings,
+                        new FindingChange(SeatVocabulary.FindingStateUnknownProlonged, false)]
+                };
+            return harnessResult;
+        }
 
         SeatStep result = input.Body switch
         {
@@ -395,6 +457,13 @@ public static class SeatStateMachine
         };
         if (input.Body is LaunchResultBody launchResult)
             result = ApplyLaunchResumability(result, launchResult, now);
+
+        if (state.Session == SessionValue.Unknown && result.State.Session != SessionValue.Unknown &&
+            !result.Findings.Any(finding => finding.Kind == SeatVocabulary.FindingStateUnknownProlonged && !finding.Open))
+            result = result with
+            {
+                Findings = [.. result.Findings, new FindingChange(SeatVocabulary.FindingStateUnknownProlonged, false)]
+            };
 
         return result with
         {
@@ -1014,7 +1083,10 @@ public static class SeatStateMachine
                     SeatVocabulary.ToStored(state.KnownActivity), SeatVocabulary.ToStored(activity), derivedReason, activityRule));
             }
         }
-        return new SeatStep(next, null, null, transitions, NoFindings, NoEffects);
+        var findings = state.Session == SessionValue.Unknown && next.Session != SessionValue.Unknown
+            ? [new FindingChange(SeatVocabulary.FindingStateUnknownProlonged, false)]
+            : NoFindings;
+        return new SeatStep(next, null, null, transitions, findings, NoEffects);
     }
 
     private static SeatStep EmptyEvent(SeatState state, EventDisposition disposition = EventDisposition.Applied) =>
