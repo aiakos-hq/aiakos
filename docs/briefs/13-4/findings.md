@@ -1,6 +1,6 @@
 # Story review: slice 13-4
 
-Reviewed at commit f573054. Stories: 6. Check: ok.
+Reviewed at commit 65aea71. Stories: 6. Check: ok.
 
 ## Findings
 
@@ -15,6 +15,9 @@ all seven findings are addressed for architect re-review.
 - [ ] S5 (judgment-gap): R8 and `RELOAD` emit `SeatActorRestarted` "before any retained work is released", but 13-3 publishes `SeatActorReloaded`, and it already does so before queued work; the rule also restates "the 13-3 lifecycle contract" without saying what this slice adds to it. Fix: use 13-3's name and state only the behaviour this slice adds (which overlays and capture requests it issues, on which inputs).
 - [ ] S1 (judgment-gap): S1's goal is to publish the records, but it owns R1, the whole `SeatUp` decision, and its output is `UP-reject`, while S2 "Up lifecycle dispatcher" owns only R2; and 13-3 left automatic timer scheduling (quiet timeout, launch watchdog, unknown prolonged) to this slice, which no rule here mentions. Fix: give S1 a rule and an output for the records alone, move the up decision to S2, and add the timer rule with its story or say which slice owns it.
 - [ ] S2 (context-gap): the story notes name prerequisites by 13-3's old story numbers ("13-3 S5/S6 persistence stages", "S7 region retry", "S7/S8", "S9"), which do not say what must be merged, and the brief says those stories "are not all on main yet". Fix: name each prerequisite by its 13-3 story title or the type it delivers, per story.
+- [ ] S1 (judgment-gap), round 1: the new `Aiakos.Core.SeatEnvelope(object Command)` has the same name as the merged `Aiakos.Orchestrator.Seats.SeatEnvelope(Guid TenantId, Guid SeatId, object Message)` (`SeatProtocol.cs`), which the dispatcher implementation must also use, and neither the new envelope nor `DispatchAsync(SeatEnvelope, CallerContext, CancellationToken)` nor any command record carries the seat, so a command names no seat. Fix: give the Core type another name or reuse the merged one, and add the seat identity (the resolved seat UUID) to the call, with the reply types that `Task<object>` can return listed.
+- [ ] S2 (context-gap), round 1: `ISeatCommandStore.CommitAsync` and `ISeatCommandPort` are named without signatures: `CommitAsync` has no parameters or result and its rows are "tenant, seat, command id/kind, caller and payload hash" with no column names; `SeatLaunch` is undefined; `Deliver(Guid,string,string,bool)` does not say what its arguments are; no method has a return type. The brief also does not say how this store's rows and the `seat_state` change of the same decision commit in one transaction with 13-3's version check, which ADR 0032 requires of the actor. Fix: give both interfaces their full members and records, the columns written per command kind, and the one transaction that holds rows and state.
+- [ ] S1 (context-gap), round 1: R1 to R9, the expected outputs table, items and stories are unchanged in this commit, so the points of the fourth to seventh findings stand as written: R5's rejection reasons are not listed and the outputs are still summaries; R8 and `RELOAD` still say `SeatActorRestarted` while the new paragraph says `SeatActorReloaded`; S1 still owns the up decision; the story notes still name prerequisites by 13-3's old numbers; and the timers appear only as "quiet/activity watchdogs 10 minutes", with no rule for which timer is armed and cancelled when, although `IHarnessStateProfile` already carries `ReadyTimeout`, `ConfirmTimeout` and `QuietTimeout` per harness. Fix: rewrite the rules, the outputs table and the story blocks themselves instead of adding a paragraph beside them, and take the timeout values from the profile or say why they are constants here.
 
 ## Not checked
 
@@ -22,3 +25,5 @@ all seven findings are addressed for architect re-review.
 - The 15-2 brief I compared with is the one I accepted at 6802c16; it says its bridge follows the merged 13-4 contract, so the fix can be on either side.
 - Size and order were not judged: the stories cannot be sized until the rules say what is built.
 - Nothing was built.
+
+Architect, round 1: the diff 37d514f..65aea71 was read. Accepted: `CallerContext`, the command records and the dispatcher port now live in `Aiakos.Core` with that project in `paths`, the messages no longer carry the caller, `SeatAlreadyDown` exists, the outbound port and the store are named, and the capture, stop and delivery timeouts have values. Three points remain, written above. The seven original boxes are left as they are; the three new boxes say what is still open.
