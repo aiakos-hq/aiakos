@@ -1,6 +1,6 @@
 # Story review: slice 15-1
 
-Reviewed at commit d56466d. Stories: 5. Check: ok.
+Reviewed at commit 90aa95b. Stories: 5. Check: ok.
 
 ## Findings
 
@@ -18,3 +18,5 @@ help/version invocations the help/version exit0 result; only instance-value vali
 - The CI workflow only packs the CLI and does not invoke it, so C1's change of `-v` does not break a workflow step; read in `.github/workflows/ci.yml`.
 - R3's rules (which commands refuse `--json` or the `dev` instance, the selectors of `down` and `send`) were not compared with spec 0007's command reference line by line.
 - Nothing was built.
+
+Architect, round 1: the diff b876e99..90aa95b was read and both resolutions are accepted; no findings are open. Not run: that `dotnet tool install` succeeds with a single local source and empty private caches.
