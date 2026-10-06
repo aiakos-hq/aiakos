@@ -193,6 +193,19 @@ R2. The runner admits at most maxConcurrency active clients (default 8). Waiters
     or timeout <=0 or timeout > TimeSpan.FromMilliseconds(4294967294) is
     ArgumentOutOfRangeException before launching anything.
 
+R23. After a child has started successfully, treat any IOException raised by writing,
+    flushing or closing its redirected stdin as the child having stopped accepting input.
+    This includes broken-pipe/EPIPE; use the exception type, without inspecting OS message text,
+    HResult or errno. Drop the unwritten remainder, close the runner's stdin stream (an
+    IOException from this close is treated the same way), keep draining stdout and stderr,
+    and await that child's exit. Return Exited with its actual exit code and exact retained
+    streams/truncation flags under R1; do not throw the stdin IOException, expose its OS
+    message, kill the child, retry or start another process. This early-closure case is the
+    exception to R1/R2's normal full-stdin guarantee. This classification applies only to
+    stdin write/flush/close IOExceptions, not stdout/stderr IO or process-start failures.
+    R2 timeout and caller cancellation remain authoritative while waiting/draining:
+    return TimedOut on timeout or throw cancellation, respectively, even after stdin closed.
+
 R3. TmuxClient snapshots nodeEnvironment and options at construction. Client environment contains only present
     HOME, USER, LOGNAME, SHELL, PATH, TMUX_TMPDIR, XDG_RUNTIME_DIR and the UTF-8 locale selection.
     If LC_ALL is nonempty and names a UTF-8 locale (case-insensitive UTF-8 or UTF8 suffix), pass it;
@@ -499,7 +512,13 @@ paths/socket and a harmless test executable. Exact error triples below are (Code
 | `E21` | default/true/false attach for demo_impl, invalid name, unavailable client | exactly [tmux,-L,aiakos-test,attach-session,-r,=demo_impl], without -r for false; invalid name NotFound; unavailable throws Unavailable; no process/input/mutation |
 | `E22` | ActivityListener/MeterListener and log capture with argv/env/attributes/stdout/stderr sentinels; success/failure/version cases | exact R22 spans/instruments and bounded tags; current outcomes/availability observed; no sentinel values, raw commands or error messages in diagnostics; registry has Attributes but no argv/environment; disposing runner/client components leaves existing harness alive |
 
+| `E23` | child exits without reading 8 MiB stdin; child closes stdin, stays alive briefly, writes stdout/stderr and exits 3 | early-exit child returns Exited with its actual exit code; closed-stdin child returns Exited/3 with exact stdout/stderr and false truncation flags; unwritten stdin is dropped, stdin write/flush/close IOException is treated as early closure without inspecting message/HResult/errno, no stdin IOException or OS text, no child kill/retry; a subsequent request succeeds |
+
 ## Analysis decision
+
+context-gap amendment requested by lead 2026-10-05 22:37Z: R23/E23/T9 defines early stdin
+closure for S1 after review of #181. Existing R2 caller-cancellation behavior is unchanged;
+its inherited-pipe failure is a judgment-gap for the retry, not an added requirement.
 
 context-gap resolved by maintainer decision 2026-10-06 (lead handoff
 qitem-20261005215420-064ab307): a dead matching starting launch for which no handle was ever
@@ -524,6 +543,10 @@ tests are removed. Do not mirror code branches without asserting the caller-visi
 - T1. Commit process-runner tests for E1–E2, plus recording FakeProcessRunner. Use harmless
     child fixtures for stream/drain/timeout/cancellation tests, and a virtual clock for timeout.
     Never launch tmux or touch an owner socket in these tests.
+- T9. Commit an early-stdin-closure regression test for E23: exercise both an immediate exit
+    without reading a large stdin and closure while the child remains alive, then assert its
+    exit code/retained output and successful permit reuse. The latter must fail if the runner
+    kills the child instead of allowing its exit 3.
 - T2. Commit initialization/client/naming tests for E3–E8. Script outputs and assert complete
     requests/config bytes. No actual tmux needed. Pure version/command/env tests run on every OS.
 - T3. Commit filesystem registry tests for E9–E10 with private temp directories and controlled

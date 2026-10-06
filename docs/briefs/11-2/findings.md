@@ -1,6 +1,6 @@
 # Story review: slice 11-2
 
-Reviewed at commit ff264aa. Stories: 8. Check: ok.
+Reviewed at commit d7fd9a6. Stories: 8. Check: ok.
 
 ## Findings
 
@@ -13,6 +13,7 @@ Reviewed at commit ff264aa. Stories: 8. Check: ok.
 - [x] S2 (judgment-gap): R21 (owned by S6) makes `TmuxNames` reject an invalid instance/home with `ArgumentException`, which is behaviour of `SocketName` and `ConfigPath` that S2 introduces under R5. Fix: move that sentence to R5/E5 so S6 does not change S2's helpers.
 - [x] S2 (context-gap): R5 says options errors throw `ArgumentException("Invalid tmux host options.")` but not whether the constructor or `InitializeAsync` throws, and R7 says "Options/config write failures yield unavailable", which reads as the opposite for options. Fix: name the throwing member in R5 and remove "Options/" from R7.
 - [x] S6 (judgment-gap): S6 owns six rules over the start lock and listing, dead-pane replacement, registry transitions, attach commands and telemetry added to both the starter and S2's client, plus real-tmux tests and the integrated E11/E13/E14 assertions, which is more than one run for a Sonnet-level implementer. Fix: move R21/E21 and R22/E22 into their own story or stories that depend on S6, with T6 divided to match.
+- [x] S1 (context-gap): R23 reclassifies only a "broken-pipe/EPIPE" failure and says other IO failures are not reclassified, but .NET gives the stdin write, flush and close one `IOException` type on every OS, so the implementer must choose how to tell them apart (message text, HResult, errno) and what the other failures return. Fix: state in R23 either that any `IOException` from writing, flushing or closing stdin of a started child is this case, or the exact test on Linux and Windows and the result for the rest.
 
 ## Not checked
 
@@ -33,3 +34,11 @@ until replacement running is committed. Spec R13 and Changes after acceptance am
 same analysis. R9/E9 include the sidecar's persistent format/API; T3/T6 guard it.
 
 Architect, round 1: the diff 9e04218..ff264aa was read, including the spec 0004 R13 amendment, and the nine resolutions are accepted; no findings are open. The maintainer decision was read in lead's qitem-20261005215420-064ab307 and the brief and spec text match it.
+
+Architect, amendment for #181: the diff e434e52..11aeefa (R23, E23, T9 on S1; status and index lines) was read; stories S2 to S8 are unchanged. One finding above is open.
+
+Author amendment resolution: R23 now classifies any IOException from started-child stdin write, flush or close as early closure, using exception type only; no platform-specific message/HResult/errno decision remains. E23 states the same classification. stdout/stderr and process-start errors remain outside this rule, and R2 timeout/cancellation precedence is unchanged.
+
+Architect, amendment round 1: the resolution was read at 65a6442 and is accepted; no findings are open.
+
+Architect, re-cut: the branch was rebuilt on main as d7fd9a6; its brief, items and stories are byte-identical to 65a6442 and it differs from main only in these four files. No findings are open.

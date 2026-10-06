@@ -331,6 +331,7 @@ public sealed class SequenceAttachmentOverlayTests
         Assert.Contains(attached.Findings, finding => finding.Kind == SeatVocabulary.FindingNodeNotConnected && !finding.Open);
         var caughtUp = Apply(attached.State, Event(NodeId, 2, new UnknownBody()));
 
+        Assert.Equal(EventDisposition.Evidence, caughtUp.Disposition);
         Assert.Null(caughtUp.State.Overlay);
         Assert.Null(caughtUp.State.CatchUpSeq);
         Assert.Equal(caughtUp.State.KnownSession, caughtUp.State.Session);

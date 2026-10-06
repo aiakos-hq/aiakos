@@ -112,4 +112,30 @@ public sealed class NodeLinkEndpointPolicyTests
         Assert.Equal("NodeLink requires an explicit loopback HTTP endpoint.", nonLoopback.Message);
         Assert.Equal("NodeLink requires an explicit loopback HTTP endpoint.", indeterminate.Message);
     }
+
+    [Theory]
+    [InlineData(" http://127.0.0.1:5180")]
+    [InlineData("http://127.0.0.1:5180\n")]
+    public void ValidateConfiguredPassesOriginalAddressTextToStrictPolicy(string address)
+    {
+        var allPorts = Assert.Throws<InvalidOperationException>(() =>
+            NodeLinkEndpointPolicy.ValidateConfigured([address], grpcPort: null));
+        var selectedPort = Assert.Throws<InvalidOperationException>(() =>
+            NodeLinkEndpointPolicy.ValidateConfigured([address], grpcPort: 5180));
+
+        Assert.Equal("NodeLink requires an explicit loopback HTTP endpoint.", allPorts.Message);
+        Assert.Equal("NodeLink requires an explicit loopback HTTP endpoint.", selectedPort.Message);
+    }
+
+    [Theory]
+    [InlineData("not-a-url")]
+    [InlineData("https://127.0.0.1:5181")]
+    public void ValidateConfiguredRejectsIndeterminateCompanionWithSelectedGrpcPort(string companion)
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            NodeLinkEndpointPolicy.ValidateConfigured(
+                ["http://127.0.0.1:5180", companion], grpcPort: 5180));
+
+        Assert.Equal("NodeLink requires an explicit loopback HTTP endpoint.", exception.Message);
+    }
 }

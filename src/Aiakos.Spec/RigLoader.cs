@@ -91,7 +91,10 @@ public static class RigLoader
         var environmentDiagnostics = semanticDiagnostics.Where(item => item.File == envDocument.File).ToArray();
         var references = LoadReferenceIntegration.Load(root, rigDocument, agentDocuments, semanticDiagnostics,
             environmentDiagnostics, envDocument.File);
-        return new LoadResult(null, references.Diagnostics);
+        var resolved = references.Diagnostics.Any(item => item.Severity == Severity.Error)
+            ? null
+            : ResolvedRigAssembler.Assemble(rigDocument, agentDocuments, seatAgents, envDocument, references);
+        return new LoadResult(resolved, references.Diagnostics);
     }
 
     private static YamlNode? LoadFile(string path, string displayPath, RigFileKind kind, List<Diagnostic> allDiagnostics, out bool parsed)

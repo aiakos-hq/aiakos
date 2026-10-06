@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -35,7 +36,9 @@ builder.Services.AddOpenTelemetry()
 // Options: Aiakos:Instance and Aiakos:Nodes are bound but not validated here (spec 0002 owns tokens).
 var aiakosSection = builder.Configuration.GetSection(AiakosOptions.Section);
 builder.Services.Configure<AiakosOptions>(aiakosSection);
-builder.Services.Configure<NodeLinkOptions>(static _ => { });
+builder.Services.AddOptions<NodeLinkOptions>()
+    .Bind(builder.Configuration.GetSection("Aiakos:NodeLink"));
+builder.Services.AddSingleton<IValidateOptions<NodeLinkOptions>, NodeLinkOptionsValidator>();
 builder.Services.TryAddSingleton<INodeLinkApplication, EmptyNodeLinkApplication>();
 builder.Services.AddSingleton(static _ => TimeProvider.System);
 builder.Services.AddSingleton<NodeTokenRegistry>(services =>
@@ -50,14 +53,16 @@ var grpcPort = ReadGrpcPort(builder.Configuration);
 // Kestrel__EndpointDefaults__Protocols, which would apply to both endpoints.
 builder.WebHost.ConfigureKestrel((context, kestrel) =>
 {
+    kestrel.Limits.Http2.KeepAlivePingDelay = TimeSpan.FromSeconds(30);
+    kestrel.Limits.Http2.KeepAlivePingTimeout = TimeSpan.FromSeconds(10);
+
     var configuredAddresses = context.Configuration.GetSection("Kestrel:Endpoints").GetChildren()
         .Select(static endpoint => endpoint["Url"])
-        .Where(static url => !string.IsNullOrWhiteSpace(url))
-        .Cast<string>()
+        .OfType<string>()
         .ToList();
     var serverUrls = context.Configuration[WebHostDefaults.ServerUrlsKey];
-    if (!string.IsNullOrWhiteSpace(serverUrls))
-        configuredAddresses.AddRange(serverUrls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    if (serverUrls is not null)
+        configuredAddresses.AddRange(serverUrls.Split(';', StringSplitOptions.RemoveEmptyEntries));
     NodeLinkEndpointPolicy.ValidateConfigured(configuredAddresses, grpcPort);
 
     kestrel.ConfigureEndpointDefaults(listen =>
@@ -79,7 +84,11 @@ builder.Services.AddAkka("aiakos", akka => akka.ConfigureLoggers(loggers =>
     loggers.AddLoggerFactory();
 }));
 
-builder.Services.AddGrpc();
+builder.Services.AddGrpc(options =>
+{
+    options.MaxReceiveMessageSize = 4194304;
+    options.MaxSendMessageSize = 4194304;
+});
 builder.Services.AddHealthChecks()
     .AddCheck<MigrationsHealthCheck>(MigrationsHealthCheck.Name);
 
@@ -108,6 +117,10 @@ if (grpcPort is { } p)
 var nodeLink = app.MapGrpcService<NodeLinkService>();
 if (grpcPort is { } nodeLinkPort)
     nodeLink.RequireHost($"*:{nodeLinkPort.ToString(CultureInfo.InvariantCulture)}");
+
+// Resolve both before RunAsync starts Kestrel, so invalid timeouts and credentials fail startup.
+_ = app.Services.GetRequiredService<IOptions<NodeLinkOptions>>().Value;
+_ = app.Services.GetRequiredService<NodeTokenRegistry>();
 
 // A failed migration throws out of RunAsync after being logged with its script name, so the
 // process exits non-zero and never serves on a partially migrated database (R28). It is not
