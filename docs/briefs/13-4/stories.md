@@ -11,14 +11,16 @@ depends: S1
 owns: R2
 outputs: UP-resume
 tests: T2
-notes: Depends on 13-3 S5/S6 persistence stages; S7 region retry may still be in flight.
+notes: Depends on the merged transactional SeatActor input writer (`ISeatInputCommitter.ApplyAsync`),
+the actor reload observer (`ISeatActorLifecycle`), and the region gateway; 13-3 retry/reload
+integration may still be in flight and must be present before implementation.
 ## S3: Down and capture dispatcher
 goal: Dispatch stop/capture commands with bounded replies and state preservation.
 depends: S1
 owns: R3, R4
 outputs: DOWN-stop, CAPTURE
 tests: T3
-notes: Depends on 13-3 actor and region seams; capture remains evidence only.
+notes: Depends on the merged SeatActor lifecycle port and region gateway; capture remains evidence only.
 ## S4: Send and delivery dispatcher
 goal: Enforce safe send admission and persist one at-most-once delivery outcome.
 depends: S1, S2
@@ -32,11 +34,12 @@ depends: S2, S3, S4
 owns: R8
 outputs: RELOAD
 tests: T5
-notes: Depends on 13-3 S7/S8; 13-3 S9 host registration and 13-5 remain out of scope.
+notes: Depends on the merged `SeatActorReloaded` observer and region gateway; host registration
+and 13-5 restart/resync integration remain out of scope.
 ## S6: Observability and safety tests
 goal: Emit bounded structured observability for lifecycle operations without sensitive values.
 depends: S1, S2, S3, S4, S5
-owns: R9
+owns: R9, R10
 outputs: OBSERVE
 tests: T6
 notes: Depends on all dispatcher behavior; no harness or transport logging.

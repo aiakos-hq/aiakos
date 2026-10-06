@@ -31,8 +31,8 @@ No transport adapter, schema/migration, harness-specific branch, CLI or 15-2 API
 ```csharp
 namespace Aiakos.Core;
 public sealed record CallerContext(Guid TenantId, string User, string Sender);
-public sealed record SeatEnvelope(object Command);
-public interface ISeatCommandDispatcher { Task<object> DispatchAsync(SeatEnvelope command, CallerContext caller, CancellationToken ct); }
+public sealed record SeatCommandEnvelope(Guid TenantId, Guid SeatId, object Message);
+public interface ISeatCommandDispatcher { Task<object> DispatchAsync(SeatCommandEnvelope command, CallerContext caller, CancellationToken ct); }
 public sealed record SeatUp(bool Fresh, string? Note);
 public sealed record SeatDown;
 public sealed record SeatSend(string Body, bool Force);
@@ -47,7 +47,7 @@ public sealed record SeatCommandTimedOut(string Reason);
 ```
 
 15-2 resolves tenant/user/sender and calls `ISeatCommandDispatcher.DispatchAsync` with a
-`SeatEnvelope` and `CallerContext`; it changes its bridge to these Core types. 13-4 never reads
+`SeatCommandEnvelope` and `CallerContext`; it changes its bridge to these Core types. 13-4 never reads
 tokens or derives identity from a body. Existing `ISeatInputCommitter.ApplyAsync` remains the
 committed-input port; 13-4 owns row creation through its atomic `ISeatCommandStore.CommitAsync`.
 
@@ -57,13 +57,21 @@ G1. All command decisions use trusted `CallerContext`, reported state and node-l
     no body, address spelling or transport metadata can change tenant identity. Bodies and tokens
     never appear in logs or exception text.
 
-The outbound seam is `ISeatCommandPort`: `StartSeat(SeatLaunch)`, `StopSeat(Guid)`,
-`CapturePane(Guid)`, and `Deliver(Guid,string,string,bool)`, each accepting a cancellation token.
+The outbound seam is `ISeatCommandPort`: `Task<LaunchReceipt> StartSeatAsync(SeatLaunch launch, CancellationToken ct)`,
+`Task StopSeatAsync(Guid launchId, CancellationToken ct)`,
+`Task<PaneCapture> CapturePaneAsync(Guid launchId, CancellationToken ct)`, and
+`Task<DeliveryReceipt> DeliverAsync(Guid launchId, string lead, string body, bool force, CancellationToken ct)`.
 13-4 calls 12-1's `BuildLaunch`/`BuildDelivery` before invoking that port; 10-5 supplies the
 transport implementation. `ISeatCommandStore.CommitAsync` atomically writes `seat_session`,
 `seat_launch`, and `seat_command` rows (tenant, seat, command id/kind, caller and payload hash)
 before any port call. Stop/capture/send use the same store. Capture timeout is 5s, stop timeout
 10s, delivery timeout 15s, and quiet/activity watchdogs 10 minutes.
+
+The full store signature is `Task<CommitReceipt> CommitAsync(SeatCommandTransaction tx,
+CancellationToken ct)`. It writes `seat_session(tenant_id,seat_id,native_session_id,state)`,
+`seat_launch(launch_id,command_id,status)`, and
+`seat_command(command_id,kind,tenant_id,seat_id,user,sender,payload_hash)` together with the
+13-3 seat-state version check in one transaction; a version conflict returns `SEAT_STATE_CONFLICT`.
 
 The absent-seat down result is `SeatAlreadyDown`. A reload consumes 13-3's `SeatActorReloaded`,
 marks launch and delivery overlays unknown, requests capture for gaps, and releases queued work
@@ -84,20 +92,22 @@ R3. `SeatDown` records desired-down and dispatches one StopSeat for a current la
 R4. `SeatCapture` dispatches CapturePane whenever a launch exists, returns its PaneCapture or a
     fixed timeout reply, and changes no axis. A contradictory dead pane opens sources-disagree.
 R5. `SeatSend` requires live node, present session, idle activity and no delivery in flight.
-    Working/needs-input reject. Force permits unknown activity and records forced; all rejections
-    use fixed reasons and no command row.
+    Working/needs-input reject with `SEAT_WORKING`/`SEAT_NEEDS_INPUT`; no-link and in-flight
+    reject with `NODE_NOT_CONNECTED`/`DELIVERY_IN_FLIGHT`; Force permits unknown activity and records forced.
 R6. Accepted send persists a deliver command and lead/body before dispatch, records one outcome
     (confirmed, submitted-unconfirmed, not-delivered, failed or unknown), and never reissues it.
     A lost node makes the delivery unknown; reconnect resend belongs to NodeProxy only.
 R7. A confirmed delivery without matching prompt evidence opens sources-disagree after the next
     commit; activity follows harness events. Delivery bodies, tokens and raw evidence stay out of
     logs, traces and metrics.
-R8. Restart/reload and node-link events preserve the 13-3 lifecycle contract: live values become
-    unknown with the specified reason, gaps request capture and never fabricate events, and
-    SeatActorRestarted is emitted before any retained work is released. Capture and delivery
-    timeouts are bounded; cancellation never reissues or rolls back a committed command.
-R9. Every transition/finding emits the specified structured log/metric/span names, with IDs,
-    kinds, outcomes and reasons only. Command operations use seat.up/down/send/capture spans.
+R8. On `SeatActorReloaded`, this slice marks live launch/delivery overlays unknown, requests
+    capture for gaps, and releases queued work only after that notification. Cancellation never
+    reissues or rolls back a committed command.
+R9. Schedule quiet/activity watchdogs at 10 minutes and launch/delivery deadlines at the values
+    above; expiry writes the corresponding timeout outcome and never reissues a command.
+R10. Every transition/finding emits log `aiakos.seat.transitions`, metric
+    `aiakos_seat_commands_total`, and spans `seat.apply`, `seat.up`, `seat.down`, `seat.send`,
+    `seat.capture`, with IDs, kinds, outcomes and reasons only.
 
 ## Expected outputs: exact text
 
@@ -107,10 +117,10 @@ R9. Every transition/finding emits the specified structured log/metric/span name
 | `UP-resume` | failed resume then ordinary up | `RESUME_LOST`; only explicit Fresh accepted |
 | `DOWN-stop` | stop success/failure | absent on success; unknown/`stop-failed` on failure |
 | `CAPTURE` | launch present / missing | PaneCapture returned; fixed timeout reply; no axis change |
-| `SEND-reject` | working/needs-input/no-link/in-flight | fixed rejection; no deliver command |
+| `SEND-reject` | working/needs-input/no-link/in-flight | `SeatCommandRejected("SEAT_WORKING")`, `"SEAT_NEEDS_INPUT"`, `"NODE_NOT_CONNECTED"`, or `"DELIVERY_IN_FLIGHT"`; no deliver command |
 | `SEND-outcome` | accepted delivery | one command and one of `confirmed`, `submitted-unconfirmed`, `not-delivered`, `failed`, `unknown`; no resend |
-| `RELOAD` | restart/link gap | unknown overlay, capture request, `SeatActorRestarted` before queued work |
-| `OBSERVE` | transition/finding | `aiakos.seat.transitions`, `seat.apply`/`seat.up`/`seat.down`/`seat.send`/`seat.capture`; no bodies/tokens |
+| `RELOAD` | restart/link gap | unknown overlay, capture request, `SeatActorReloaded` before queued work |
+| `OBSERVE` | transition/finding | named log/metric/spans above; no bodies/tokens |
 
 ## Tests
 
