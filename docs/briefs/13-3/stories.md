@@ -22,33 +22,49 @@ outputs: READ-snapshot, READ-startup
 tests: T3
 notes: Separate reader class/private SQL helpers; no writer or actor is needed. Uses existing 13-2 schema, including current launch/session joins. Metadata for humans permits the later region to exclude them before child creation.
 
-## S4: Atomic seat evidence and conclusion writer
-goal: Commit evidence, transitions, state, findings, session rotation and received result metadata in one version-checked transaction.
+## S4: Atomic event and state writer foundation
+goal: Commit event evidence, transitions and version-checked state together with safe failure classification.
 depends: S2
-owns: R5, R6, R7, R8
-outputs: WRITE-atomic, WRITE-conflict, WRITE-evidence, WRITE-findings, WRITE-session, WRITE-results
+owns: R5, R6
+outputs: WRITE-atomic, WRITE-conflict, WRITE-evidence
 tests: T4
-notes: One transaction concern with a separate writer class; uses supplied before/steps, not S3 reader or S5 actor. R5 order enables rollback evidence; R7 consumes persistence-only rotation. R8 records existing command outcomes only, never creates or sends commands. No schema edits. If breadth exceeds one run, report actual size evidence to architect; no escalation assumed.
+notes: Separate writer class; supplied snapshots/steps need no S3 reader or actor. G2 stages unsupported findings/rotation/results with explicit failure until owner lands. No schema edits; SQL rollback test after event inserts. NUL raw storage is R6, full gap finding/receipt tested later.
 
-## S5: Serialized seat apply and commit actor
+## S5: Atomic finding and session rotation persistence
+goal: Extend the writer transaction with recurring/resolved findings and new or reused native-session pointers.
+depends: S4
+owns: R7
+outputs: WRITE-findings, WRITE-session
+tests: T8
+notes: Same writer class after S4, remove G2 finding/rotation guard here. R7 same-seat reuse preserves history; foreign-owner race rolls back and R9 later replans terminal gap. No actor implementation is needed for direct writer tests. Expand rollback coverage.
+
+## S6: Received command and launch outcomes
+goal: Extend the writer transaction with existing command, delivery and launch result metadata without creation or dispatch.
+depends: S5
+owns: R8
+outputs: WRITE-results
+tests: T9
+notes: Same writer class after S5; remove G2 result guard. R8 uses existing DeliveryStateMachine and R7 finding semantics. Expand rollback coverage; no commands sent or tokens changed.
+
+## S7: Serialized seat apply and commit actor
 goal: Apply normalized events/link inputs serially and return success only after committing; fail safely and reload on restart.
 depends: S1, S2
 owns: R9, R10
 outputs: ACTOR-commit, ACTOR-reject, ACTOR-fail
 tests: T5
-notes: Fake reader/writer/profile and named S2 requests/SeatChildLoaded allow real actor tests without S3/S4 or the S6 gateway. No production harness profile exists; reject its absence. Actual public observer and gateway cancellation assertions belong to S6. External RequestCapture effects only return after commit.
+notes: Fake reader/writer/profile and named S2 requests/SeatChildLoaded allow real actor tests without S3/S4 or the S8 gateway. No production harness profile exists; reject its absence. Actual public observer and gateway cancellation assertions belong to S8. External RequestCapture effects only return after commit.
 
-## S6: Seat region routing, gateway and reload notification
+## S8: Seat region routing, gateway and reload notification
 goal: Route eligible tenant seats to supervised children, expose the three commit ports, and notify node consumers only after successful restart reload.
-depends: S5
+depends: S7
 owns: R11, R12, R13
 outputs: REGION-route, REGION-limit, REGION-reload, ACTOR-cancel
 tests: T6
-notes: Uses S5 actor with fake stores; no S3/S4 dependency. R11 clones/admission/cancellation handles unread callers. R12 writes only actor-stopped seat findings through writer port, never node-scoped findings. R13 observer is the exact 10-4 re-forward seam; no node facade dependency.
+notes: Uses S7 actor with fake stores; no concrete writer/reader dependency. R11 clones/admission/cancellation handles unread callers. R12 writes only actor-stopped seat findings through writer port, never node-scoped findings. R13 observer is the exact 10-4 re-forward seam; no node facade dependency.
 
-## S7: Production shell registration and host integration
+## S9: Production shell registration and host integration
 goal: Host the region after migrations with concrete Postgres stores and expose the same gateway singleton through all ports.
-depends: S3, S4, S6
+depends: S3, S6, S8
 owns: R14, C1
 outputs: HOST-shell
 tests: T7

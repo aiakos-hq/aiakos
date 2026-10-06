@@ -38,7 +38,9 @@ HOST-shell	output	once	R14,C1
 T1	test	once	R1
 T2	test	once	R2,R3
 T3	test	once	R4
-T4	test	once	R5,R6,R7,R8
+T4	test	once	R5,R6,G2
 T5	test	once	R9,R10
 T6	test	once	R11,R12,R13
 T7	test	once	R14,C1
+T8	test	once	R7,G2
+T9	test	once	R8,G2
