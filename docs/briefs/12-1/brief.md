@@ -28,6 +28,11 @@ persist native IDs, authenticate callers or dispatch commands.
 BuildLaunch accepts caller-supplied projection and relay files. Later14-5 supplies projection
 bytes, 12-2 supplies the actual relay, and 13-4/10-5 assemble the input and persist native IDs
 before dispatch. This is an explicit application seam, not a default relay or assumed writer.
+Maintainer decision of 2026-10-06 (qitem-20261006123052-cc0bd3ce): safe ~/ api-key
+source references are accepted and expanded by the node's runtime HOME in a fixed helper
+command; the orchestrator never looks up its own HOME. This analysis also clarifies spec0005
+R36 in the same PR, which must be marked **read this one** for maintainer review.
+
 Tests use named opaque file fixtures. No story needs those absent implementations to compile
 or prove the pure adapter. Profile is independently useful to 13-3 as soon as it merges.
 
@@ -152,14 +157,21 @@ R4. Hooks property order is SessionStart,UserPromptSubmit,PreToolUse,PermissionR
     No projected .claude/settings.json; all settings go in the --settings file.
 
 R5. Subscription has no apiKeyHelper and no credential added. For api-key require exactly one
-    ResolvedSeatSecret named anthropic_api_key, File absolute matching ^/[A-Za-z0-9._/-]+$
-    with no . or .. segment, otherwise InvalidOperationException("INVALID_LAUNCH"). Emit
-    apiKeyHelper's parsed value is "cat '<source File>'". For /keys/anthropic.key the exact
-    final property line is two ASCII spaces followed by
-    `"apiKeyHelper": "cat \u0027/keys/anthropic.key\u0027"` and LF (no comma).
-    The quotes in the parsed helper are not literal apostrophe bytes in JSON. Never read/copy secret contents or create a SeatSecret
-    proto, env credential, key value or secret fixture. Other secret references remain outside
-    this adapter's result. Node12-4 checks actual existence/mode; this pure API does not guess it.
+    ResolvedSeatSecret named anthropic_api_key. File must start with / or ~/ followed by a
+    nonempty ASCII path using only [A-Za-z0-9._/-], no empty/./.. segment; otherwise
+    InvalidOperationException("INVALID_LAUNCH"). Reject ~user/, relative paths, spaces,
+    non-ASCII, quote, dollar, backtick, backslash and controls. Absolute source parsed helper
+    is exactly "cat '<source File>'". For ~/ source remove that anchor and emit parsed helper
+    exactly `cat "$HOME/<rest>"`; no orchestrator environment lookup/expansion. Node shell
+    expands its HOME when Claude invokes the helper. Only that fixed syntax adds a dollar/quotes;
+    supplied rest cannot inject them. For /keys/anthropic.key the final JSON property line is
+    two ASCII spaces then `"apiKeyHelper": "cat \u0027/keys/anthropic.key\u0027"` and LF (no comma).
+    For ~/.config/aiakos/secrets/anthropic_api_key it is two ASCII spaces then
+    `"apiKeyHelper": "cat \u0022$HOME/.config/aiakos/secrets/anthropic_api_key\u0022"` and LF.
+    These are exact file bytes; decoded helper quotes are not literal quote bytes in JSON.
+    Never read/copy secret contents or create a SeatSecret proto, env credential, key value or
+    secret fixture. Other secret references remain outside this adapter's result. Node12-4
+    checks actual existence/mode; this pure API does not guess it.
 
 R6. BuildLaunch checks session.Id first: invalid per R1 ->
     InvalidOperationException("INVALID_SESSION_ID"). Then permit Fresh/Resume; Fork ->
@@ -234,7 +246,7 @@ No source tree, caller API, real node or Claude exists in this fixture.
 | `E2` | every HarnessEventKind/source and valid/missing previous_session_id | readiness only SessionStarted startup/resume/fork/clear; conversation only PromptSubmitted/TurnEnded/TurnFailed; rotation only clear with valid previousID; unknown/compact/idle/tool/input false; attributes untouched |
 | `E3` | base settings and Unicode permissions; duplicate tmuxdeny; invalid mode/auth/harness/string | exact ordered LF/UTF8 JSON R3 with disableAllHooks false, preserved permission lists and exactly one appended tmux rule; valid Unicode preserved after parse; fixed INVALID_LAUNCH for invalid inputs, no platform-normalization exception |
 | `E4` | settings hooks/status | exactly11 ordered hooks, only4 matcher*, timeout5, exact placeholder relay commands R4; statusLine command exact withouttimeout; noextra key |
-| `E5` | subscription/api-key; missing/duplicate/unsafe secretpath | subscription has nohelper/credential; api-key helper exactly cat '/keys/anthropic.key' for source path fixture, parsed helper value cat quoted path; file JSON line is two spaces then "apiKeyHelper": "cat \u0027/keys/anthropic.key\u0027" followed by LF; no file read/value; invalid path/reference fixed INVALID_LAUNCH |
+| `E5` | subscription/api-key; absolute and ~/ source; missing/duplicate/unsafe reference | subscription has no helper/credential; /keys/anthropic.key decoded helper is cat '/keys/anthropic.key', exact final JSON line is two spaces then "apiKeyHelper": "cat \u0027/keys/anthropic.key\u0027" and LF; ~/.config/aiakos/secrets/anthropic_api_key decoded helper is cat "$HOME/.config/aiakos/secrets/anthropic_api_key", exact final JSON line is two spaces then "apiKeyHelper": "cat \u0022$HOME/.config/aiakos/secrets/anthropic_api_key\u0022" and LF; no host HOME lookup/file read/value; ~user/relative/dot-segment/space/non-ASCII/quote/dollar/backtick/backslash/control paths and missing/duplicate source fixed INVALID_LAUNCH |
 | `E6` | Fresh/Resume; modelnull/empty/Unicode; invalidsession/Fork/path | exact R6 argv/env/terminal160x45/ready15s; Resume has no session-id, model single verbatimarg; invalidID beforeother checks INVALID_SESSION_ID, Fork LAUNCH_MODE_NOT_SUPPORTED, invalidmode/path INVALID_LAUNCH; /srv and ~/aiakos/seats anchors accepted unchanged with placeholder argv, loader-valid space/non-ASCII path fixed INVALID_LAUNCH; no credential |
 | `E7` | projection/relay supplied files shuffled/mutated; missing/duplicate/unsafefile | exact bytes preserved, pathsorted roots SeatHome, projection0644false/relay0755false/settings0644true; snapshotimmutable, no checkout IO; malformed bundle INVALID_LAUNCH before result |
 | `E8` | body CRLF/CR/TAB/noncharacters/control/surrogate/maxbytes; sender/commandid | normal lead exactly [aiakos from operator #12345678] plus one space; normalizedbody with TAB preserved, confirmationtrue5s; exact R8 INVALID_DELIVERY/INVALID_INPUT/INPUT_TOO_LARGE, no body echoed in error |
@@ -253,7 +265,8 @@ not generated by production implementation; sourcebytes intentionally absent fro
     one ready/rotation/conversation example through existing pure state machine with this
     profile to prove current-session ID ownership remains caller-controlled (no state changes).
 - T2. Commit byte-exact settings golden for E3-E5, including property/hook order, final LF,
-    duplicate deny preservation, subscription/API-path only. Test U+FFFE/nonBMP and fixed invalid
+    duplicate deny preservation, subscription and absolute/~/ API-path references, exact escaped
+    helper bytes and no host HOME lookup. Test U+FFFE/nonBMP and fixed invalid
     surrogate/control rejection. Verify no environment/key content is read or returned.
 - T3. Commit E6/E7 Fresh/Resume argv/env/files golden and malformed bundle cases. Bytes may
     be arbitrary opaque projection/relay evidence, never interpreted/executed. Input and output
