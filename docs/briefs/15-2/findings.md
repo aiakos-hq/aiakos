@@ -1,6 +1,6 @@
 # Story review: slice 15-2
 
-Reviewed at commit 62fb2b1. Stories: 6. Check: ok.
+Reviewed at commit ada84ed. Stories: 6. Check: ok.
 
 ## Findings
 
@@ -24,6 +24,9 @@ removed from this slice.
 - [x] S5 (context-gap), remaining from the eighth finding: `/down` and `/send` return `AcceptedResponse(Guid LaunchId, Guid CommandId)`, which has no launch id to give for a stop or a delivery, and no HTTP status is stated for any command response (accepted, already up, no-op, capture, capture timeout). Fix: give each command its own response shape or make the launch id optional, and add the status code of every response to the route list.
 - [x] S4 (context-gap), remaining from the sixth finding: `SEAT_REJECTED` has "fixed actor detail" without the text, and the table has no reason for a malformed or invalid request body although R6 maps validation to 400 and the table ends with "No other reason is emitted". Fix: add the detail text and the validation reason to the table.
 - [x] S6 (context-gap), remaining from the seventh finding: R9 itself still says `cli.<command>` and an OTLP export with a one second flush, the new section says `api.<command>` and no export, and `Aiakos:Api:OtlpEndpoint` is still a configuration key; the values of `<command>` per route are not listed. Fix: rewrite R9 and E7 to the new section's rule, remove the key, and list the command name of each route.
+- [ ] S3 (context-gap), open after round 2: R5 recomputes both hashes "with the existing `ResolvedRig` canonicalizer", but that canonicalizer (`RigCanonicalizer.Create`) takes a `ResolvedRig` object, not the request's `Resolved` JSON string, and it and `CanonicalJson.Write` are internal to `Aiakos.Spec`, visible only to its test assembly, while `src/Aiakos.Spec/` is not in this slice's paths, so the story depends on something that does not exist in usable form. Fix: decide where the recomputation lives (a public entry point in `Aiakos.Spec` with that project added to the paths, or another named rule) and state it in R5.
+- [ ] S3 (context-gap), open after round 2: C2 says `resolved` "stores complete canonical file contents" and spec 0007 R34 sends "canonical form plus file contents", but `RegisterRigRequest` has only the `Resolved` string, and the canonical JSON holds descriptors (path, hash, size), not bytes; the contents are a separate map in `CanonicalRigResult`. Fix: add the field that carries the contents to `RegisterRigRequest`, with its encoding, and say in C2 where they are stored.
+- [ ] S3 (context-gap), open after round 2: `RigRegistration` and `RigRevisionReceipt` (parameter and result of `IRigRevisionRepository.AppendAsync`) have no properties, and C2 lists the revision table's columns without types, nullability or the name of the seat table and columns that R5's upsert writes. Fix: give both records' properties and the migration's column types, and name the seat columns the upsert sets.
 
 ## Not checked
 
@@ -33,3 +36,5 @@ removed from this slice.
 - Size and order were not judged beyond the tie in the fourth finding: the stories cannot be sized until their surface is written down.
 
 Architect, round 1: the diff b16b72b..62fb2b1 was read. Accepted: the configuration keys, token store and loopback error (third finding), the route list now visible to every story (fourth finding), the problem table and the version header except for the two points above. Six points remain open, written as new findings above; the author's ticks on the first, second, fifth, sixth, seventh and eighth findings stand only for the parts named as accepted. R5, R9, the expected outputs table, items and stories are unchanged in that commit. `InstanceDefaults.ReleasedPortBase` and `ApiPortOffset` exist on main.
+
+Architect, round 2: the diff 4ab83f6..ada84ed was read. Accepted: S1's external prerequisite on 13-4, the resolver members, `NodeResponse`, `ProblemResponse`, the command responses with their status codes, `INVALID_REQUEST` and the `SEAT_REJECTED` text, R9's activity names with the export removed, and the registration request, response and E4 documents. Three points on S3 remain open, written above. This was the second round, so the slice goes to lead with them instead of back to the author. Read in the source: `RigCanonicalizer` and `CanonicalJson` are `internal` in `Aiakos.Spec` and `AssemblyInfo.cs` exposes internals only to `Aiakos.Spec.Tests`.
