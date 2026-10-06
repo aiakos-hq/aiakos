@@ -74,7 +74,7 @@ public sealed class TmuxClientTests
         Directory.CreateDirectory(home);
         var source = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["PATH"] = "/usr/bin:/bin", ["HOME"] = home, ["LANG"] = "en_US.UTF-8",
+            ["PATH"] = "/usr/bin:/bin", ["LANG"] = "en_US.UTF-8",
             ["LC_ALL"] = "", ["TMUX"] = "sentinel-secret", ["AIAKOS_NODE_TOKEN"] = "sentinel-token",
             ["OTEL_EXPORTER_OTLP_HEADERS"] = "sentinel-diagnostic", ["DOTNET_ENVIRONMENT"] = "sentinel-dotnet"
         };
@@ -107,6 +107,7 @@ public sealed class TmuxClientTests
         Assert.DoesNotContain("AIAKOS_NODE_TOKEN", versionRequest.Environment.Keys);
         Assert.DoesNotContain("OTEL_EXPORTER_OTLP_HEADERS", versionRequest.Environment.Keys);
         Assert.DoesNotContain("DOTNET_ENVIRONMENT", versionRequest.Environment.Keys);
+        Assert.DoesNotContain("HOME", runner.Requests.Skip(2).Take(4).Select(request => request.Arguments[8]));
         Assert.Equal("show-environment", runner.Requests[1].Arguments[5]);
         Assert.Equal("-f", runner.Requests[1].Arguments[1]);
         Assert.Equal("/usr/bin/tmux", runner.Requests[1].FileName);

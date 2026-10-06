@@ -15,6 +15,8 @@ public sealed class TmuxClient
     [
         "HOME", "USER", "LOGNAME", "SHELL", "PATH", "TMUX_TMPDIR", "XDG_RUNTIME_DIR"
     ];
+    private static readonly HashSet<string> AllowedBaseEnvironmentNames =
+        new(BaseEnvironmentNames, StringComparer.Ordinal);
     private static readonly Action<ILogger, string, Exception?> LogExecutable =
         LoggerMessage.Define<string>(LogLevel.Information, new EventId(0, nameof(LogExecutable)), "tmux executable: {Path}");
     private static readonly Action<ILogger, string, Exception?> LogRemovedEnvironment =
@@ -241,7 +243,7 @@ public sealed class TmuxClient
 
         foreach (var name in ParseEnvironmentNames(environmentResult.Stdout))
         {
-            if (_clientEnvironmentNames.Contains(name))
+            if (AllowedBaseEnvironmentNames.Contains(name) || _clientEnvironmentNames.Contains(name))
                 continue;
 
             var unsetResult = await InvokeCommandAsync(["set-environment", "-g", "-u", name], null, ct)
