@@ -154,7 +154,10 @@ R4. Hooks property order is SessionStart,UserPromptSubmit,PreToolUse,PermissionR
 R5. Subscription has no apiKeyHelper and no credential added. For api-key require exactly one
     ResolvedSeatSecret named anthropic_api_key, File absolute matching ^/[A-Za-z0-9._/-]+$
     with no . or .. segment, otherwise InvalidOperationException("INVALID_LAUNCH"). Emit
-    apiKeyHelper="cat '<source File>'". Never read/copy secret contents or create a SeatSecret
+    apiKeyHelper's parsed value is "cat '<source File>'". For /keys/anthropic.key the exact
+    final property line is two ASCII spaces followed by
+    `"apiKeyHelper": "cat \u0027/keys/anthropic.key\u0027"` and LF (no comma).
+    The quotes in the parsed helper are not literal apostrophe bytes in JSON. Never read/copy secret contents or create a SeatSecret
     proto, env credential, key value or secret fixture. Other secret references remain outside
     this adapter's result. Node12-4 checks actual existence/mode; this pure API does not guess it.
 
@@ -162,8 +165,12 @@ R6. BuildLaunch checks session.Id first: invalid per R1 ->
     InvalidOperationException("INVALID_SESSION_ID"). Then permit Fresh/Resume; Fork ->
     InvalidOperationException("LAUNCH_MODE_NOT_SUPPORTED"), Unspecified/unknown ->
     InvalidOperationException("INVALID_LAUNCH"). Require resolved Harness=claude-code, safe ASCII
-    absolute SeatDir/Workdir/ProjectionRoot (R5 path grammar), ProjectionRoot=SeatDir+/projection,
-    and seat/rig ASCII schema IDs, otherwise INVALID_LAUNCH. No native-ID mint/persist/fallback.
+    node SeatDir/Workdir/ProjectionRoot anchored by / or ~/ (remaining characters
+    [A-Za-z0-9._/-], no empty/./.. segment), ProjectionRoot=SeatDir+/projection,
+    and seat/rig ASCII schema IDs, otherwise INVALID_LAUNCH. Tilde is retained verbatim;
+    only the node knows its HOME. A loader-valid path containing space or non-ASCII is
+    INVALID_LAUNCH here, matching the node shell-safe launch requirement, never silently quoted
+    or normalized. These paths never replace placeholders in argv/settings. No native-ID mint/persist/fallback.
     Fresh argv exactly [claude,--session-id,<id>,-n,<seat>@<rig>,--settings,
     ${AIAKOS_SEAT_HOME}/aiakos/claude-settings.json,--add-dir,${AIAKOS_SEAT_HOME}/projection];
     Resume replaces --session-id with --resume and contains no --session-id. If Model nonnull
@@ -227,8 +234,8 @@ No source tree, caller API, real node or Claude exists in this fixture.
 | `E2` | every HarnessEventKind/source and valid/missing previous_session_id | readiness only SessionStarted startup/resume/fork/clear; conversation only PromptSubmitted/TurnEnded/TurnFailed; rotation only clear with valid previousID; unknown/compact/idle/tool/input false; attributes untouched |
 | `E3` | base settings and Unicode permissions; duplicate tmuxdeny; invalid mode/auth/harness/string | exact ordered LF/UTF8 JSON R3 with disableAllHooks false, preserved permission lists and exactly one appended tmux rule; valid Unicode preserved after parse; fixed INVALID_LAUNCH for invalid inputs, no platform-normalization exception |
 | `E4` | settings hooks/status | exactly11 ordered hooks, only4 matcher*, timeout5, exact placeholder relay commands R4; statusLine command exact withouttimeout; noextra key |
-| `E5` | subscription/api-key; missing/duplicate/unsafe secretpath | subscription has nohelper/credential; api-key helper exactly cat '/keys/anthropic.key' for source path fixture, no file read/value; invalid path/reference fixed INVALID_LAUNCH |
-| `E6` | Fresh/Resume; modelnull/empty/Unicode; invalidsession/Fork/path | exact R6 argv/env/terminal160x45/ready15s; Resume has no session-id, model single verbatimarg; invalidID beforeother checks INVALID_SESSION_ID, Fork LAUNCH_MODE_NOT_SUPPORTED, invalidmode/path INVALID_LAUNCH; no credential |
+| `E5` | subscription/api-key; missing/duplicate/unsafe secretpath | subscription has nohelper/credential; api-key helper exactly cat '/keys/anthropic.key' for source path fixture, parsed helper value cat quoted path; file JSON line is two spaces then "apiKeyHelper": "cat \u0027/keys/anthropic.key\u0027" followed by LF; no file read/value; invalid path/reference fixed INVALID_LAUNCH |
+| `E6` | Fresh/Resume; modelnull/empty/Unicode; invalidsession/Fork/path | exact R6 argv/env/terminal160x45/ready15s; Resume has no session-id, model single verbatimarg; invalidID beforeother checks INVALID_SESSION_ID, Fork LAUNCH_MODE_NOT_SUPPORTED, invalidmode/path INVALID_LAUNCH; /srv and ~/aiakos/seats anchors accepted unchanged with placeholder argv, loader-valid space/non-ASCII path fixed INVALID_LAUNCH; no credential |
 | `E7` | projection/relay supplied files shuffled/mutated; missing/duplicate/unsafefile | exact bytes preserved, pathsorted roots SeatHome, projection0644false/relay0755false/settings0644true; snapshotimmutable, no checkout IO; malformed bundle INVALID_LAUNCH before result |
 | `E8` | body CRLF/CR/TAB/noncharacters/control/surrogate/maxbytes; sender/commandid | normal lead exactly [aiakos from operator #12345678] plus one space; normalizedbody with TAB preserved, confirmationtrue5s; exact R8 INVALID_DELIVERY/INVALID_INPUT/INPUT_TOO_LARGE, no body echoed in error |
 | `E9` | /compact,/clear,/exit,/resume,/login, slash arguments, multiline and ordinary prose | only trimmed /compact accepted: empty lead, confirmationfalse5s, original normalized body preserved; disallowed slash fixed SLASH_COMMAND_NOT_ALLOWED; ordinary prose normal R8 behavior |
