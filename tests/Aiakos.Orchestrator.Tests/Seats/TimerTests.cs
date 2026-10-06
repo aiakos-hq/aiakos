@@ -27,6 +27,7 @@ public sealed class TimerTests
         Assert.Contains(timedOut.Findings,
             finding => finding.Kind == SeatVocabulary.FindingActivityStale && finding.Open);
         Assert.Empty(timedOut.Effects);
+        Assert.Null(timedOut.Disposition);
         SeatAssert.Invariants(timedOut);
 
         AssertUnchanged(State(SessionValue.Present, ActivityValue.Working) with

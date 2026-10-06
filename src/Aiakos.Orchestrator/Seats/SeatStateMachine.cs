@@ -44,7 +44,7 @@ public static class SeatStateMachine
 
             var quiet = SetActivity(state, ActivityValue.Unknown, null, SeatVocabulary.ActivityReasonQuietTimeout,
                 state.PendingInputRequest, now, "A15");
-            return WithFindings(quiet, Open(SeatVocabulary.FindingActivityStale));
+            return WithFindings(quiet, Open(SeatVocabulary.FindingActivityStale)) with { Disposition = null };
         }
 
         if (input is UnknownProlongedFired)
