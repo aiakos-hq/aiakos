@@ -2,7 +2,7 @@
 id: 12-1
 title: "#12 slice 1 — Claude orchestrator adapter"
 issue: 12
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Orchestrator/Harnesses/, src/Aiakos.Orchestrator/Program.cs, src/Aiakos.Orchestrator/Aiakos.Orchestrator.csproj, tests/Aiakos.Orchestrator.Tests/Harnesses/]
 date: 2026-10-06
