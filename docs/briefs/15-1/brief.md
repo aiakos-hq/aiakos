@@ -134,7 +134,7 @@ C1. Replace preview greeting and placeholder README examples with command help a
 R1. Add System.CommandLine2.0.12 centrally and create the production command tree. Parse fresh
     per call, using System.CommandLine parsing, not a hand-written token parser. `--help`/`-h`
     for root and each command/group returns generated help; no args gives root help. `--version`
-    only at root, alone, returns Version=true. Help/version require no instance/path lookup.
+    only at root (no subcommand/positionals), optionally with global options, returns Version=true. Help/version require no instance/path lookup.
     Generated help must contain the exact command/option names below and an appended plain
     paragraph `Exit codes: 0 done; 1 unsuccessful outcome; 2 invalid input; 3 instance unavailable; 4 incompatible version; 5 authentication failed.`
     Do not golden-test library wrapping/localized boilerplate. Root description is
@@ -169,7 +169,12 @@ R2. Grammar (all names case-sensitive; System.CommandLine standard `--` end-of-o
     Group `instance` with no child gives group help. Defaults are strings as shown; absent
     optional scalars/flags/repeat options have no dictionary key. Unknown nonempty environment
     values only affect parsing when no explicit instance overrides them. Null/empty env selects
-    release. Empty option strings and empty required seat/text/file/rig/node/distro values fail.
+    release. A syntactically valid help/version request bypasses instance-value validation:
+    `--help` and `--version` with AIAKOS_INSTANCE=BAD return help/version respectively (exit0);
+    `--instance BAD --help` and `--instance BAD --version` likewise return help/version (exit0).
+    No resolved instance or Request is produced. Missing option values/unrecognized tokens still
+    fail grammar; this exception ignores only the instance value, not arbitrary syntax errors.
+    Empty option strings and empty required seat/text/file/rig/node/distro values fail.
 R3. CliRequestValidator.Validate is pure and returns null or exactly `Invalid command line.`.
     `up --fresh` requires at least one seat; note requires fresh; no-wait/dry-run combination
     is accepted (no-wait has no local effect). Down requires exactly one nonempty selector:
@@ -236,7 +241,13 @@ R8. For up --dry-run, resolve optional rig-dir against currentDirectory (default
 R9. Program is a thin asynchronous entry calling CliApplication with real CliGitRunner and
     GitEnvChecker. Dispose created resources. Smoke invocation of built CLI and temporary
     `dotnet pack` install must work cross-platform for help/version/dry run, never install/update
-    the authenticated user's global tool. README lists only supported local behavior and the
+    the authenticated user's global tool. Pack into a private temporary package folder; create
+    a temporary NuGet.Config with packageSources cleared and ONLY that folder as a source.
+    Install with that --configfile, explicit --version 0.0.1-preview.1, temporary --tool-path and
+    private NUGET_PACKAGES/NUGET_HTTP_CACHE_PATH/DOTNET_CLI_HOME directories in the subprocess
+    environment. Do not use owner caches, fallback feeds, nuget.org or a published/cached same-ID
+    package; smoke must execute exactly the just-packed payload. Restore the calling environment
+    (prefer per-process variables); clean only owned temporary paths. README lists only supported local behavior and the
     honest not-implemented result. Package/runtime payload/release version remains15-5.
 
 ## Expected outputs: exact text
@@ -254,14 +265,14 @@ seat: "impl" node: "local" harness: "claude-code" model: null checkout: "shared"
 
 | ID | Input | Exact expectation |
 |---|---|---|
-| `E1` | root/help/version and grammar/defaults matrix R1/R2 | recognized command paths/options/defaults exactly R2; help contains exact names/Purpose/exit paragraph; root version=true; malformed parse error Invalid command line.; immutable independent snapshots |
+| `E1` | root/help/version and grammar/defaults matrix R1/R2 | recognized command paths/options/defaults exactly R2; help contains exact names/Purpose/exit paragraph; root version=true; help/version with invalid environment instance or --instance BAD => help/version exit0 without instance resolution; malformed parse error Invalid command line.; immutable independent snapshots |
 | `E2` | cross-field validation R3 | fresh without seat; note without fresh; conflicting/missing down/send sources; invalid wait; ps seat plus rig; json unsupported; dev host mutation => Invalid command line.; other legal combinations => null |
 | `E3` | renderer demo and Unicode/null/human/multiple seats | exact R4 text above; unchanged rig order and JSON-quoted strings; no file/secret payload |
 | `E4` | renderer demo, empty/null load, diagnostics/notices | {"api":"v1","rig":"demo","spec_hash":"s","binding_hash":"b","seats":[{"id":"owner","kind":"human","node":null,"harness":null,"model":null,"checkout":null,"workdir":null},{"id":"impl","kind":"agent","node":"local","harness":"claude-code","model":null,"checkout":"shared","workdir":"/repo"}],"diagnostics":[],"notices":[]} plus LF; null load has null rig/hashes and empty seats; exact ordered diagnostic fields R5 |
 | `E5` | fake git tracked/untracked/missing/outside/timeout/cancel paths | exact argv/ordering R6; tracked one Warning AIK5010 and exact message; missing/timeout exact notices; no commands after terminal outcome; cancellation propagated; immutable results |
 | `E6` | application parse/help/version/unimplemented/canceled | exact stdout/stderr/codes R7/G2; -v no longer version; no argument/env/body leakage or instance access |
 | `E7` | actual loader minimal and negative fixtures with fake git; env override/default cwd/JSON | text summary/JSON exact R4/R5; diagnostics relative cwd using unchanged formatter; loader error exit2 without text summary but with JSON document; success0; no IO writes/network/instance dependency |
-| `E8` | built/packed isolated executable help/version/local dry run | package identity unchanged; preview greeting gone; command tree/help and dry run usable; isolated install only; operational invocation fixed not-implemented exit1 |
+| `E8` | built/packed isolated executable help/version/local dry run | package identity unchanged; preview greeting gone; command tree/help and dry run usable; isolated local-only fresh-package install with private NuGet/tool/home caches; operational invocation fixed not-implemented exit1 |
 
 ## Tests
 
@@ -280,7 +291,8 @@ canonicalization. Fake git runner records argv and uses TaskCompletionSource for
     proving tracked/untracked/outside and space/non-ASCII paths. No authenticated checkout writes.
 - T5. Commit application E6/E7 golden streams/exit codes and executable E8 smoke; fake checker
     input capture, files-before/after comparison, env override and no instance/network requirement.
-    Package smoke uses temporary output/tool path, no global install. Earlier CLI/version identity
+    Package smoke uses R9 temporary-only NuGet.Config/source/packages/http-cache/tool/home paths,
+    explicitly proving fresh payload rather than published/cached placeholder; no global install. Earlier CLI/version identity
     checks are updated only for C1 and all Spec tests remain green.
 
 ## Done
