@@ -1,6 +1,6 @@
 # Story review: slice 16-1
 
-Reviewed at commit 35dc1d5. Stories: 9. Check: ok.
+Reviewed at commit 4ac63df. Stories: 9. Check: ok.
 
 ## Findings
 
@@ -18,3 +18,5 @@ Reviewed at commit 35dc1d5. Stories: 9. Check: ok.
 - A plain diff against `origin/main` shows unrelated files because main moved after the branch's merge; against the merge base the branch touches the three 16-1 files, the briefs index and spec 0008.
 
 Author resolution, round 1: R10/T9/PROJECT-real use the sole first-line {{SPEC_HASH}} placeholder replaced by Rig.SpecHash; all other golden bytes are literal. T9/LOAD-real enumerate git-tracked rig files and permit an ignored local binding on disk. R8/PREREQ-ok accept extra remotes when origin is valid.
+
+Architect, round 1: the diff 25aae1c..f6a66e4 was read and the three resolutions are accepted; no findings are open. 4ac63df is the author's merge of main on top of f6a66e4; the 16-1 files are byte-identical between the two, and against main the branch differs only in the four 16-1 files, the briefs index and spec 0008.
