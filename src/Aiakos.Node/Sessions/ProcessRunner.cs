@@ -77,6 +77,7 @@ public sealed class ProcessRunner : IProcessRunner, IDisposable
             try
             {
                 await Task.WhenAll(stdinTask, stdoutTask, stderrTask, exitTask).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
                 if (timeout.IsCancellationRequested)
                 {
                     await StopAndJoinAsync(process, stdinTask, stdoutTask, stderrTask, exitTask).ConfigureAwait(false);
@@ -147,15 +148,40 @@ public sealed class ProcessRunner : IProcessRunner, IDisposable
                 while (!bytes.IsEmpty)
                 {
                     var length = Math.Min(PipeChunkBytes, bytes.Length);
-                    await stream.WriteAsync(bytes[..length], ct).ConfigureAwait(false);
+                    try
+                    {
+                        await stream.WriteAsync(bytes[..length], ct).ConfigureAwait(false);
+                    }
+                    catch (IOException)
+                    {
+                        return;
+                    }
                     bytes = bytes[length..];
                 }
-                await stream.FlushAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    await stream.FlushAsync(ct).ConfigureAwait(false);
+                }
+                catch (IOException)
+                {
+                    return;
+                }
             }
+        }
+        catch (IOException)
+        {
+            // A child that closes stdin early has no use for the remaining input.
         }
         finally
         {
-            stream.Close();
+            try
+            {
+                stream.Close();
+            }
+            catch (IOException)
+            {
+                // Closing a pipe already closed by the child is also an early close.
+            }
         }
     }
 

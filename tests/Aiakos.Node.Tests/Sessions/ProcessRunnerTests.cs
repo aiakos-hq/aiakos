@@ -205,6 +205,40 @@ public sealed class ProcessRunnerTests
     }
 
     [Fact]
+    public async Task ProcessRunnerTreatsEarlyStdinClosureAsAnExitedChild()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "The shell process fixture is Linux-specific.");
+        Assert.SkipUnless(File.Exists("/bin/sh"), "The shell process fixture is unavailable.");
+        using var runner = new ProcessRunner();
+
+        var result = await runner.RunAsync(Request("/bin/sh", ["-c", "exec 0<&-; printf partial; exit 3"],
+            new byte[8 * 1024 * 1024]), TestContext.Current.CancellationToken);
+
+        Assert.Equal(ProcessOutcome.Exited, result.Outcome);
+        Assert.Equal(3, result.ExitCode);
+        Assert.Equal("partial", System.Text.Encoding.UTF8.GetString(result.Stdout));
+        Assert.Empty(result.Stderr);
+    }
+
+    [Fact]
+    public async Task ProcessRunnerPropagatesCallerCancellationWhenGrandchildRetainsOutputPipes()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "The shell process fixture is Linux-specific.");
+        Assert.SkipUnless(File.Exists("/bin/sh") && File.Exists("/usr/bin/sleep"),
+            "Required standard process fixtures are unavailable.");
+        using var runner = new ProcessRunner();
+        using var cancellation = new CancellationTokenSource();
+
+        var invocation = runner.RunAsync(Request("/bin/sh", ["-c", "(sleep 5) & printf partial; exit 0"], null,
+            timeout: TimeSpan.FromSeconds(10)), cancellation.Token);
+        await Task.Delay(TimeSpan.FromMilliseconds(700), TestContext.Current.CancellationToken);
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => invocation.WaitAsync(
+            TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task ProcessRunnerRejectsInvalidConcurrencyAndTimeoutsBeforeLaunching()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new ProcessRunner(0));
