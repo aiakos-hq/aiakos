@@ -219,11 +219,68 @@ public sealed class SeatActorTests
         Assert.Equal(2, writer.PersistedInputs.Length);
         Assert.Equal(new ObservationGapBody(GapReason.IngestUnavailable),
             Assert.IsType<EventReceived>(writer.PersistedInputs[0].Input).Body);
-        Assert.Contains(writer.PersistedInputs[0].Step.Findings,
+        Assert.Equal(nul, writer.PersistedInputs[0].Event);
+        Assert.Single(writer.PersistedInputs[0].Step.Findings,
             finding => finding.Kind == SeatVocabulary.FindingObservationGap && finding.Open);
         Assert.Equal(3, reader.GetSnapshot(key)!.State.NextSeq);
         Assert.Equal(ActivityValue.Unknown, reader.GetSnapshot(key)!.State.KnownActivity);
         Assert.Equal(1, writer.CommitCalls);
+    }
+
+    [Theory]
+    [InlineData("capture")]
+    [InlineData("launch-evidence")]
+    [InlineData("gap-from")]
+    [InlineData("gap-to")]
+    public async Task InvalidKnownBodyTimestampBecomesGapAndFollowingEventCommits(string body)
+    {
+        var key = new SeatKey(TenantId, SeatId);
+        var reader = new FakeReader(Snapshot(key));
+        var writer = new FakeWriter(reader);
+        await using var rig = await ActorRig.StartAsync(key, reader, writer, [new TestProfile()], new FixedTimeProvider());
+        var invalidTimestamp = new Timestamp { Seconds = 253_402_300_800 };
+        var malformed = body switch
+        {
+            "capture" => new SeatEvent
+            {
+                SeatId = SeatId.ToString("D"), LaunchId = LaunchId.ToString("D"), Seq = 1,
+                CommandResult = new CommandResult
+                {
+                    Status = CommandStatus.Completed,
+                    Capture = new PaneCapture { Text = "capture", CapturedAt = invalidTimestamp }
+                }
+            },
+            "launch-evidence" => new SeatEvent
+            {
+                SeatId = SeatId.ToString("D"), LaunchId = LaunchId.ToString("D"), Seq = 1,
+                CommandResult = new CommandResult
+                {
+                    Status = CommandStatus.Completed,
+                    Launch = new LaunchResult
+                    {
+                        Evidence = new PaneCapture { Text = "evidence", CapturedAt = invalidTimestamp }
+                    }
+                }
+            },
+            "gap-from" => GapEvent(invalidTimestamp, from: true),
+            "gap-to" => GapEvent(invalidTimestamp, from: false),
+            _ => throw new InvalidOperationException("Unknown test body")
+        };
+        var completion = NewCompletion<SeatEventsCommitted>();
+
+        rig.Actor.Tell(new SeatEventRequest(Node, EpochId, [malformed, Event(2)], null, completion));
+
+        var result = await completion.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Equal(2, result.ThroughSeq);
+        Assert.Equal(2, writer.PersistedInputs.Length);
+        Assert.Equal(new ObservationGapBody(GapReason.IngestUnavailable),
+            Assert.IsType<EventReceived>(writer.PersistedInputs[0].Input).Body);
+        Assert.Equal(malformed, writer.PersistedInputs[0].Event);
+        Assert.Single(writer.PersistedInputs[0].Step.Findings,
+            finding => finding.Kind == SeatVocabulary.FindingObservationGap && finding.Open);
+        Assert.Equal(3, reader.GetSnapshot(key)!.State.NextSeq);
+        Assert.Equal(1, writer.CommitCalls);
+        Assert.Equal(2, reader.LoadCount);
     }
 
     [Fact]
@@ -375,6 +432,13 @@ public sealed class SeatActorTests
             result.Harness = harness;
         }
 
+        return result;
+    }
+
+    private static SeatEvent GapEvent(Timestamp timestamp, bool from)
+    {
+        var result = Event(1);
+        result.Gap = from ? new ObservationGap { From = timestamp } : new ObservationGap { To = timestamp };
         return result;
     }
 

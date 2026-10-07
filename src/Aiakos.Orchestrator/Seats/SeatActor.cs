@@ -147,6 +147,10 @@ public sealed class SeatActor : ReceiveActor
                 }
                 else
                 {
+                    if (HasInvalidKnownBodyTimestamp(wireEvent))
+                    {
+                        input = input with { Body = new ObservationGapBody(GapReason.IngestUnavailable) };
+                    }
                     step = SeatStateMachine.Apply(currentState, input, profile, appliedAt);
                     var rotation = step.Effects.OfType<AdoptRotatedSession>().FirstOrDefault();
                     if (rotation is not null)
@@ -434,6 +438,23 @@ public sealed class SeatActor : ReceiveActor
     private static bool IsValidTimestamp(Timestamp timestamp) =>
         timestamp.Seconds is >= -62_135_596_800 and <= 253_402_300_799 &&
         timestamp.Nanos is >= 0 and <= 999_999_999;
+
+    private static bool HasInvalidKnownBodyTimestamp(SeatEvent value) => value.BodyCase switch
+    {
+        SeatEvent.BodyOneofCase.CommandResult => value.CommandResult.ResultCase switch
+        {
+            CommandResult.ResultOneofCase.Capture => HasInvalidTimestamp(value.CommandResult.Capture.CapturedAt),
+            CommandResult.ResultOneofCase.Launch => value.CommandResult.Launch.Evidence is not null &&
+                HasInvalidTimestamp(value.CommandResult.Launch.Evidence.CapturedAt),
+            _ => false
+        },
+        SeatEvent.BodyOneofCase.Gap => HasInvalidTimestamp(value.Gap.From) ||
+            HasInvalidTimestamp(value.Gap.To),
+        _ => false
+    };
+
+    private static bool HasInvalidTimestamp(Timestamp? timestamp) =>
+        timestamp is not null && !IsValidTimestamp(timestamp);
 
     private static bool HasIsolatedSurrogate(SeatEvent value)
     {
