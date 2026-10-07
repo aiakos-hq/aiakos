@@ -175,6 +175,35 @@ R2. Grammar (all names case-sensitive; System.CommandLine standard `--` end-of-o
     No resolved instance or Request is produced. Missing option values/unrecognized tokens still
     fail grammar; this exception ignores only the instance value, not arbitrary syntax errors.
     Empty option strings and empty required seat/text/file/rig/node/distro values fail.
+    Implementation guidance for the information-option boundary (same behavior, no added rule):
+    System.CommandLine2.0.12 RootCommand already contains HelpOption and VersionOption.
+    Do not register a duplicate --version; the built-in VersionOption disallows other explicit
+    options, and built-in HelpAction clears unrelated grammar errors. A validation tree may
+    remove those defaults, register ordinary zero-arity bool --help/-h and root-only --version,
+    and give root and each command group a no-op action so valid information requests do not
+    acquire the library's missing-subcommand error. Set ParserConfiguration.ResponseFileTokenReplacer
+    to null on every parse, including help generation; an @-prefixed body stays literal and is
+    never opened as a response file. Check Errors and UnmatchedTokens before GetValue (GetValue
+    can throw for a result with parse errors). Library tokenization can consume an unknown option
+    as a free positional or scalar value, so supplement its checks: refuse parsed positional or
+    option values beginning with '-' before the original '--' marker, except the literal '-'
+    allowed for send. Track token occurrence positions, not membership in a set of values after
+    '--'. This rejects up --dry, up --version, capture --version, up --env --dry-run and
+    up --seat --fresh without echoing their tokens. Count option identifier occurrences, including
+    aliases, before handling information; --instance --help --help cannot become valid help.
+    Inspect parsed option values and selected command, never raw token presence alone. Root
+    with options but no command/help/version is invalid (e.g. --json); no args still gives root
+    help. The instance group without a child gives generated group help, including instance
+    --help and an otherwise valid group-only invocation; malformed group syntax remains invalid.
+    For this validation pass, positional minimum arities may be zero: enforce the R2 required
+    positional counts after valid help/version has been handled, so capture --help remains valid
+    but capture without a seat is invalid. Scalar option values must still be present/nonempty,
+    duplicates and numeric bounds checked before returning information; only instance slug
+    validation is bypassed. --version with a selected subcommand is invalid even if the flag
+    occurred before it; tokens after -- remain positional. Render generated help only after this
+    validation, using the library HelpAction/HelpBuilder rather than handwritten help. This is
+    one private approach supported by the scoped probe, not authorization for a handwritten token parser, Program
+    wiring, information short-circuit before grammar validation, or changed public results.
 R3. CliRequestValidator.Validate is pure and returns null or exactly `Invalid command line.`.
     `up --fresh` requires at least one seat; note requires fresh; no-wait/dry-run combination
     is accepted (no-wait has no local effect). Down requires exactly one nonempty selector:

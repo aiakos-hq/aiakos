@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Text;
 using Aiakos.Contracts.Node.V1;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -19,6 +21,7 @@ public sealed class NodeEventBuffer : IDisposable
     private readonly object _sync = new();
     private readonly Dictionary<string, SeatState> _seats = new(StringComparer.Ordinal);
     private readonly TimeProvider _timeProvider;
+    private readonly NodeEventBufferOptions _options;
     private readonly ulong _initialSequenceForTests;
     private TaskCompletionSource _changed = NewSignal();
     private long _generation;
@@ -35,6 +38,12 @@ public sealed class NodeEventBuffer : IDisposable
 
     internal NodeEventBuffer(NodeEventBufferOptions? options, TimeProvider? timeProvider, ulong initialSequence)
     {
+        _options = options is null ? new NodeEventBufferOptions() : new NodeEventBufferOptions
+        {
+            MaxEventsPerSeat = options.MaxEventsPerSeat, MaxEvents = options.MaxEvents, MaxBytes = options.MaxBytes
+        };
+        if (_options.MaxEventsPerSeat < 2 || _options.MaxEvents < 2 || _options.MaxBytes < 1024)
+            throw new ArgumentException("Invalid event buffer options.");
         ArgumentOutOfRangeException.ThrowIfGreaterThan(initialSequence, MaximumSequence);
         _initialSequenceForTests = initialSequence;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -99,6 +108,20 @@ public sealed class NodeEventBuffer : IDisposable
         var copy = value.Clone();
         if (!IsValidEvent(copy) || !TryCanonicalId(copy.SeatId, out var seatId))
             throw InvalidEvent();
+        NormalizeMessage(copy);
+        if (copy.Harness is { } harness)
+        {
+            foreach (var pair in harness.Attributes)
+                if (Encoding.UTF8.GetByteCount(pair.Value) > 1024)
+                    throw InvalidEvent();
+            if (harness.Raw.Length > 262144)
+            {
+                var original = harness.Raw.Length;
+                harness.Raw = ByteString.CopyFrom(harness.Raw.Span[..262144]);
+                harness.RawTruncated = true;
+                harness.RawSize = (uint)original;
+            }
+        }
 
         lock (_sync)
         {
@@ -150,6 +173,7 @@ public sealed class NodeEventBuffer : IDisposable
 
             if (RemoveEvents(state, item => item.Sequence <= ack.ThroughSeq) > 0)
             {
+                MaterializeGaps();
                 SignalChanged();
             }
         }
@@ -181,6 +205,7 @@ public sealed class NodeEventBuffer : IDisposable
                 RemoveEvents(state, item => item.Sequence < nextSequence);
                 state.Eligible = true;
             }
+            MaterializeGaps();
             SignalChanged();
         }
     }
@@ -196,7 +221,11 @@ public sealed class NodeEventBuffer : IDisposable
             else if (_readerActive)
                 throw new InvalidOperationException("An event buffer reader is already active.");
             else
+            {
                 _readerActive = true;
+                foreach (var state in _seats.Values)
+                    state.LastTelemetrySent = null;
+            }
         }
         if (alreadyDisposed)
             yield break;
@@ -226,6 +255,21 @@ public sealed class NodeEventBuffer : IDisposable
                     continue;
                 }
 
+                var telemetryDelay = TelemetryDelay();
+                if (telemetryDelay is { } delay)
+                {
+                    using var wake = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    var timer = Task.Delay(delay, _timeProvider, wake.Token);
+                    try
+                    {
+                        await Task.WhenAny(timer, changed).WaitAsync(ct).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        await wake.CancelAsync().ConfigureAwait(false);
+                    }
+                    continue;
+                }
                 await changed.WaitAsync(ct).ConfigureAwait(false);
             }
         }
@@ -258,6 +302,8 @@ public sealed class NodeEventBuffer : IDisposable
         var request = new ConnectRequest { SeatEvent = eventCopy };
         SetTrace(request);
         var size = request.CalculateSize();
+        if (size > 4194304)
+            throw InvalidEvent();
         var newByteCount = checked(_bufferedBytes + size);
         var ordinal = checked(_nextOrdinal + 1);
 
@@ -266,7 +312,85 @@ public sealed class NodeEventBuffer : IDisposable
         _nextOrdinal = ordinal;
         _bufferedBytes = newByteCount;
         _bufferedCount++;
+        EnforceBounds();
         SignalChanged();
+    }
+
+    private void EnforceBounds()
+    {
+        var violatingSeats = _seats.Values
+            .Where(state => state.Events.Count > _options.MaxEventsPerSeat)
+            .OrderBy(state => state.Inventory.SeatId, StringComparer.Ordinal);
+        foreach (var state in violatingSeats)
+        {
+            Coalesce(state);
+            while (state.Events.Count > _options.MaxEventsPerSeat)
+                Drop(state, state.Events[0]);
+        }
+
+        if (_bufferedCount > _options.MaxEvents || _bufferedBytes > _options.MaxBytes)
+            foreach (var state in _seats.Values)
+                Coalesce(state);
+
+        while (_bufferedCount > _options.MaxEvents || _bufferedBytes > _options.MaxBytes)
+        {
+            var oldestSeat = _seats.Values.Where(state => state.Events.Count > 0)
+                .MinBy(state => state.Events[0].Ordinal)!;
+            Drop(oldestSeat, oldestSeat.Events[0]);
+        }
+        MaterializeGaps();
+    }
+
+    private void Coalesce(SeatState state)
+    {
+        var telemetry = state.Events
+            .Where(item => item.Request.SeatEvent.Harness?.Kind == HarnessEventKind.Telemetry)
+            .ToArray();
+        for (var index = 0; index < telemetry.Length - 1; index++)
+            Drop(state, telemetry[index]);
+    }
+
+    private void Drop(SeatState state, BufferedEvent item)
+    {
+        state.Events.Remove(item);
+        _bufferedCount--;
+        _bufferedBytes -= item.Size;
+        var represented = item.Request.SeatEvent.Gap?.Reason == GapReason.BufferOverflow
+            ? item.Request.SeatEvent.Gap.DroppedEvents : 1UL;
+        state.PendingOverflow += represented;
+    }
+
+    private void MaterializeGaps()
+    {
+        foreach (var state in _seats.Values.OrderBy(state => state.Inventory.SeatId, StringComparer.Ordinal))
+        {
+            if (state.PendingOverflow.IsZero || state.LastSequence >= MaximumSequence ||
+                state.Events.Count >= _options.MaxEventsPerSeat || _bufferedCount >= _options.MaxEvents)
+                continue;
+
+            var emitted = (ulong)BigInteger.Min(state.PendingOverflow, ulong.MaxValue);
+            var sequence = state.LastSequence + 1;
+            var gap = new SeatEvent
+            {
+                SeatId = state.Inventory.SeatId,
+                Seq = sequence,
+                ObservedAt = Timestamp.FromDateTimeOffset(_timeProvider.GetUtcNow()),
+                Gap = new ObservationGap { Reason = GapReason.BufferOverflow, DroppedEvents = emitted },
+            };
+            var request = new ConnectRequest { SeatEvent = gap };
+            SetTrace(request);
+            var size = request.CalculateSize();
+            if (size > _options.MaxBytes - _bufferedBytes)
+                continue;
+
+            var ordinal = checked(_nextOrdinal + 1);
+            state.Events.Add(new BufferedEvent(sequence, ordinal, size, request));
+            state.LastSequence = sequence;
+            state.PendingOverflow -= emitted;
+            _nextOrdinal = ordinal;
+            _bufferedCount++;
+            _bufferedBytes += size;
+        }
     }
 
     private ConnectRequest? TakeNextEvent()
@@ -279,6 +403,9 @@ public sealed class NodeEventBuffer : IDisposable
             if (!state.Eligible)
                 continue;
             var candidate = state.Events.FirstOrDefault(item => item.SentGeneration != _generation);
+            if (candidate?.Request.SeatEvent.Harness?.Kind == HarnessEventKind.Telemetry &&
+                state.LastTelemetrySent.HasValue && _timeProvider.GetElapsedTime(state.LastTelemetrySent.Value) < TimeSpan.FromSeconds(1))
+                candidate = null;
             if (candidate is not null && (selected is null || candidate.Ordinal < selected.Ordinal))
                 selected = candidate;
         }
@@ -286,6 +413,8 @@ public sealed class NodeEventBuffer : IDisposable
         if (selected is null)
             return null;
         selected.SentGeneration = _generation;
+        if (selected.Request.SeatEvent.Harness?.Kind == HarnessEventKind.Telemetry)
+            _seats[selected.Request.SeatEvent.SeatId].LastTelemetrySent = _timeProvider.GetTimestamp();
         return selected.Request.Clone();
     }
 
@@ -335,6 +464,60 @@ public sealed class NodeEventBuffer : IDisposable
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 
+    private TimeSpan? TelemetryDelay()
+    {
+        lock (_sync)
+        {
+            TimeSpan? shortest = null;
+            var now = _timeProvider.GetTimestamp();
+            foreach (var state in _seats.Values)
+            {
+                if (!state.Eligible || state.LastTelemetrySent is not { } sent)
+                    continue;
+                var head = state.Events.FirstOrDefault(item => item.SentGeneration != _generation);
+                if (head?.Request.SeatEvent.Harness?.Kind != HarnessEventKind.Telemetry)
+                    continue;
+                var remaining = TimeSpan.FromSeconds(1) - _timeProvider.GetElapsedTime(sent, now);
+                if (remaining <= TimeSpan.Zero)
+                    return TimeSpan.Zero;
+                if (shortest is null || remaining < shortest)
+                    shortest = remaining;
+            }
+            return shortest;
+        }
+    }
+
+    private static void NormalizeMessage(IMessage message)
+    {
+        foreach (var field in message.Descriptor.Fields.InFieldNumberOrder())
+        {
+            if (field.HasPresence && !field.Accessor.HasValue(message))
+                continue;
+            var value = field.Accessor.GetValue(message);
+            if (field.IsMap)
+            {
+                if (value is System.Collections.IDictionary dictionary)
+                {
+                    var entries = dictionary.Keys.Cast<object>().Select(key => (key, dictionary[key]!)).ToArray();
+                    dictionary.Clear();
+                    foreach (var (key, item) in entries)
+                    {
+                        var normalizedKey = key is string text ? NormalizeText(text) : key;
+                        var normalizedValue = item is string valueText ? NormalizeText(valueText) : item;
+                        dictionary[normalizedKey] = normalizedValue;
+                    }
+                }
+            }
+            else if (field.FieldType == Google.Protobuf.Reflection.FieldType.String)
+                field.Accessor.SetValue(message, NormalizeText((string)value));
+            else if (value is IMessage nested) NormalizeMessage(nested);
+            else if (value is System.Collections.IEnumerable items && value is not ByteString)
+                foreach (var item in items) if (item is IMessage child) NormalizeMessage(child);
+        }
+    }
+
+    private static string NormalizeText(string value) => new UTF8Encoding(false, false).GetString(Encoding.UTF8.GetBytes(value));
+
     private static TaskCompletionSource NewSignal() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -378,6 +561,8 @@ public sealed class NodeEventBuffer : IDisposable
         public List<BufferedEvent> Events { get; } = [];
         public bool Eligible { get; set; }
         public bool RecoveryGapQueued { get; set; }
+        public BigInteger PendingOverflow { get; set; }
+        public long? LastTelemetrySent { get; set; }
     }
 
     private sealed class BufferedEvent(ulong sequence, long ordinal, int size, ConnectRequest request)

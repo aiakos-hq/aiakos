@@ -69,9 +69,30 @@ public sealed class NodeLinkService(
         var unknown = false;
         var stateTail = Task.CompletedTask;
         Task stateChanged(NodeLinkState state) => stateTail = stateTail.ContinueWith(
-            async _ =>
+            async previousState =>
             {
-                try { await application.StateChangedAsync(identity, state, CancellationToken.None).ConfigureAwait(false); }
+                if (application is not INodeEventApplication)
+                {
+                    try { await application.StateChangedAsync(identity, state, CancellationToken.None).ConfigureAwait(false); }
+                    catch (Exception) { }
+                    return;
+                }
+
+                using var deadline = new CancellationTokenSource(options.Value.LivenessTimeout, timeProvider);
+                var sessionToken = session?.CallbackToken ?? CancellationToken.None;
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+                    deadline.Token, context.CancellationToken, lifetime.ApplicationStopping, sessionToken);
+                Task? callback = null;
+                try { callback = application.StateChangedAsync(identity, state, linked.Token); }
+                catch (Exception) { }
+                if (callback is null)
+                    return;
+                try { await callback.WaitAsync(linked.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (linked.IsCancellationRequested)
+                {
+                    _ = callback.ContinueWith(static task => _ = task.Exception,
+                        TaskContinuationOptions.OnlyOnFaulted);
+                }
                 catch (Exception) { }
             }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default).Unwrap();
 
@@ -210,6 +231,97 @@ public sealed class NodeLinkService(
             }
         }
 
+        async Task<EventAck?> waitForEventCallback(Task<EventAck?> callbackTask, NodeLinkSession current,
+            CancellationTokenSource eventCallbackCancellation)
+        {
+            var requestCanceled = Task.Delay(Timeout.InfiniteTimeSpan, context.CancellationToken);
+
+            void observeLateCompletion() => _ = callbackTask.ContinueWith(
+                static task => _ = task.Exception, TaskContinuationOptions.OnlyOnFaulted);
+
+            async Task endAsSuperseded()
+            {
+                eventCallbackCancellation.Cancel();
+                observeLateCompletion();
+                await writeGoodbye(GoodbyeReason.Superseded, "Node link superseded.").ConfigureAwait(false);
+                throw Failure(StatusCode.Aborted, "Node link superseded.");
+            }
+
+            async Task endAsShutdown()
+            {
+                eventCallbackCancellation.Cancel();
+                observeLateCompletion();
+                await writeGoodbye(GoodbyeReason.Shutdown, "Orchestrator shutting down.").ConfigureAwait(false);
+                throw Failure(StatusCode.Unavailable, "Orchestrator shutting down.");
+            }
+
+            while (true)
+            {
+                if (current.Superseded.IsCompleted)
+                    await endAsSuperseded().ConfigureAwait(false);
+                if (shutdownTask.IsCompleted)
+                    await endAsShutdown().ConfigureAwait(false);
+                if (context.CancellationToken.IsCancellationRequested)
+                {
+                    eventCallbackCancellation.Cancel();
+                    observeLateCompletion();
+                    throw Failure(StatusCode.Cancelled, string.Empty);
+                }
+
+                var activeLiveness = livenessTask;
+                if (activeLiveness is not null && activeLiveness.IsCompleted)
+                {
+                    livenessTask = null;
+                    livenessSource?.Dispose();
+                    livenessSource = null;
+                    var elapsed = timeProvider.GetElapsedTime(livenessStartedAt);
+                    if (elapsed < options.Value.LivenessTimeout)
+                    {
+                        armLiveness(options.Value.LivenessTimeout - elapsed);
+                        continue;
+                    }
+                    if (!unknown)
+                    {
+                        unknown = true;
+                        _ = stateChanged(NodeLinkState.Unknown);
+                    }
+                    eventCallbackCancellation.Cancel();
+                    observeLateCompletion();
+                    throw Failure(StatusCode.Unavailable, "Node event commit timed out.");
+                }
+
+                if (callbackTask.IsCompleted)
+                {
+                    try { return await callbackTask.ConfigureAwait(false); }
+                    catch (Exception) when (current.Superseded.IsCompleted || shutdownTask.IsCompleted ||
+                                            context.CancellationToken.IsCancellationRequested)
+                    {
+                        continue;
+                    }
+                    catch (Exception)
+                    {
+                        throw Failure(StatusCode.FailedPrecondition, "Node event processing failed.");
+                    }
+                }
+
+                await Task.WhenAny(callbackTask, activeLiveness ?? Task.Delay(Timeout.InfiniteTimeSpan),
+                    current.Superseded, shutdownTask, requestCanceled).ConfigureAwait(false);
+            }
+        }
+
+        async Task writeEventAcknowledgement(EventAck acknowledgement)
+        {
+            await writeGate.WaitAsync(context.CancellationToken).ConfigureAwait(false);
+            try
+            {
+                context.CancellationToken.ThrowIfCancellationRequested();
+                var response = new ConnectResponse { EventAck = acknowledgement.Clone() };
+                NodeLinkTelemetry.SetTrace(response);
+                await responseStream.WriteAsync(response).ConfigureAwait(false);
+            }
+            finally { writeGate.Release(); }
+        }
+
         try
         {
             var linkOptions = options.Value;
@@ -268,8 +380,24 @@ public sealed class NodeLinkService(
                     if (request.BodyCase is not (ConnectRequest.BodyOneofCase.CommandAck or ConnectRequest.BodyOneofCase.SeatEvent))
                         throw Failure(StatusCode.FailedPrecondition, "Unexpected node message.");
 
-                    var callbackTask = NodeLinkRegistry.ReceiveAsync(activeSession, request, callbackCancellation!.Token);
-                    await waitForCallback(callbackTask, activeSession).ConfigureAwait(false);
+                    if (request.BodyCase == ConnectRequest.BodyOneofCase.SeatEvent &&
+                        application is INodeEventApplication)
+                    {
+                        using var eventCallbackCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                            callbackCancellation!.Token);
+                        var eventCallbackTask = NodeLinkRegistry.ReceiveAsync(activeSession, request,
+                            eventCallbackCancellation.Token);
+                        var acknowledgement = await waitForEventCallback(eventCallbackTask, activeSession,
+                            eventCallbackCancellation).ConfigureAwait(false);
+                        if (acknowledgement is not null)
+                            await writeEventAcknowledgement(acknowledgement).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        var callbackTask = NodeLinkRegistry.ReceiveAsync(activeSession, request,
+                            callbackCancellation!.Token);
+                        await waitForCallback(callbackTask, activeSession).ConfigureAwait(false);
+                    }
                 }
             }
         }
