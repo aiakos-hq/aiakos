@@ -160,6 +160,7 @@ public interface IOwnedNodeLauncher {
 public sealed class ReleasedNodeProcessFactory(InstanceConfiguration config,string linuxHome,
     string nodeToken,string? otlpEndpoint,IHostLogs logs,IOwnedNodeLauncher launcher) : INodeProcessFactory;
 public interface IHostLogs : IAsyncDisposable {
+    Microsoft.Extensions.Logging.ILoggerProvider CreateLoggerProvider();
     Task WriteHostAsync(string message,CancellationToken ct);
     Task WriteNodeAsync(string text,CancellationToken ct);
 }
@@ -176,6 +177,7 @@ public interface IInstanceLiveness {
 }
 public sealed class ConnectionStore(IInstanceLiveness liveness) {
     public Task<ConnectionInfo?> ReadAsync(string home,CancellationToken ct);
+    public Task<ConnectionInfo?> ReadDevAsync(string home,CancellationToken ct);
     public Task PublishAsync(string home,ConnectionInfo info,CancellationToken ct);
     public Task RemoveOwnedAsync(string home,int pid,CancellationToken ct);
 }
@@ -183,6 +185,7 @@ public interface IInstanceOrchestrator : IAsyncDisposable {
     Task StartAsync(CancellationToken ct);
     Task<bool> IsHealthyAsync(CancellationToken ct);
     Task<bool> IsNodeConnectedAsync(string nodeId,CancellationToken ct);
+    Task BeginShutdownAsync(CancellationToken ct);
     Task StopAsync(CancellationToken ct);
 }
 public interface IInstanceOrchestratorFactory {
@@ -204,7 +207,7 @@ public sealed class InstanceHost(InstanceLockFactory locks,IDatabaseManager data
 }
 public sealed class InstanceHostRequest(InstanceConfiguration config,string home,int pid,string version,
     string nodeToken,string apiToken,string payloadDirectory,IReleasedNodeProcessFactoryProvider nodeFactory,ConnectionStore connections,
-    IHostLogs logs,IHostTelemetry telemetry,IInstanceHostControl control) {
+    IHostLogs logs,IHostTelemetry telemetry,IInstanceHostControl control,InstanceStopSignal stopSignal) {
     public InstanceConfiguration Config { get; }
     public string Home { get; }
     public int Pid { get; }
@@ -217,6 +220,7 @@ public sealed class InstanceHostRequest(InstanceConfiguration config,string home
     public IHostLogs Logs { get; }
     public IHostTelemetry Telemetry { get; }
     public IInstanceHostControl Control { get; }
+    public InstanceStopSignal StopSignal { get; }
 } // class properties initialized from constructor; redacted ToString
 public sealed class WindowsDetachedInstanceLauncher : IDetachedInstanceLauncher;
 public interface IDetachedInstanceLauncher {
@@ -256,12 +260,21 @@ Host API control port is in Aiakos.Orchestrator.Instances, avoiding an Orchestra
 `GetBlockingAgentAddressesAsync(CancellationToken)` returns `Task<IReadOnlyList<string>>`;
 `RequestStopAsync(bool keepSeats,bool keepDatabase,CancellationToken)` returns `Task` when queued.
 CLI classes consuming it import that namespace; production control reads SeatQueries/NodeLinkRegistry.
-The concrete `InstanceOrchestratorFactory : IInstanceOrchestratorFactory` creates an in-process
-WebApplication through the shared composition and registers the supplied control instance.
+R24 owns IInstanceOrchestrator, IInstanceOrchestratorFactory and the concrete `InstanceOrchestratorFactory(IHostLogs logs) : IInstanceOrchestratorFactory`.
+R24 owns `InstanceStopSignal`: `Task RequestAsync(bool keepSeats,bool keepDatabase,CancellationToken ct)`
+queues the first request only; `Task<HostShutdownRequest> WaitAsync(CancellationToken ct)` awaits it.
+R24 owns `ProductionInstanceHostControl(InstanceConfiguration config,string home,int pid,string version,
+DateTimeOffset startedAt,InstanceStopSignal stopSignal,Func<HostDatabase> databaseSnapshot,
+Func<IReadOnlyList<HostNode>> nodeSnapshots)` implementing IInstanceHostControl.
+Its `void Bind(IServiceProvider services)` binds the built application's service provider once.
+Before binding, status/blocker reads throw the existing HOST_UNAVAILABLE admin exception; stop queues
+through the supplied signal. Config/home metadata is immutable; snapshots reflect current host state.
+Construction performs no query. Bind happens before listeners start. No Orchestrator reference to CLI.
 
-`InstanceAdminException(int exitCode,string message,IReadOnlyList<string>? seats)` is a sealed
+`InstanceAdminException(int exitCode,string message,IReadOnlyList<string>? seats,string? reason=null)` is a sealed
 exception with public int ExitCode and IReadOnlyList<string>? Seats immutable properties; no raw
-response body or bearer token in Message/ToString.
+response body or bearer token in Message/ToString. Public string? Reason retains only a recognized
+problem reason; network failures have null Reason.
 `Aiakos.Orchestrator.Instances.AdminHostEndpoints.Map(WebApplication)` returns that application
 and is called by shared MapAiakosOrchestrator after merged15-2 routes. Its no-control default is503.
 
@@ -294,7 +307,7 @@ C1. Extract current-main orchestrator service registration, endpoint policy, tel
     options resolution and route mapping from Program into the shared composition methods.
     No external15-2 prerequisite for extraction: preserve current Program as it stands. Later
     merged15-2 stories register through these composition methods (move any late Program-only
-    additions into composition in the same later story). Preserve every existing registration, health endpoint, startup validation and migration-first
+    additions into composition in S18, the admin lifecycle routes story). Preserve every existing registration, health endpoint, startup validation and migration-first
     behavior; tests relying on public Program continue working. API registrations from merged
     15-2 are included, rather than a parallel host-only API implementation.
 C2. Extract WSL preflight/runner/config/environment logic into Aiakos.Wsl without Aspire references.
@@ -353,10 +366,13 @@ R4. InstanceInitializer derives paths, validates against siblings, then creates 
     write. Existing instance.json with force=false returns false without writes or random generation;
     Initialization validation errors throw InvalidOperationException with Validate's exact message.
     Discover sibling JSON here, including malformed-sibling failure under R2; S1 validation is pure.
-    Lock file is home/instance.lock: held means opening it for read/write FileShare.Read fails due
+    Lock file is home/instance.lock: held means opening it for read/write with FileShare.Read on Windows,
+    FileShare.None otherwise, bufferSize=0, fails due
     to sharing/locking (other IO failures abort as `Instance initialization failed.`).
     force=true is refused while instance.lock is held with `Instance is locked by another host.`
-    and otherwise explicitly recreates secrets.
+    and otherwise rotates api-token and node-token. Preserve an existing postgres-password byte-for-byte
+    with no RNG call or replacement: its retained database volume still uses that password. Generate
+    a password only in container mode when absent. External mode leaves an existing password untouched.
     Stage secret files with ACLs before publication. Force replacement retains user-only backups
     of existing secret files until config publication succeeds and restores them on any failure.
     Configuration is published last via sibling temporary file and rename. Failed init removes only
@@ -418,8 +434,9 @@ R10. Container database preparation first probes docker info. Failure returns
     create/start; existing mismatched image/port/volume fails `Instance database configuration does not match.`
     rather than replace an owner container. Poll readiness before orchestrator starts. External mode
     reads the connection string from configured file, does not invoke Docker, and never logs it.
-    Exact container-mode argv (fileName=docker, runner timeout10s per command): info;
-    inspect,--type,container,name; for missing container only: volume,create,volumeName; then
+    Exact container-mode argv (fileName=docker, runner timeout10s except pull): info;
+    inspect,--type,container,name; for missing container only: image,inspect,postgres:18; if absent,
+    pull,postgres:18 with timeout180s; then volume,create,volumeName; then
     create,--name,name,--env-file,tempFile,--env,POSTGRES_USER=aiakos,--env,POSTGRES_DB=aiakos,
     --publish,127.0.0.1:<base+2>:5432,--mount,type=volume,source=<volume>,target=/var/lib/postgresql,
     postgres:18; then start,name when not running. Inspect Config.Image, State.Running,
@@ -431,22 +448,47 @@ R10. Container database preparation first probes docker info. Failure returns
     Host=127.0.0.1,Port=base+2,Database=aiakos,Username=aiakos,Password=secret via Npgsql builder.
     Stop argv stop,--time,10,name; never rm/volume rm. All fixed failure messages in R10 are
     InvalidOperationException. External file read/connect failure => `Instance database is unavailable.`.
+    Pull nonzero exit/timeout throws `Instance database image could not be pulled.`; create never
+    implicitly pulls because image availability is established first. Inspect-image absence requires
+    a missing-image diagnostic, not permission/daemon failure. Caller cancellation propagates and
+    removes the temporary env-file; the starter's overall timeout can cancel a slow first start.
     PostgreSQL18 volume destination is pinned to the image layout, not the older /data mount.
-R11. InstanceHost obtains the R17 lock, prepares database, runs shared WSL preflight then node
-    installation before accepting nodes, and starts the in-process orchestrator through C1/C4.
-    Production preparation calls installer only before nodeFactory.StartAsync. The orchestrator
-    listens127.0.0.1:base+0 HTTP/2 h2c and127.0.0.1:base+1 HTTP/1.1; no child orchestrator process.
-    Host composition configures instance, connection string, node id/default tenant/token, and
-    Api TokenFile/Operator/Port consistently with15-2; keys are ConnectionStrings:aiakos,
-    Aiakos:Instance, Aiakos:Orchestrator:GrpcPort, Aiakos:Nodes:0:Id/Name/TenantId/Token,
-    Aiakos:Api:TokenFile=<home>/secrets/api-token, Aiakos:Api:Operator and Aiakos:Api:Port.
-    Node tenant is TenantIds.Default; do not duplicate its GUID. Secrets only in in-memory config.
-    Prepare telemetry R19 and logs R16 before constructing ReleasedNodeProcessFactory, pass chosen
-    endpoint and logs to it, then run supervisor. R18 readiness publishes connection. Cancellation
-    or failure shuts down only resources this host acquired, deletes its owned connection and
-    releases its lock. HostRequest is secret-bearing, redacted ToString. Runtime/instance paths
-    never fall back to dev. Missing hook-port consuming capability is reported as partial; this
-    slice forwards AIAKOS_HOOK_PORT=base+10 but never implements Node's hook server/configuration.
+R11. InstanceHost obtains the R17 lock, prepares database, runs shared WSL preflight and node
+    installation, prepares telemetry/logs, creates and starts the orchestrator, then runs supervisor.
+    PrepareAsync returns the absolute Linux instance home: resolved Linux $HOME joined with the
+    validated relative config.Wsl.Home. Pass that returned path into NodeFactory.Create.
+    Publish connection only after orchestrator /health is healthy AND configured node connected;
+    ConnectionStore itself only writes the supplied document. HostRequest is redacted.
+    Await StopSignal.WaitAsync concurrently with cancellation. A terminal supervisor exit leaves
+    the host running unhealthy, as R9 requires; it does not request host shutdown.
+    API control and host share the same signal. A stop request carries keep_seats and keep_database;
+    keep_seats changes admission/warning only, never leaves the owned node alive. Cancellation/failure
+    defaults keep_database=false. After a successful response has completed, BeginShutdownAsync
+    closes new API command admission and drains outstanding requests, then stop owned node within10s,
+    stop orchestrator, stop acquired instance Postgres unless keep_database, stop acquired dashboard,
+    remove owned connection, flush/dispose logs and release lock. Cleanup executes remaining steps
+    even when an earlier step fails; preserve the first sanitized failure. Partial startup cleans
+    only acquired resources. Runtime/instance paths never fall back to dev.
+    Backlog #12 (12-2) owns the node hook-port configuration/consumer. This slice does not introduce
+    or forward a hook-port environment variable; reserved port reporting remains unchanged.
+R24. InstanceOrchestratorFactory creates an in-process WebApplication through C1/C4 and registers
+    the supplied control instance. After Build, bind ProductionInstanceHostControl to app.Services;
+    fake controls need no binding. StartAsync starts listeners; no child orchestrator process.
+    Listen127.0.0.1:base HTTP/2 h2c and127.0.0.1:base+1 HTTP/1.1. Configure keys
+    ConnectionStrings:aiakos, Aiakos:Instance, Aiakos:Orchestrator:GrpcPort,
+    Aiakos:Nodes:0:Id/Name/TenantId/Token, Aiakos:Api:TokenFile=<home>/secrets/api-token,
+    Aiakos:Api:Operator and Aiakos:Api:Port consistently with15-2; tenant is TenantIds.Default.
+    Secrets stay in memory. Register logs.CreateLoggerProvider() with builder.Logging so orchestrator
+    ILogger output passes the same R16 redaction before disk; remove other disk/console providers
+    for this released host to avoid duplicate secret-bearing output. Existing executable logging
+    is unchanged. BeginShutdownAsync rejects new changing API requests with503 HOST_UNAVAILABLE,
+    drains outstanding API requests while retaining node gRPC until StopAsync. StopAsync stops app.
+    Production control creates/disposes a fresh DI scope for each persisted SeatQueries read and
+    reads NodeLinkRegistry connectivity. Blockers are agent seats in starting/present/unknown,
+    addresses sorted ordinal; humans and absent/exited do not block. Status uses declared metadata,
+    current database/node snapshots, registry connectivity, persisted seat counts and /health;
+    Healthy is database healthy AND /health healthy AND configured node connected. RequestStopAsync
+    delegates to the shared signal without querying services. Dispose releases only its application.
 R12. Node factory launches held wsl.exe child argv `-d`,distro,`--cd`,`~`,`--exec`,
     `<WSL home absolute path>/node/aiakos-node`, UseShellExecute=false and redirected stdout/stderr.
     Resolve Linux home with wsl.exe argv `-d`,distro,`--exec`,`/bin/sh`,`-c`,
@@ -454,14 +496,17 @@ R12. Node factory launches held wsl.exe child argv `-d`,distro,`--cd`,`~`,`--exe
     otherwise InvalidOperationException `WSL home could not be resolved.`. No Windows user guess. Env is
     AIAKOS_ORCHESTRATOR_URL=http://127.0.0.1:base, AIAKOS_HOME=absolute Linux instance home,
     AIAKOS_NODE_ID=config NodeId, AIAKOS_NODE_TOKEN=secret, AIAKOS_INSTANCE=config Instance;
-    AIAKOS_HOOK_PORT=base+10; remove inherited OTEL_* and add only configured
+    Remove inherited OTEL_* and add only configured
     OTEL_EXPORTER_OTLP_ENDPOINT plus OTEL_SERVICE_NAME=aiakos-node when endpoint present; WSLENV composed by R6. No token in argv, status or logs.
-R13. ConnectionStore publishes connection.json atomically only after healthy /health AND configured
-    node connected, fields api_url,pid,version,started_at,otlp_endpoint in that order compact+LF.
-    Read returns null for missing/malformed/dead pid OR unheld instance.lock; loopback http API URL
+R13. ConnectionStore atomically publishes the supplied connection.json; the host owns readiness, fields api_url,pid,version,started_at,otlp_endpoint in that order compact+LF.
+    ReadAsync returns null for missing/malformed/dead pid OR unheld instance.lock; loopback http API URL
     required. It never probes guessed ports or deletes stale files during read. If pid reused but
     lock unheld, return null. A held lock with unreachable authenticated API is unavailable, not
     proof this host can be replaced. RemoveOwnedAsync removes only a connection with the given pid.
+    ReadDevAsync uses the same schema, loopback and live-pid checks but skips the lock check only
+    for the .aiakos-dev home; another basename throws ArgumentException `Invalid dev instance home.`.
+    Serialize StartedAt with source-generated System.Text.Json DateTimeOffset formatting: UTC
+    offset +00:00, no fractional component for the whole-second fixture in E8.
     File publication failure throws InvalidOperationException `Instance connection could not be published.`.
 R14. Host-only GET /v1/admin/status and POST /v1/admin/shutdown share 15-2 bearer auth and changing
     version gate. Status contains api=v1,instance,running,healthy,host_pid,host_version,started_at,ports,database,
@@ -471,9 +516,10 @@ R14. Host-only GET /v1/admin/status and POST /v1/admin/shutdown share 15-2 beare
     and ordered seat addresses in a seats field. Humans and absent/exited agents do not block.
     keep_seats overrides with warning `Seats keep running only while WSL stays up and are adopted by the next node.`
     Response202 is HostShutdownResponse(api=v1,warning=null or the keep-seats warning).
-    Return202 before stopping acceptance of new API commands; finish outstanding requests, stop
-    owned node within10s, stop orchestrator, stop owned instance Postgres unless keep_database, stop owned dashboard R19,
-    delete owned connection file and release lock, in that order. No seat actor messages/state writes.
+    Register an HttpResponse.OnCompleted callback that queues RequestStopAsync with the request flags
+    and CancellationToken.None. Return202 before that callback executes. Host shutdown sequence
+    belongs to R11, not the route. S18 moves any merged15-2 Program-only service/route additions into
+    AddAiakosOrchestrator/MapAiakosOrchestrator, including /v1/version; no alternate route copy.
     Without host integration these routes return503 HOST_UNAVAILABLE with 15-2 exact detail.
 R15. Status exit0 when running with healthy database/orchestrator and connected node,1 when running
     unhealthy,3 when unavailable. Human output is stable LF lines: instance:<name>, running:<bool>,
@@ -490,15 +536,25 @@ R16. HostLogs rolls UTC daily logs/host-yyyyMMdd.log and node-yyyyMMdd.log, UTF-
     delete only matching plain files strictly older than14days by parsed UTC filename date.
     Replace each configured secret occurrence with [REDACTED] before rendering to disk, including
     property text and node streams; do not log exception objects or process environment. Use
-    Serilog.Extensions.Hosting10.0.0 and Serilog.Sinks.File7.0.0 centrally in CLI host only.
+    Serilog.Sinks.File7.0.0 centrally in CLI host only; do not add Serilog.Extensions.Hosting.
+    CreateLoggerProvider returns an ILoggerProvider adapter: format message/properties, redact,
+    then WriteHostAsync; never render exception objects. Provider disposal does not dispose the
+    shared HostLogs; the host owns the sink lifetime. Logging scopes/properties obey redaction too.
     Dispose flushes sinks. Logging failure throws InvalidOperationException `Instance logging failed.`.
-R17. InstanceLockFactory creates home/instance.lock and holds FileAccess.ReadWrite, FileShare.Read:
-    readers may inspect, another writer cannot acquire. Write compact JSON pid,version plus LF,
+R17. InstanceLockFactory creates home/instance.lock and holds FileAccess.ReadWrite, bufferSize=0,
+    FileShare.Read on Windows, FileShare.None elsewhere. Another writer cannot acquire on either OS.
+    Holder read on Windows uses FileAccess.Read/FileShare.ReadWrite|Delete; on Linux use libc open
+    O_RDONLY + SafeFileHandle + RandomAccess.Read, avoiding FileStream's flock. Follow the existing
+    src/Aiakos.Node/InstanceLock.cs pattern in CLI, without a Node project reference. Raw read must
+    return the pid/version fixture on Linux; only an actual unreadable/malformed holder is unknown. Write compact JSON pid,version plus LF,
     flush before dependency effects. Sharing collision throws InvalidOperationException
     `Instance is locked by host <pid> (<version>).`; unparseable/read error holder =>
     `Instance is locked by host unknown (unknown).`. Other IO errors => `Instance lock could not be acquired.`.
     IsHeld tests acquiring the same writer handle and immediately disposing it; false if success,
-    true only sharing collision. Disposal releases handle; lock file may remain (not connection).
+    true only sharing collision. Use the existing Node pattern: an exact IOException from handle
+    open is the sharing/locking collision; IOException subclasses and access failures are real IO
+    errors. IsHeld missing file returns false without creating it; other non-collision IO errors
+    propagate the fixed R17 acquisition message. Disposal releases handle; lock file may remain (not connection).
 R18. InstanceStarter first discovers live connection and calls authenticated status. Responding live
     host (healthy or unhealthy) returns it without copying/launching; unreachable API throws `Instance is unavailable.`
     and never stops owner host. Otherwise RuntimeCopy.EnsureAsync(sourceDirectory=the passed directory (production caller supplies AppContext.BaseDirectory),
@@ -513,7 +569,8 @@ R19. HostTelemetry clears inherited owner OTEL exporter config; disabled returns
     ensures container aiakos-<slug>-dashboard, image mcr.microsoft.com/dotnet/aspire-dashboard:13.5.2,
     ports127.0.0.1:base+10000:18888 and127.0.0.1:base+14000:18889; env
     DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS=true, no exposed non-loopback port. Docker runner
-    timeout10s; argv inspect,--type,container,name; when missing create,--name,name,--publish,
+    timeout10s except pull; argv inspect,--type,container,name; when missing image,inspect,image;
+    if image absent pull,image with timeout180s, then create,--name,name,--publish,
     127.0.0.1:<base+10000>:18888,--publish,127.0.0.1:<base+14000>:18889,--env,
     DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS=true,image; start,name when stopped. Dispose
     uses stop,--time,10,name only, never rm. Compare Config.Image and HostConfig.PortBindings
@@ -522,7 +579,9 @@ R19. HostTelemetry clears inherited owner OTEL exporter config; disabled returns
     port mismatch is refused without replacement. Return http://127.0.0.1:base+14000. Host/node
     use chosen endpoint; connection publishes it for15-3 spans. Dispose stops only dashboard
     started/acquired for this host, after orchestrator/database stop, even keep_database=true.
-    Failure throws InvalidOperationException `Instance telemetry could not be started.`.
+    Pull nonzero exit/timeout throws InvalidOperationException `Instance telemetry image could not be pulled.`.
+    Caller cancellation propagates; no create follows failed pull. Other failures throw
+    InvalidOperationException `Instance telemetry could not be started.`.
 R20. InstanceAdminClient owns only status/shutdown HTTP, not15-3 seat commands. Read tokenFile
     to Bearer header, GET connection.ApiUrl+/v1/admin/status; deserialize HostStatusResponse.
     Stop sends X-Aiakos-Client-Version and body keep_seats,keep_database to admin/shutdown;
@@ -530,7 +589,7 @@ R20. InstanceAdminClient owns only status/shutdown HTTP, not15-3 seat commands. 
     all failures throw InstanceAdminException with ExitCode3/4/5/1 corresponding to unavailable/
     incompatible/auth/seat refusal. HTTP401 => `Instance authentication failed.`;
     409 VERSION_INCOMPATIBLE => `CLI and instance versions are incompatible.`;503 HOST_UNAVAILABLE
-    or refused/network/10s request timeout => `Instance is unavailable.`;409 SEATS_RUNNING => fixed
+    (Reason=HOST_UNAVAILABLE) or refused/network/10s request timeout (Reason=null) => `Instance is unavailable.`;409 SEATS_RUNNING => fixed
     detail plus ordered addresses (JSON quoted, comma-space separated) for stop command. No token/body
     logging. Admin responses may be injected through HttpMessageHandler; no unbriefed15-3 prerequisite.
 R23. InstanceProcessRunner implements IInstanceProcessRunner with ProcessStartInfo.ArgumentList,
@@ -551,9 +610,14 @@ R21. InstanceCommands guards Windows mutations through IInstancePlatform before 
     distro defaultUbuntu,node-id defaultwsl-local, operator Environment.UserName (in tests supplied
     by IInstancePlatform.UserName/UserProfile), home from layout, database external iff database-url-file present,
     telemetry false/null. Force only from flag. Run loads editable config and enters foreground
-    host; start passes current installed source/version to starter; stop uses admin client and
+    host; production host runner supplies PayloadDirectory=Path.Combine(AppContext.BaseDirectory,
+    "node","linux-x64"), including when executing from the versioned runtime copy. Never use cwd
+    or a repository path. Start passes current installed source/version to starter; stop uses admin client and
     polls connection/lock every250ms until released,30s maximum, then prints stopped. Timeout=>
-    exit1 stderr `Instance did not stop.\n`. dev status503=>exit3 stderr `Instance is unavailable.\n`.
+    exit1 stderr `Instance did not stop.\n`. dev uses ReadDevAsync; a live dev API returning503
+    HOST_UNAVAILABLE=>exit3 stderr `Dev stack has no released instance host status.\n`. Missing/dead
+    dev connection or network failure retains `Instance is unavailable.\n`. Never apply dev exemption
+    to released discovery.
     Exit3 line `Instance is unavailable.\n` except lock errors retain R17 exact text; exit4 line
     `CLI and instance versions are incompatible.\n`; exit5 `Instance authentication failed.\n`.
     Other anticipated host failures exit1 exact exception message+LF; config errors exit2 fixed
@@ -561,7 +625,6 @@ R21. InstanceCommands guards Windows mutations through IInstancePlatform before 
     after stop completion. Blocked seats exit1,stderr detail+LF then `Seats: <quoted addresses>.\n`.
 
 Package pins for R16 were checked against publisher pages:
-[Serilog.Extensions.Hosting](https://www.nuget.org/packages/Serilog.Extensions.Hosting/10.0.0) and
 [Serilog.Sinks.File](https://www.nuget.org/packages/Serilog.Sinks.File/7.0.0).
 
 ## Expected outputs and permanent tests
@@ -573,26 +636,27 @@ version0.1.0. All subprocess tests use recording ports and contain no authentica
 | ID | Case | Exact expectation |
 |---|---|---|
 | `E1` | layout/guard/JSON/overlap matrix | .aiakos and aiakos-release-postgres/aiakos-release-pgdata; named .aiakos-demo; forbidden dev message R1; port collision message R2; exact config field order/types R3; no secret fields; fixture JSON is the following document |
-| `E2` | new/existing/force/init failure | true/new three secret files; false/existing zero writes/RNG; force lock refusal; independent base64 values decoding to32bytes; explicit current-user-only ACL before content; no secret in output; config published last |
+| `E2` | new/existing/force/init failure | true/new three secret files; false/existing zero writes/RNG; force lock refusal on Linux/Windows; force retains existing postgres password bytes; only two RNG calls when password exists; independent base64 values decoding to32bytes; explicit current-user-only ACL before content; no secret in output; config published last |
 | `E3` | runtime new/same/changed/running/cancel/prune | bytes preserved; hash-identical zero replacement; safe version directory only; protected running mismatch exact R5 error; last two+protected copy; staging removed on failure; owner files unchanged |
 | `E4` | extraction/composition regression | existing orchestrator health/migration-first/token/endpoint tests unchanged green; same registrations/routes in executable and in-process host; public Program remains |
 | `E5` | shared WSL extraction/environment matrix | compatibility messages/signatures/cache unchanged; configurable prefixes and case rules R6; existing dev script byte-equivalent |
-| `E10` | WSL install/version/argv matrix | matching VERSION zero copy; mismatch staging/chmod/VERSION/rename sequence; missing payload exact R7 error; WSLENV entries preserved and appended sorted /u; no injected shell command |
+| `E10` | WSL install/version/argv matrix | matching VERSION zero copy; mismatch staging/chmod/rename then separate VERSION command; missing payload exact R7 error; no injected shell command |
 | `E6` | restart/fake time/owned stop | delays1,2,4,8,16,30,30; uptime300s reset1; exit2/3 no retry; unexpected0 retry; cancellation delay zero restart; owned child stop then dispose once; LastExitCode exact; no owner process effect |
-| `E7` | database recording ports | Docker unavailable => exact R10 error/no later effects; external => zero Docker calls; env-file ACL/delete/no secret argv; database timeout fixed error and zero later startup |
-| `E11` | lock sharing fixture | second writer refused with pid1234 version0.1.0 => Instance is locked by host 1234 (0.1.0).; unknown holder exact R17 text; reader may read; disposal permits second writer |
-| `E12` | host recording ports | lock, database, preflight, install, telemetry/logs, orchestrator, node, readiness publication; loopback h2c/HTTP1 ports exact R11; partial startup owned cleanup |
+| `E7` | database recording ports | Docker unavailable => exact R10 error/no later effects; external => zero Docker calls; env-file ACL/delete/no secret argv; existing volume uses preserved password in its connection string; database timeout fixed error and zero later startup; missing image pull180s before create, failed pull exact R10 text, zero create |
+| `E11` | lock sharing fixture | second writer refused with pid1234 version0.1.0 => Instance is locked by host 1234 (0.1.0).; unknown holder exact R17 text; holder JSON readable without flock on Linux and by shared read on Windows; disposal permits second writer |
+| `E12` | host recording ports | lock, database, preflight, install, telemetry/logs, orchestrator, node, readiness publication; publication only after healthy+connected; stop signal flags/drain/node/orchestrator/database/dashboard/connection/lock exact R11; keep_database skips only database stop; partial startup owned cleanup |
 | `E13` | held node process factory | exact argv/env/home helper bound R12; secret omitted from argv; streams drained into redacted logs; only owned child stopped |
-| `E8` | readiness/connection discovery | connection only after healthy+connected; malformed/dead file unavailable3; owned publication/removal bytes exact R13 |
+| `E8` | readiness/connection discovery | supplied connection publication bytes match E8 golden; malformed/dead/unheld returns null; ReadDevAsync exempts only .aiakos-dev lock; owned removal exact R13 |
 | `E14` | detached start | live healthy zero copy/launch; held/unreachable API fixed unavailable error; timeout owned cleanup; exact dotnet dll argv and parent lifetime R18 |
-| `E15` | admin lifecycle routes | agent starting/present/unknown409 SEATS_RUNNING, absent/exited/human allow202; ordered addresses; warning in202; stop order exact R14 |
+| `E15` | admin lifecycle routes | agent starting/present/unknown409 SEATS_RUNNING, absent/exited/human allow202; ordered addresses; warning in202; OnCompleted queues exact flags after response; /v1/version answers with shared composition alone |
 | `E16` | status renderers | golden documents below; exact declaration order and LF R15 |
 | `E17` | admin client | only status/shutdown routes, bearer/version/body exact;401/409/503/network fixed errors R20 |
-| `E18` | command wiring | original CliApplication constructor remains; injected Windows platform can test on Linux; config defaults exact R21; G2 mutations fail before effects; stop waits for lock release/30s timeout; dev503=>exit3 |
-| `E9` | log matrix | UTC daily owned filenames,14day retention,secret redaction; owned sinks only R16 |
-| `E19` | telemetry matrix | disabled zero exporter/dashboard; explicit endpoint zero Docker; named dashboard image/ports exact R19; mismatch refused, owned stop after database |
+| `E18` | command wiring | original CliApplication constructor remains; injected Windows platform can test on Linux; config defaults exact R21; G2 mutations fail before effects; stop waits for lock release/30s timeout; live dev503 HOST_UNAVAILABLE=>exit3 exact R21 dev line; packaged PayloadDirectory independent of cwd |
+| `E9` | log matrix | UTC daily owned filenames,14day retention,secret redaction; owned sinks and ILogger properties/scopes redacted through R16 provider |
+| `E19` | telemetry matrix | disabled zero exporter/dashboard; explicit endpoint zero Docker; named dashboard image/ports exact R19; mismatch refused, pull180s before create/failed pull exact R19 text; owned stop after database |
 | `E22` | short-process adapter | exact argv/env snapshots, timeout/start fixed exceptions, cancellation/drain/only-owned cleanup R23 |
 | `E21` | admin contract/policy goldens | exact E16 API document and E15 SEATS_RUNNING body serialize through generated context; existing15-2 ordinary problem retains three fields |
+| `E23` | production composition/control | two loopback protocols/config keys R24; bind before reads; scoped persisted status/blockers; ILogger redaction; admission drain and app stop |
 | `E20` | host project references | CLI Core/Wsl/Orchestrator/Api.Contracts references and ASP.NET framework; isolated pack/help starts per C4 |
 
 E1 configuration golden (compact plus final LF):
@@ -604,6 +668,11 @@ E1 extra cases: demo base7181 against initialized release7180 => `Instance ports
     demo base5170 against reserved dev => same message; external path `C:\secrets\db` accepted,
     `db.txt` and `/secrets/db` rejected with R3 FormatException. Sibling errors are tested by T2 only.
 E3 copies A,B,C published at distinct UTC t1<t2<t3 => retain B,C; when runningVersion=A retain A,B,C.
+
+E8 connection golden (compact+LF, otlp_endpoint retained null):
+```json
+{"api_url":"http://127.0.0.1:7181","pid":1234,"version":"0.1.0","started_at":"2026-10-20T08:15:00+00:00","otlp_endpoint":null}
+```
 
 Status fixture: release,pid1234,version0.1.0,start2026-10-20T08:15:00Z, healthy database/node,
 zero seats, log_directory `/owned/.aiakos/logs`. E15 successful stop response is exactly
@@ -646,13 +715,15 @@ T6. Commit E6 fake-time supervisor/policy tests including cancellation while run
     start failure, reset boundary299s/300s, and only-owned process cleanup.
 T7. Commit E7 recording-process database/argv/timeout/env-file cleanup tests; no owner containers.
 T11. Commit E11 actual temporary lock sharing/writer/reader/release tests.
-T12. Commit E12 host sequencing and external private Postgres in-process composition tests; fake node.
+T12. Commit E12 host fake-port readiness/shutdown/flags/partial-cleanup sequencing tests.
+T23. Commit E23 external private Postgres in-process composition/control tests, fake node,
+    bound services, scoped query disposal, ILogger redaction and admission drain; no owner database.
 T13. Commit E13 recording node factory/home/env/drain/only-owned stop tests.
 T8. Commit E8 connection bytes/liveness/pid-reuse/publication/removal tests.
 T14. Commit E14 starter fake-time/copy/launch/timeout tests. Windows opt-in
     owned demo must prove detached host survives parent terminal closure and attached WSL child
     remains alive; do not mark these risks closed based on Linux fakes.
-T15. Commit E15 HTTP admin/auth/version/rejection/shutdown ordering tests, with persisted seat fixture.
+T15. Commit E15 HTTP admin/auth/version/rejection/OnCompleted callback tests, with persisted seat fixture.
 T16. Commit E16 exact status text/JSON bytes and version mismatch warning tests.
 T17. Commit E17 HttpMessageHandler client request/error mapping tests.
 T18. Commit E18 CLI injection/platform/init/default/error/stop wait tests.
@@ -669,8 +740,7 @@ The public surfaces above now provide independent acceptance entry points for ev
 S7–S9 of the first split are replaced by separate process/lock/database/node/log/telemetry/
 connection/admin/client/renderer/application concerns; see new split for ownership. No production
 code or acceptance gate was changed/run. Node hook-port consuming configuration is not present
-in current NodeOptions: final host integration explicitly reports that missing neighbor rather
-than implementing it. Architect review must judge these proposed resolutions before approval.
+in current NodeOptions: lead assigns it to backlog #12 (12-2); no new variable is forwarded here. Architect review must judge these proposed resolutions before approval.
 
 ## Done
 

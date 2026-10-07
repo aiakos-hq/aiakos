@@ -73,3 +73,6 @@ T19	test	once	E19
 T20	test	once	E20
 T21	test	once	E21
 T22	test	once	E22
+R24	rule	once	-
+E23	output	once	R24
+T23	test	once	E23
