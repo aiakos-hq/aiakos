@@ -7,6 +7,9 @@ namespace Aiakos.Orchestrator.Tests.Seats;
 
 public sealed class TestKitCompatibilityTests
 {
+    private static readonly string[] EqualSequence = ["a", "b"];
+    private static readonly string[] DifferentSequence = ["a", "c"];
+
     [Fact]
     public async Task TestProbeReceivesPingAndActorSystemTerminates()
     {
@@ -49,6 +52,20 @@ public sealed class TestKitCompatibilityTests
         Assert.ThrowsAny<XunitException>(() => assertions.AssertFalse(true, "expected false"));
         Assert.ThrowsAny<XunitException>(() => assertions.AssertEqual(7, 8, "expected {0}", 7));
         Assert.ThrowsAny<XunitException>(() => assertions.AssertEqual("ping", "pong", StringComparer.Ordinal.Equals, "not equal"));
+    }
+
+    [Fact]
+    public async Task AdapterComparesCollectionsAndCoversAllThrowAssertions()
+    {
+        var assertions = new XunitV3TestKitAssertions();
+
+        assertions.AssertEqual(EqualSequence, EqualSequence.ToArray(), "sequence equality");
+        Assert.ThrowsAny<XunitException>(() => assertions.AssertEqual(EqualSequence, DifferentSequence, "sequence mismatch"));
+
+        Assert.IsType<InvalidOperationException>(assertions.AssertThrows(static () => throw new InvalidOperationException()));
+        Assert.IsType<ArgumentException>(assertions.AssertThrows<ArgumentException>(static () => throw new ArgumentException()));
+        Assert.IsType<InvalidOperationException>(await assertions.AssertThrowsAsync(static () => Task.FromException(new InvalidOperationException())));
+        Assert.IsType<ArgumentException>(await assertions.AssertThrowsAsync<ArgumentException>(static () => Task.FromException(new ArgumentException())));
     }
 
     private sealed class SmokeTestKit(ActorSystem system) : TestKitBase(new XunitV3TestKitAssertions(), system, "smoke-probe");
