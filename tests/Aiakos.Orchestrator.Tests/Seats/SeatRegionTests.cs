@@ -23,6 +23,31 @@ public sealed class SeatRegionTests
     private static readonly Guid RetiredSeat = Guid.Parse("55555555-5555-4555-8555-555555555555");
 
     [Fact]
+    public async Task DirectConstructionStartsEagerlyBeforeExternalRequestsAndContinuesAfterFailedKey()
+    {
+        var keyA = new SeatKey(Tenant, SeatA);
+        var keyB = new SeatKey(Tenant, SeatB);
+        var reader = new FakeReader(Snapshot(keyA), Snapshot(keyB), startupSeats: [keyA, keyB])
+        {
+            StartupRead = new(TaskCreationOptions.RunContinuationsAsynchronously),
+        };
+        reader.FailLoadsFor(keyB);
+        var writer = new FakeWriter(reader);
+        await using var rig = await RegionRig.StartAsync(reader, writer, startExplicitly: false);
+        var pending = rig.Gateway.ApplyAsync(Tenant, SeatA, new NodeLinkLost(), CancellationToken.None);
+        await reader.StartupEntered.Task.WaitAsync(Deadline, TestContext.Current.CancellationToken);
+        Assert.False(pending.IsCompleted);
+        Assert.Equal(0, writer.TotalCommitCount);
+        reader.StartupRead.TrySetResult([keyA, keyB]);
+        await writer.ActorStoppedFinding.Task.WaitAsync(Deadline, TestContext.Current.CancellationToken);
+        Assert.Equal(8, (await pending.WaitAsync(Deadline, TestContext.Current.CancellationToken)).Version);
+        Assert.Null(await rig.GetSeatAsync(SeatB));
+        Assert.Equal(1, writer.RecordActorStoppedCount);
+        Assert.Equal(1, writer.CommitCount(keyA));
+        Assert.Equal(0, writer.CommitCount(keyB));
+    }
+
+    [Fact]
     public async Task RoutesByTenantSeatAndKeepsDifferentSeatCommitsIndependent()
     {
         var keyA = new SeatKey(Tenant, SeatA);
@@ -329,15 +354,18 @@ public sealed class SeatRegionTests
         public SeatActorGateway Gateway { get; }
 
         public static async Task<RegionRig> StartAsync(FakeReader reader, FakeWriter writer,
-            TimeProvider? gatewayTimeProvider = null, TimeSpan? requestTimeout = null)
+            TimeProvider? gatewayTimeProvider = null, TimeSpan? requestTimeout = null, bool startExplicitly = true)
         {
             var system = ActorSystem.Create($"seat-region-tests-{Guid.NewGuid():N}");
             var testKit = new RegionTestKit(system);
             var region = system.ActorOf(Props.Create(() => new SeatRegion(reader, writer,
                 new IHarnessStateProfile[] { new ClaudeLike() }, TimeProvider.System)), "seats");
             var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            region.Tell(new StartSeatRegion(ready));
-            await ready.Task.WaitAsync(Deadline, TestContext.Current.CancellationToken);
+            if (startExplicitly)
+            {
+                region.Tell(new StartSeatRegion(ready));
+                await ready.Task.WaitAsync(Deadline, TestContext.Current.CancellationToken);
+            }
             return new(system, testKit, region, new SeatActorGateway(region,
                 gatewayTimeProvider ?? TimeProvider.System, requestTimeout ?? TimeSpan.FromSeconds(30)));
         }
@@ -392,8 +420,15 @@ public sealed class SeatRegionTests
             return Task.FromResult(snapshot);
         }
 
-        public Task<IReadOnlyList<SeatKey>> GetStartupSeatsAsync(CancellationToken ct) =>
-            Task.FromResult(_startupSeats);
+        public TaskCompletionSource<IReadOnlyList<SeatKey>>? StartupRead { get; init; }
+        public TaskCompletionSource StartupEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<IReadOnlyList<SeatKey>> GetStartupSeatsAsync(CancellationToken ct)
+        {
+            StartupEntered.TrySetResult();
+            return StartupRead?.Task.WaitAsync(ct) ?? Task.FromResult(_startupSeats);
+        }
 
         public Task<SeatNativeSession?> FindNativeSessionAsync(Guid tenantId, string harness,
             string nativeSessionId, CancellationToken ct) => Task.FromResult<SeatNativeSession?>(null);

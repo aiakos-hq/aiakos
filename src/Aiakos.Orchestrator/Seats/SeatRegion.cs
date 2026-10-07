@@ -3,7 +3,7 @@ using Akka.Event;
 
 namespace Aiakos.Orchestrator.Seats;
 
-public sealed class SeatRegion : ReceiveActor
+public sealed class SeatRegion : ReceiveActor, IWithUnboundedStash
 {
     private const string SeatNotFound = "SEAT_NOT_FOUND";
     private const string HumanSeat = "HUMAN_SEAT";
@@ -49,16 +49,72 @@ public sealed class SeatRegion : ReceiveActor
 
         ReceiveAsync<StartSeatRegion>(StartAsync);
         Receive<StopSeatRegion>(Stop);
-        ReceiveAsync<SeatEnvelope>(message => RouteAsync(message, Sender));
+        ReceiveAsync<SeatEnvelope>(message => HoldUntilStarted()
+            ? Task.CompletedTask : RouteAsync(message, Sender));
         Receive<SeatChildLoaded>(ChildLoaded);
         Receive<SeatChildLoadFailed>(ChildLoadFailed);
-        Receive<AddSeatActorObserver>(message => _observers[message.Id] = message.Observer);
-        Receive<RemoveSeatActorObserver>(message => _observers.Remove(message.Id));
+        Receive<AddSeatActorObserver>(message =>
+        {
+            if (!HoldUntilStarted())
+                _observers[message.Id] = message.Observer;
+        });
+        Receive<RemoveSeatActorObserver>(message =>
+        {
+            if (!HoldUntilStarted())
+                _observers.Remove(message.Id);
+        });
         Receive<SeatRequestSettled>(RequestSettled);
-        Receive<SeatRegionBarrier>(message => message.Completion.TrySetResult());
-        Receive<GetSeatActorRef>(request => request.Completion.TrySetResult(
-            _childrenBySeat.TryGetValue(request.SeatId, out var child) ? child.Actor : null));
+        Receive<SeatRegionBarrier>(message =>
+        {
+            if (!HoldUntilStarted())
+                message.Completion.TrySetResult();
+        });
+        Receive<GetSeatActorRef>(request =>
+        {
+            if (!HoldUntilStarted())
+                request.Completion.TrySetResult(
+                    _childrenBySeat.TryGetValue(request.SeatId, out var child) ? child.Actor : null);
+        });
         Receive<Terminated>(ChildTerminated);
+    }
+
+    public IStash Stash { get; set; } = null!;
+
+    protected override void PreStart()
+    {
+        base.PreStart();
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _ = ready.Task.ContinueWith(static task => _ = task.Exception,
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted |
+            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        Self.Tell(new StartSeatRegion(ready));
+    }
+
+    private bool HoldUntilStarted()
+    {
+        if (_started || _stopping)
+            return false;
+        Stash.Stash();
+        return true;
+    }
+
+    private void FailStashed()
+    {
+        foreach (var envelope in Stash.ClearStash())
+        {
+            switch (envelope.Message)
+            {
+                case SeatEnvelope request:
+                    FailRequest(request.Message, SeatActorUnavailable);
+                    break;
+                case GetSeatActorRef request:
+                    request.Completion.TrySetResult(null);
+                    break;
+                case SeatRegionBarrier request:
+                    request.Completion.TrySetException(new InvalidOperationException(SeatActorUnavailable));
+                    break;
+            }
+        }
     }
 
     protected override SupervisorStrategy SupervisorStrategy() =>
@@ -67,6 +123,7 @@ public sealed class SeatRegion : ReceiveActor
     protected override void PostStop()
     {
         _stoppingToken.Cancel();
+        FailStashed();
         foreach (var child in _childrenByActor.Keys.ToArray())
         {
             FailPending(_childrenByActor[child]);
@@ -91,14 +148,14 @@ public sealed class SeatRegion : ReceiveActor
         _starting = true;
         try
         {
-            var startupSeats = await _reader.GetStartupSeatsAsync(_stoppingToken.Token).ConfigureAwait(false);
+            var startupSeats = await _reader.GetStartupSeatsAsync(_stoppingToken.Token);
             var seen = new HashSet<SeatKey>();
             foreach (var key in startupSeats)
             {
                 if (!SeatActor.IsValidKey(key) || !seen.Add(key))
                     continue;
 
-                var result = await LoadEligibleSnapshotAsync(key).ConfigureAwait(false);
+                var result = await LoadEligibleSnapshotAsync(key);
                 if (result.Error is not null)
                 {
                     if (result.Error == SeatActorUnavailable && !_stopping)
@@ -155,7 +212,7 @@ public sealed class SeatRegion : ReceiveActor
             return;
         }
 
-        var eligibility = await LoadEligibleSnapshotAsync(key).ConfigureAwait(false);
+        var eligibility = await LoadEligibleSnapshotAsync(key);
         if (eligibility.Error is not null)
         {
             FailRequest(envelope.Message, eligibility.Error);
@@ -173,7 +230,7 @@ public sealed class SeatRegion : ReceiveActor
         SeatActorSnapshot? snapshot;
         try
         {
-            snapshot = await _reader.LoadAsync(key, _stoppingToken.Token).ConfigureAwait(false);
+            snapshot = await _reader.LoadAsync(key, _stoppingToken.Token);
         }
         catch (OperationCanceledException) when (_stoppingToken.IsCancellationRequested)
         {
@@ -322,6 +379,7 @@ public sealed class SeatRegion : ReceiveActor
         _stopping = true;
         _stoppingToken.Cancel();
         FailStartWaiters();
+        FailStashed();
         foreach (var entry in _childrenByActor.Values.ToArray())
         {
             _expectedStops.Add(entry.Actor);
@@ -359,6 +417,7 @@ public sealed class SeatRegion : ReceiveActor
 
         _starting = false;
         _started = true;
+        Stash.UnstashAll();
         foreach (var waiter in _startWaiters)
             waiter.TrySetResult();
         _startWaiters.Clear();
