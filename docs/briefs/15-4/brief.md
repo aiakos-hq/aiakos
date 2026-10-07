@@ -2,7 +2,7 @@
 id: 15-4
 title: "#15 slice 4 — released instance configuration and host lifecycle"
 issue: 15
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Cli/, src/Aiakos.Wsl/, src/Aiakos.Hosting.Wsl/, src/Aiakos.Orchestrator/, src/Aiakos.Api.Contracts/, src/Aiakos.AppHost/, tests/Aiakos.Hosting.Wsl.Tests/, docs/specs/0007-cli-and-released-instance.md, tests/Aiakos.Cli.Tests/, tests/Aiakos.Wsl.Tests/, tests/Aiakos.AppHost.Tests/, tests/Aiakos.Orchestrator.Tests/, Directory.Packages.props, Aiakos.slnx]
 date: 2026-10-07
