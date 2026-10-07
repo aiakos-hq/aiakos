@@ -1,6 +1,6 @@
 # Story review: slice 15-1
 
-Reviewed at commit 0673557. Stories: 5. Check: ok.
+Reviewed at commit 53b3cff. Stories: 5. Check: ok.
 
 ## Findings
 
@@ -31,6 +31,18 @@ root-options-only refusal, instance group help, parsed option/positional value r
 -- (literal send - excepted), occurrence-aware provenance, duplicate alias counts, parse-error
 check before GetValue, and ResponseFileTokenReplacer=null on every parse. These clarify
 existing R1/R2 outcomes; public surface, items, split and acceptance sources are unchanged.
+
+Architect, round 2: the diff 1dd0c70..53b3cff was read and the three resolutions are accepted; no
+findings are open. Run against System.CommandLine 2.0.12 with the amended guidance:
+`ResponseFileTokenReplacer = null` keeps `send impl @notes` literal; a no-op action on the
+`instance` group removes `Required command was not provided.`; the tokens of a positional or
+option result are the same objects as in `ParseResult.Tokens`, which carries a `DoubleDash` token,
+so "before or after `--`" can be decided by position (`up -- --dry` against `up --dry`);
+`--help -h` counts two identifier tokens. One consequence, not a finding: the library gives the
+same tokens for `--env -x` and `--env=-x`, so with this guidance no option value may begin with
+`-` in either form (a note such as `--note "-x"` is `Invalid command line.`); R2's "missing
+option values fail" leaves no other reading. Not run: the acceptance tests (not read), the
+production tree.
 
 ## Not checked
 
