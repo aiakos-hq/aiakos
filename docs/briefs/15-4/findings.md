@@ -1,6 +1,6 @@
 # Story review: slice 15-4
 
-Reviewed at commit 3d1c368. Stories: 9. Check: ok.
+Reviewed at commit 1063b39. Stories: 22. Check: ok.
 
 ## Findings
 
@@ -78,3 +78,34 @@ Reviewed at commit 3d1c368. Stories: 9. Check: ok.
 - Serilog: the two package versions exist on nuget.org; their build under this repository's warnings-as-errors was not tried.
 - Spec 0007 was read for R6–R21, instance files, ports, the API table and the start sequence only; ADR 0034 and the rest of the spec were not read.
 - The story texts from `tools/story.sh show` were checked for which items they carry (S2 and S9), not read in full for each story.
+
+## Round 2: resolution 1063b39
+
+The whole brief and the 22-story split were read again. The 32 round-1 resolutions are accepted,
+with the residues named below: the public seams exist for every story, the large stories are
+split, the admin client is owned here, the paths cover what is touched, the port sets are
+compared as sets, the Docker argv and the `postgres:18` mount target are exact, the dashboard is
+per instance, and discovery needs a held lock as well as a live pid. Twelve points are open; the
+first was run, the others are read.
+
+- [ ] S11, S2 (judgment-gap): R17 holds the lock with `FileAccess.ReadWrite, FileShare.Read` and R4 tests "held" the same way, but on Linux, where the gate runs, .NET takes a shared lock for any share mode other than `FileShare.None`: a second writer with `FileShare.Read` opened the file while the first held it (run on this machine), so E11 "second writer refused" and E2 "force lock refusal" cannot pass. Fix: use the rule of `src/Aiakos.Node/InstanceLock.cs` (`FileShare.Read` on Windows, `FileShare.None` elsewhere, holder read without a lock) in R17 and R4, and say what E11 expects for the holder text on Linux.
+- [ ] S12, S14 (context-gap): R10 and R19 run every `docker` command with a 10 s bound, but `docker create` pulls `postgres:18` or the dashboard image when it is not on the machine, which takes longer on a first start, so the first `instance start` fails with `Instance process timed out.`. Fix: add an explicit `pull` step with its own bound and error text, or give `create` a bound that covers a pull.
+- [ ] S2, S12 (context-gap): R4's `force=true` "explicitly recreates secrets", including `postgres-password`, while R10 keeps the existing volume, whose database still has the old password; after `instance init --force` the orchestrator can no longer authenticate and no rule gives the outcome. Fix: keep `postgres-password` on force when it exists, or state the refusal and its exact text.
+- [ ] S16, S18, S19 (judgment-gap): E8 asserts "connection only after healthy+connected" and E15 asserts "stop order exact R14", but `ConnectionStore` only writes what it is given and the routes are tested with a fake control: both sequences are the host's (R11, S19), and R11 does not say how `RequestStopAsync(keepSeats, keepDatabase)` ends `InstanceHost.RunAsync` or carries `keep_database`; R11 also cites "R18 readiness" where R13 is meant. Fix: move the two sequence cases to E12, and state in R11 the stop path from the control to the host with the order.
+- [ ] S19 (context-gap): the story holds the host sequencing over fake ports, the real `InstanceOrchestratorFactory` (in-process `WebApplication`, configuration keys, two Kestrel listeners, tested against Postgres) and the production host control (status from `SeatQueries` and `NodeLinkRegistry`, blocking addresses, stop); the control is also passed into the factory before the application whose services it reads exists. Fix: make the factory with the control implementation its own story before the host story, and say how the control obtains the application's services.
+- [ ] S4, S18 (context-gap): C1 says a 15-2 story merged after S4 has its "Program-only additions" moved into the composition "in the same later story", which names no story; 15-2's implementers read only 15-2's brief, so the routes land in `Program` and the in-process host of S19 has no API. Fix: name S18 as the story that moves any `Program`-only 15-2 registration into the composition, and add to E15 that `/v1/version` answers through `MapAiakosOrchestrator` alone.
+- [ ] S13, S19 (context-gap): R16 pins `Serilog.Extensions.Hosting`, but `HostLogs` only writes the messages it is handed and the host builder is created in S19, so nothing uses the package and no rule says whether the in-process orchestrator's `ILogger` output goes to `host-*.log` or passes the redaction. Fix: state in R11 that the factory routes `ILogger` output through `HostLogs` (and owns the hosting package there), or remove the package and say that this output is not written.
+- [ ] S15, S19 (context-gap): `AIAKOS_HOOK_PORT` is a name this brief invents for a node setting that #12 owns (spec 0001 and spec 0005 R18 say only that the node's hook port is the port base + 10; the node reads no such variable today), and R11 calls the missing consumer "partial", which in the workflow means acceptance tests that cannot pass, while here they pass. Fix: lead decides whether this slice fixes the variable name for 12-2 to follow or leaves it out until 12-2; either way replace "partial" by a named backlog item.
+- [ ] S22 (context-gap): no rule says where `InstanceHostRequest.PayloadDirectory` comes from in production (R5 mentions `node/linux-x64` inside the runtime copy), nor what the `string` of `IInstanceWslPreparation.PrepareAsync` is. Fix: state both in R21 and R11.
+- [ ] S6 (context-gap): E10 expects "staging/chmod/VERSION/rename", but R7 now writes `VERSION` by a separate command after the unchanged script has replaced `node`; E10 also still carries the `WSLENV` case, which is E5's. Fix: write E10's sequence as R7 has it and drop the `WSLENV` clause.
+- [ ] S16 (context-gap): E8 asserts "publication bytes exact", but there is no golden for `connection.json` and R13 does not fix the form of `started_at` (spec 0007 shows `Z`, the status golden shows `+00:00`). Fix: add the golden document for the status fixture.
+- [ ] S22 (context-gap): with R13 a connection counts only when `instance.lock` is held, and the AppHost holds no such lock in `~/.aiakos-dev`, so `--instance dev instance status` reports `Instance is unavailable.` with exit 3 while the dev stack runs; R21's "dev status 503" case is never reached. Fix: give the dev instance its own exact line and exit code that do not claim the stack is down, or exempt dev from the lock condition and state the 503 outcome.
+
+Architect, round 2. Run: `tools/story.sh check 15-4` (ok, 22 stories, 74 items); a .NET probe of
+file share modes on Linux (first finding); the registry tag list of
+`mcr.microsoft.com/dotnet/aspire-dashboard` (13.5.2 is listed). Read: the brief and split at
+1063b39, `src/Aiakos.Node/InstanceLock.cs`, spec 0001 (instance table) and spec 0005 R18 for the
+hook port. Not checked: the story texts from `tools/story.sh show`; Windows behaviour (share
+modes, ACLs, detached process); whether the CLI packs with the ASP.NET framework reference;
+nothing was built. This was the second round: the hook-port point needs lead's decision, the
+other eleven are the author's.
