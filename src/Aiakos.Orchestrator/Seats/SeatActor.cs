@@ -7,7 +7,7 @@ using Google.Protobuf.WellKnownTypes;
 
 namespace Aiakos.Orchestrator.Seats;
 
-public sealed class SeatActor : ReceiveActor
+public sealed class SeatActor : ReceiveActor, IDisposable
 {
     private const string InvalidSeatEvent = "INVALID_SEAT_EVENT";
     private const string SeatNotFound = "SEAT_NOT_FOUND";
@@ -22,6 +22,8 @@ public sealed class SeatActor : ReceiveActor
     private readonly ISeatActorWriter _writer;
     private readonly IReadOnlyList<IHarnessStateProfile> _profiles;
     private readonly TimeProvider _timeProvider;
+    private readonly CancellationTokenSource _actorStopping = new();
+    private int _disposed;
     private SeatActorSnapshot? _snapshot;
     private string? _initializationFailure;
 
@@ -56,6 +58,20 @@ public sealed class SeatActor : ReceiveActor
         _snapshot = null;
         _initializationFailure = null;
         base.PostRestart(reason);
+    }
+
+    protected override void PostStop()
+    {
+        Dispose();
+        base.PostStop();
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+        _actorStopping.Cancel();
+        _actorStopping.Dispose();
     }
 
     private async Task HandleEventsAsync(SeatEventRequest request)
@@ -117,7 +133,11 @@ public sealed class SeatActor : ReceiveActor
             try
             {
                 committedSequences = await _reader.GetCommittedSequencesAsync(_key,
-                    request.NodeInstanceId, inputSequences, CancellationToken.None);
+                    request.NodeInstanceId, inputSequences, _actorStopping.Token);
+            }
+            catch (OperationCanceledException) when (_actorStopping.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception)
             {
@@ -159,7 +179,11 @@ public sealed class SeatActor : ReceiveActor
                         try
                         {
                             owner = await _reader.FindNativeSessionAsync(_key.TenantId,
-                                profile.Harness, rotation.NativeSessionId, CancellationToken.None);
+                                profile.Harness, rotation.NativeSessionId, _actorStopping.Token);
+                        }
+                        catch (OperationCanceledException) when (_actorStopping.IsCancellationRequested)
+                        {
+                            throw;
                         }
                         catch (Exception)
                         {
@@ -193,6 +217,10 @@ public sealed class SeatActor : ReceiveActor
         {
             request.Completion.TrySetException(new InvalidOperationException(SeatActorUnavailable));
             throw new InvalidOperationException(SeatActorUnavailable);
+        }
+        catch (OperationCanceledException) when (_actorStopping.IsCancellationRequested)
+        {
+            request.Completion.TrySetException(new InvalidOperationException(SeatActorUnavailable));
         }
         catch (RetryableActorFailureException)
         {
@@ -262,6 +290,10 @@ public sealed class SeatActor : ReceiveActor
             request.Completion.TrySetException(new InvalidOperationException(SeatActorUnavailable));
             throw new InvalidOperationException(SeatActorUnavailable);
         }
+        catch (OperationCanceledException) when (_actorStopping.IsCancellationRequested)
+        {
+            request.Completion.TrySetException(new InvalidOperationException(SeatActorUnavailable));
+        }
         catch (RetryableActorFailureException)
         {
             request.Completion.TrySetException(new SeatCommitFailedException());
@@ -291,7 +323,7 @@ public sealed class SeatActor : ReceiveActor
         SeatActorSnapshot? snapshot;
         try
         {
-            snapshot = await _reader.LoadAsync(_key, CancellationToken.None);
+            snapshot = await _reader.LoadAsync(_key, _actorStopping.Token);
         }
         catch (Exception)
         {
@@ -327,10 +359,12 @@ public sealed class SeatActor : ReceiveActor
         catch (RequestRejectedException exception)
         {
             _initializationFailure = exception.Code;
+            Context.Parent.Tell(new SeatChildLoadFailed(_key));
         }
         catch (ActorLoadFailedException)
         {
             _initializationFailure = SeatActorUnavailable;
+            Context.Parent.Tell(new SeatChildLoadFailed(_key));
         }
     }
 
@@ -356,8 +390,8 @@ public sealed class SeatActor : ReceiveActor
     {
         try
         {
-            await _writer.CommitAsync(before, appliedInputs, CancellationToken.None);
-            var refreshed = await _reader.LoadAsync(_key, CancellationToken.None);
+            await _writer.CommitAsync(before, appliedInputs, _actorStopping.Token);
+            var refreshed = await _reader.LoadAsync(_key, _actorStopping.Token);
             if (refreshed is null || refreshed.Key != _key)
             {
                 throw new InvalidOperationException();
@@ -367,6 +401,10 @@ public sealed class SeatActor : ReceiveActor
             return refreshed;
         }
         catch (SeatStoreRejectedException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (_actorStopping.IsCancellationRequested)
         {
             throw;
         }
@@ -409,7 +447,7 @@ public sealed class SeatActor : ReceiveActor
         return null;
     }
 
-    private static bool IsSupportedInput(SeatInput? input) => input is NodeAttached or NodeLinkLost or
+    internal static bool IsSupportedInput(SeatInput? input) => input is NodeAttached or NodeLinkLost or
         OrchestratorRestarted or QuietTimeoutFired or LaunchWatchdogFired or UnknownProlongedFired;
 
     private static SeatStep Duplicate(SeatState state) => new(state, null, EventDisposition.Duplicate,
@@ -420,9 +458,9 @@ public sealed class SeatActor : ReceiveActor
         Effects = step.Effects.Where(static effect => effect is not AdoptRotatedSession).ToArray()
     };
 
-    private static bool IsValidKey(SeatKey key) => key.TenantId != Guid.Empty && key.SeatId != Guid.Empty;
+    internal static bool IsValidKey(SeatKey key) => key.TenantId != Guid.Empty && key.SeatId != Guid.Empty;
 
-    private static bool IsValidEvent(SeatEvent value, Guid seatId)
+    internal static bool IsValidEvent(SeatEvent value, Guid seatId)
     {
         if (!Guid.TryParse(value.SeatId, out var eventSeatId) || eventSeatId != seatId ||
             value.Seq == 0 || value.Seq >= long.MaxValue || value.SourceSeq > long.MaxValue ||

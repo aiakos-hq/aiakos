@@ -78,3 +78,5 @@ internal sealed record SeatInputRequest(SeatInput Input,
     TaskCompletionSource<SeatInputCommitted> Completion);
 
 internal sealed record SeatChildLoaded(SeatKey Key, long Version, TaskCompletionSource Ready);
+
+internal sealed record SeatChildLoadFailed(SeatKey Key);

@@ -3,6 +3,7 @@ using System.Globalization;
 using Aiakos.Data;
 using Aiakos.Orchestrator;
 using Aiakos.Orchestrator.Link;
+using Aiakos.Orchestrator.Seats;
 using Aiakos.ServiceDefaults;
 
 using Akka.Hosting;
@@ -75,14 +76,29 @@ builder.WebHost.ConfigureKestrel((context, kestrel) =>
 
 builder.AddNpgsqlDataSource("aiakos");
 builder.Services.AddSingleton<TenantRepository>();
+builder.Services.AddSingleton<ISeatActorReader, PostgresSeatActorReader>();
+builder.Services.AddSingleton<ISeatActorWriter, PostgresSeatActorWriter>();
 
-// The ActorSystem hosts live entities only; the skeleton registers no actors and uses no
-// remoting, clustering or persistence (R27). It stops with the host.
+// The ActorSystem hosts live seat actors only; it uses no remoting, clustering or persistence (R27).
 builder.Services.AddAkka("aiakos", akka => akka.ConfigureLoggers(loggers =>
 {
     loggers.ClearLoggers();
     loggers.AddLoggerFactory();
 }));
+
+// Migrations are registered before the seat region hosted service, so startup routing sees the
+// migrated schema. The optional node-link application registration above remains unchanged.
+builder.Services.AddSingleton<SeatRegionHost>();
+builder.Services.AddHostedService(services => services.GetRequiredService<SeatRegionHost>());
+builder.Services.Configure<HostOptions>(options => options.ServicesStartConcurrently = false);
+builder.Services.AddSingleton(static services => new SeatActorGateway(
+    services.GetRequiredService<SeatRegionHost>().Region));
+builder.Services.AddSingleton<ISeatEventCommitter>(static services =>
+    services.GetRequiredService<SeatActorGateway>());
+builder.Services.AddSingleton<ISeatInputCommitter>(static services =>
+    services.GetRequiredService<SeatActorGateway>());
+builder.Services.AddSingleton<ISeatActorLifecycle>(static services =>
+    services.GetRequiredService<SeatActorGateway>());
 
 builder.Services.AddGrpc(options =>
 {
