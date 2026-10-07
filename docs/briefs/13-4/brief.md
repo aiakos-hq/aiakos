@@ -121,8 +121,45 @@ are implemented only in their owning story. Keep all existing constructors and i
 usable by earlier tests; new optional service bundles or overloads may compose command services
 without changing the 13-3 ports. Internal requests are keyed by SeatKey and use asynchronous
 TaskCompletionSource; their private names are not an API. Cancellation is caller-wait cancellation.
-Concrete names are SeatCommandDispatcher, PostgresSeatCommandStore, SeatTokenGenerator and
-SeatLaunchFactory. Extend existing SeatActor/SeatRegion/SeatActorGateway rather than duplicate them.
+Concrete constructors (class outlines describe implementations, not stubs):
+
+```csharp
+public sealed class SeatCommandDispatcher : Aiakos.Core.ISeatCommandDispatcher
+{
+    public SeatCommandDispatcher(SeatActorGateway gateway);
+}
+public sealed class PostgresSeatCommandStore : ISeatCommandStore
+{
+    public PostgresSeatCommandStore(Npgsql.NpgsqlDataSource dataSource);
+}
+public sealed class SeatTokenGenerator : ISeatTokenGenerator
+{
+    public SeatTokenGenerator();
+}
+public sealed class SeatLaunchFactory : ISeatLaunchFactory
+{
+    public SeatLaunchFactory(IReadOnlyList<Aiakos.Orchestrator.Harnesses.IHarnessAdapter> adapters,
+        ISeatTokenGenerator tokens);
+}
+public sealed record SeatCommandServices(ISeatCommandStore Store, ISeatCommandPort Port,
+    ISeatNodeConnectionSource Connections, ISeatLaunchMaterialSource Materials,
+    ISeatLaunchFactory Launches);
+// Additional overloads; existing 13-3 constructors remain usable:
+public SeatActor(SeatKey key, ISeatActorReader reader, ISeatActorWriter writer,
+    IReadOnlyList<IHarnessStateProfile> profiles, TimeProvider timeProvider, SeatCommandServices commands);
+public SeatRegion(ISeatActorReader reader, ISeatActorWriter writer,
+    IReadOnlyList<IHarnessStateProfile> profiles, TimeProvider timeProvider, SeatCommandServices commands);
+// Existing gateway constructor stays SeatActorGateway(IActorRef region).
+// Add this member to that gateway, without creating a second region:
+public Task<object> DispatchAsync(Aiakos.Core.SeatCommandEnvelope command,
+    Aiakos.Core.CallerContext caller, CancellationToken ct);
+```
+
+R7 owns dispatcher, service bundle, actor/region overloads and gateway member. R3 owns store
+constructor; R5 owns factory/token constructors. The old event-only constructors leave commands
+unavailable. R17 below owns additive reader fields; its story must land before actor command
+services. The actor's reader must implement ISeatCommandReader when commands are supplied;
+otherwise public commands reject SEAT_COMMAND_SERVICE_UNAVAILABLE, existing events still work. Extend existing SeatActor/SeatRegion/SeatActorGateway rather than duplicate them.
 No new packages, Version attributes, NoWarn, pragma warning suppression or migration. Tests live
 in tests/Aiakos.Orchestrator.Tests; existing TestKit/xUnit-v3 patterns remain the standard.
 
@@ -144,17 +181,10 @@ G2. All mutations and node sends are decisions of the one seat actor. No SQL fro
 
 ## Rules
 
-R1. Publish R1's records/ports exactly above. SeatCommandDispatcher implements the Core interface
-    and resolves no addresses. Dispatch validates caller/envelope match, nonempty seat and
-    supported message, returning SeatCommandRejected("INVALID_SEAT_COMMAND") without actor/store/
-    port work otherwise. Null command/caller returns a safe faulted task ArgumentNullException
-    with parameter name command/caller; null inner Message is INVALID_SEAT_COMMAND. User/Sender
-    must be nonempty strings without CR/LF/NUL or isolated surrogate; Note permits newlines but
-    not NUL/isolated surrogate. Capture HistoryLines 0..10000 inclusive; body validation uses
-    InputValidator.CheckBody; require Problem==None and pass its Normalized body to the adapter. Bad note/body/history yields INVALID_SEAT_COMMAND without value
-    echo. Region eligibility failures map exact SEAT_NOT_FOUND/HUMAN_SEAT/SEAT_RETIRED/profile
-    reason from 13-3 to SeatCommandRejected. Returned accepted/up/down/capture/timeout records
-    have the properties shown, never a second CallerContext or ambiguous Core.SeatEnvelope.
+R1. Publish R1's records/ports exactly above. This story has no forwarding or dispatcher
+    implementation. All records have the exact shown properties; accepted/up/down/capture/
+    timeout records never introduce a second CallerContext or ambiguous Core.SeatEnvelope.
+    Valid command behavior and runtime validation are implemented only by R7.
 
 R2. Publish R2's transaction records/store port exactly above. Inputs hold the actor's already
     computed SeatStep values. Transaction.Before is the loaded snapshot/version; At is trusted
@@ -182,11 +212,14 @@ R3. PostgresSeatCommandStore executes one transaction sharing 13-3's writer help
     must not be introduced. Payload never contains the token or token hash. Up session pointer
     is the inserted session or reused Before.CurrentSessionId; current_launch_id=Launch.LaunchId.
     Reuse never inserts/rewrites a session. AbandonSessionId sets abandoned_at=At and
-    abandoned_reason='fresh-explicit', keeping all history; null does nothing. Desired updates
+    abandoned_reason=Launch.Decision, keeping all history; null does nothing. Desired updates
     seat.desired to up/down, desired_at=At, desired_by=DesiredBy, updated_at=At; state reader
     obtains Desired from seat, not a nonexistent seat_state.desired column. Each applied
-    transition uses cause_type='command', cause_command_id=Command.CommandId when creating a
-    command; timer transitions use cause_type='timer', NULL cause_command_id. Findings and all
+    transition caused by public command admission/rejection uses cause_type='command',
+    cause_command_id=Command.CommandId when inserting, otherwise NULL. Dispatch failure/status
+    update uses cause_type='command', cause_command_id=Updates[0].CommandId. Link-loss or
+    different-instance input uses cause_type='link', cause_command_id=NULL; timer input uses
+    cause_type='timer', cause_command_id=its targeted command UUID or NULL for state watchdogs. Findings and all
     mutable state columns follow 13-3's transaction rules. Nothing deletes prior evidence.
     Version conflict throws InvalidOperationException("SEAT_VERSION_CONFLICT") without inner;
     check/not-null/FK violations give SeatStoreRejectedException("SEAT_COMMIT_REJECTED").
@@ -212,8 +245,8 @@ R5. SeatLaunchFactory accepts the StartLaunch effect produced by the pure up dec
     InvalidOperationException("LAUNCH_MATERIAL_UNAVAILABLE"), no inner or values. For a
     new-session launch the actor generates native id via Profile.NewNativeSessionId; resume
     passes the stored id verbatim, never a new one. Material has real finalized projection and
-    relay files in production; tests inject immutable fixtures. BuildLaunch errors are fixed
-    INVALID_LAUNCH rejections, never echo builder exceptions. Factory creates a new command UUID,
+    relay files in production; tests inject immutable fixtures. BuildLaunch errors throw InvalidOperationException("INVALID_LAUNCH") with no inner/value
+    echo; this factory does not return public replies. R6 maps its safe exceptions to replies. Factory creates a new command UUID,
     and a session UUID only if effect.NewSession; otherwise requires Before.CurrentSessionId.
     New session decision='new-session' if effect.Decision is new-session/no-conversation-yet,
     otherwise 'fresh-explicit'. Launch mode is fresh/resume, decision exactly effect.Decision;
@@ -234,22 +267,45 @@ R5. SeatLaunchFactory accepts the StartLaunch effect produced by the pure up dec
 
 R6. Actor up handling calls pure Apply with UpRequested(Fresh,connection.Connected,newLaunchId,
     profileGeneratedNativeId) and uses that sole decision. Profile id may be generated but no
-    token/row is created for rejection/no-op. Precedence stays pure-machine exact: disconnected
+    token/session/launch/command is created for rejection/no-op. Commit findings returned by a
+    rejected pure step (including node-not-connected) through R3 without command insertion,
+    before returning the rejection; no-op desired changes also commit. Precedence stays pure-machine exact: disconnected
     NODE_NOT_CONNECTED; connected starting/present AlreadyUp; connected unknown
     SEAT_STATE_UNKNOWN; connected absent/exited with resumability Lost and !Fresh RESUME_LOST.
     For AlreadyUp commit desired-up only when it changes and return SeatAlreadyUp(current id).
     For StartLaunch prepare R5, then commit R3 rows, state starting/readiness false and desired-up
     before sending; new session resets resumability FreshOnly per pure Apply. Explicit Fresh
     that replaces a previous session marks it abandoned as R3, closes resume-loss/mismatch
-    findings per pure Apply and preserves caller.Note in launch decision_note. Do not fall back
-    when a native id/previous-session pointer is missing: LAUNCH_MATERIAL_UNAVAILABLE.
+    findings per pure Apply and preserves caller.Note in launch decision_note. Materials.LoadAsync returning null, a missing native id/session pointer or factory
+    LAUNCH_MATERIAL_UNAVAILABLE signal returns SeatCommandRejected("LAUNCH_MATERIAL_UNAVAILABLE");
+    factory INVALID_LAUNCH signal returns SeatCommandRejected("INVALID_LAUNCH"). No token rows,
+    state mutation or send for these preparation failures; no exception/detail reaches caller.
     After precommit/read refresh send once via port using the exact current connection instance,
     then commit R4 send acknowledgement/failure. Sent=true returns
     SeatCommandAccepted(newLaunchId,commandId); false/port exception returns
     SeatCommandRejected("COMMAND_DISPATCH_FAILED") after its safe failure commit. No up reply
     means launch-ready: final launch outcomes arrive exclusively in committed CommandResult.
 
-R7. Commands/result integration runs within the existing SeatActor mailbox. Successful send
+R7. Dispatch validates caller/envelope match, nonempty seat and
+    supported message, returning SeatCommandRejected("INVALID_SEAT_COMMAND") without actor/store/
+    port work otherwise. Null command/caller returns a safe faulted task ArgumentNullException
+    with parameter name command/caller; null inner Message is INVALID_SEAT_COMMAND. User/Sender
+    must be nonempty strings without CR/LF/NUL or isolated surrogate; Note permits newlines but
+    not NUL/isolated surrogate. A null Send.Body is INVALID_SEAT_COMMAND. Capture HistoryLines 0..10000 inclusive; body validation uses
+    InputValidator.CheckBody; require Problem==None and pass its Normalized body to the adapter. Bad note/body/history yields INVALID_SEAT_COMMAND without value
+    echo. R7 maps region eligibility failures to exact SEAT_NOT_FOUND/HUMAN_SEAT/SEAT_RETIRED/profile
+    reason from 13-3 as SeatCommandRejected. Returned accepted/up/down/capture/timeout records
+    have the properties shown, never a second CallerContext or ambiguous Core.SeatEnvelope.
+
+
+    Implement SeatCommandDispatcher and declared gateway/actor/region members. Dispatcher
+    performs the runtime validation above, then forwards the typed internal request with trusted caller
+    through existing region SeatEnvelope. Map eligibility failures as specified above. A valid
+    request without the service bundle returns SEAT_COMMAND_SERVICE_UNAVAILABLE; supplied
+    services route serially to the owned handlers, never independent SQL. Connection is live only
+    when Connected=true and NodeInstanceId is a nonempty UUID; otherwise use disconnected
+    branches for every command/effect, never pass a fabricated instance to the port. Commands/result
+    integration runs within the existing SeatActor mailbox. Successful send
     acknowledgment is transport acceptance only, not LaunchReceipt/PaneCapture/DeliveryReceipt.
     Existing 13-3 mapping/writer owns CommandResult launch/stop/delivery/capture results, launch
     metadata, resumability changes and event/axis/finding transaction. Refresh the committed
@@ -266,17 +322,24 @@ R7. Commands/result integration runs within the existing SeatActor mailbox. Succ
     replies use TrySetResult/Exception so event/timeout/node loss/cancellation completes at most
     once. Store/refresh failure uses 13-3 SeatCommitFailedException and supervision; no success.
 
-R8. Down applies DownRequested and commits desired-down (caller.User) plus the pure step. If
-    reported session is absent or no current launch exists, do not insert/send a command;
-    return SeatAlreadyDown after desired commit. Otherwise one pending stop command has payload
-    {"grace_seconds":10}; Wire StopSeat.Grace=10s, Command.Timeout=30s, Attempt=1, seat/id as R5.
-    Commit it and StopRequested before send. Send=true is SeatCommandAccepted(launchId,commandId);
-    failure follows R4 COMMAND_DISPATCH_FAILED. Existing committed StopResult STOPPED/KILLED/
-    NOT_RUNNING makes session Absent/activity None; FAILED/TIMED_OUT result makes session
-    Unknown with reason stop-failed and activity Unknown/stop-failed. Resumability never changes
-    for stop alone. Node loss still uses the existing link overlay, never an invented stopped.
+R8. Down applies DownRequested and commits desired-down (caller.User) plus the pure step.
+    Execute stop exactly when that step emits DispatchStop; never infer it separately from the
+    reported axis. No DispatchStop returns SeatAlreadyDown after desired commit, regardless of
+    link state. DispatchStop with disconnected/missing node instance commits desired-down and
+    pure StopRequested state, inserts no stop command, sends nothing and returns
+    SeatCommandRejected("NODE_NOT_CONNECTED"). It does not fabricate a stop result or change
+    session/activity/resumability. Connected DispatchStop creates one pending stop command with
+    payload {"grace_seconds":10}; Wire StopSeat.Grace=10s, Command.Timeout=30s, Attempt=1.
+    Commit it before send. Send=true returns SeatCommandAccepted(launchId,commandId);
+    failure follows R4 COMMAND_DISPATCH_FAILED. Committed StopResult STOPPED/KILLED/NOT_RUNNING
+    gives Absent/None; failed/timed-out result gives Unknown/stop-failed and Unknown/stop-failed.
+    Resumability never changes for stop alone. A local StopDeadlineFired(commandId) is ignored
+    for final commands, otherwise commits status unknown/outcome NULL/error_reason
+    COMMAND_RESULT_MISSING/completed_at=At with pure StopNotCompletedBody(TimedOut), so state
+    is honest Unknown/stop-failed; no invented wire event. R13 only schedules this message.
 
-R9. Capture requires a current launch, including exited/unknown; no launch returns
+R9. Capture checks launch first, then connection: it requires a current launch, including
+    exited/unknown; no launch (even disconnected) returns
     SeatCommandRejected("SEAT_NOT_PRESENT"). Disconnected returns NODE_NOT_CONNECTED. Commit a
     capture command with payload {"history_lines":HistoryLines}, forced=false and requested_by
     caller.User before sending; Timeout=5s, Attempt=1, CapturePane.HistoryLines=(uint)value.
@@ -284,14 +347,19 @@ R9. Capture requires a current launch, including exited/unknown; no launch retur
     After committed matching Completed CommandResult with Capture, return
     SeatCaptureCompleted(Capture.Clone()). Failed/rejected/noncapture terminal result gives
     SeatCommandRejected("CAPTURE_FAILED"); timed-out gives SeatCommandTimedOut("CAPTURE_TIMEOUT").
-    At local 5s deadline from successful send, commit status='timed-out',error_reason=
+    On CaptureDeadlineFired(commandId), ignore an already-final command; otherwise commit status='timed-out',error_reason=
     'CAPTURE_TIMEOUT',completed_at=At before that reply; leave outcome NULL. Final event beats
-    timeout if its commit occurred first; no synthetic wire event. PaneDead is evidence only:
+    timeout if its commit occurred first; no synthetic wire event. R13 schedules this message
+    at SentAt+5s; R9 owns handling, tested by directly enqueued messages before scheduler lands.
+    On link loss, commit sent capture status unknown/outcome NULL/error_reason
+    NODE_NOT_CONNECTED/completed_at=At, then complete its wait NODE_NOT_CONNECTED. A late result
+    still supplies event evidence but cannot revive the canceled/completed wait. PaneDead is evidence only:
     use existing 13-3 CaptureBody behavior/finding, never infer a healthy axis from a capture.
 
 R10. Send runs InputValidator before admission and pure SendRequested(Force,connected,
     DeliveryInFlight). In-flight means the same seat has an existing deliver status pending/sent.
-    Rejection order is disconnected NODE_NOT_CONNECTED; unknown session SEAT_STATE_UNKNOWN;
+    Commit any rejected step findings without creating a deliver command (node-not-connected
+    included), then return its rejection. Rejection order is disconnected NODE_NOT_CONNECTED; unknown session SEAT_STATE_UNKNOWN;
     session not Present SEAT_NOT_PRESENT; in-flight DELIVERY_IN_FLIGHT; Working SEAT_WORKING;
     NeedsInput SEAT_NEEDS_INPUT; Unknown activity without Force SEAT_ACTIVITY_UNKNOWN.
     Force permits Unknown activity only, never an overlay/working/input dialog. Use matching
@@ -307,14 +375,19 @@ R10. Send runs InputValidator before admission and pure SendRequested(Force,conn
 R11. Only the existing committed result writer/DeliveryStateMachine decides a sent delivery's
     final outcome: CONFIRMED→confirmed; SUBMITTED_UNCONFIRMED→submitted-unconfirmed plus open
     delivery-unconfirmed; NOT_DELIVERED→not-delivered; unspecified→unknown; FAILED/REJECTED/
-    TIMED_OUT status→failed. A final outcome is immutable. On node instance replacement or
-    NodeLinkLost, any sent nonfinal delivery becomes status='unknown',outcome='unknown',
-    completed_at=At; pending not yet dispatched becomes failed/not-delivered instead. Persist
-    these changes with the link input step in one R3 transaction, then notify any waiters.
+    TIMED_OUT status→failed. A final outcome is immutable. On NodeAttached with a different NodeInstanceId from its stored sent NodeInstanceId, any
+    sent nonfinal delivery becomes status='unknown',outcome='unknown',
+    completed_at=At; pending not yet dispatched becomes failed/not-delivered instead. On NodeLinkLost keep
+    sent status/outcome and original NodeInstanceId unchanged; the same node can reconnect and
+    NodeProxy may resend using that id; R13 uncertainty deadline remains armed using original SentAt. Persist replacement changes with the attachment step in one R3 transaction, then notify any waiters.
     Never reissue deliver from seat actor, timer, restart or dispatcher. Same-instance transport
     reconnection resend remains NodeProxy/10-5's responsibility; this actor does not schedule it.
-    Delivery confirmation has no direct activity effect. On local 30s command deadline persist
-    status='timed-out',outcome='failed',error_reason='COMMAND_TIMEOUT',completed_at=At; no retry.
+    Delivery confirmation has no direct activity effect. On DeliveryDeadlineFired(commandId), ignore final commands; otherwise persist
+    status='unknown',outcome='unknown',error_reason='COMMAND_RESULT_MISSING',completed_at=At.
+    No node result means unknown, not failed; no retry. R13 schedules at SentAt+30s node timeout
+    +Profile.ConfirmTimeout+30s margin; R11 owns handling, tested with directly enqueued message.
+    Node TIMED_OUT result is still failed per the existing result writer; the local uncertainty
+    deadline must not simulate that node status.
 
 R12. After a committed confirmed delivery with nonempty turn_id, compare the next successful
     event/input commit against persisted plus currently received seat events of current launch:
@@ -334,13 +407,17 @@ R13. Actor timers use TimeProvider, injected fake time and per-arm generation/cu
     | quiet | known Present/Working with LastEventAt: due LastEventAt+Profile.QuietTimeout; rearm on new LastEventAt; cancel when not Present/Working, overlay or actor stop | QuietTimeoutFired, existing pure Apply and writer; stale deadline no-op |
     | launch watchdog | after launch precommit; due launch requested At+Profile.ReadyTimeout+30s command timeout+30s; cancel on terminal launch result, absent/exited or actor stop | LaunchWatchdogFired; starting→Unknown/launch-result-missing and launch-unconfirmed finding via pure machine |
     | unknown prolonged | reported Unknown: due SessionSince+5min; retain deadline across same unknown reason; cancel when no longer Unknown or actor stop | UnknownProlongedFired; existing state-unknown-prolonged finding, no command |
-    | capture | after successful capture send: SentAt+5s; cancel on final result/wait cancellation/actor stop | R9 committed timeout, reply CAPTURE_TIMEOUT |
-    | command | after successful start/stop/deliver send: SentAt+30s; cancel on final committed result/actor stop | commit timed-out/error_reason COMMAND_TIMEOUT; start uses StartNotCompletedBody(TimedOut,COMMAND_TIMEOUT), stop StopNotCompletedBody(TimedOut), deliver DeliveryNotCompleted(TimedOut); no invented SeatEvent |
+    | capture | after successful capture send: SentAt+5s; cancel on final result/wait cancellation/actor stop | CaptureDeadlineFired(commandId), R9 owns handling |
+    | stop | after successful stop send: SentAt+30s timeout+30s margin; cancel on final result/actor stop | StopDeadlineFired(commandId), R8 owns handling |
+    | delivery | after successful deliver send: SentAt+30s timeout+Profile.ConfirmTimeout+30s margin; cancel on final result/actor stop | DeliveryDeadlineFired(commandId), R11 owns handling |
 
-    Timer-derived pure steps and command updates share one store transaction. Command timeout
-    does not delete launch-watchdog: watchdog may later establish missing-result diagnosis.
-    ReadyTimeout/QuietTimeout/ConfirmTimeout always come from the selected harness; fixed5s
-    capture,30s command,10s stop grace and5min unknown are orchestration policy, not profile values.
+    R13 owns timer arming only; R8/R9/R11 own command-deadline handling. State watchdogs enqueue
+    the existing pure inputs and commit their steps. There is no local start-command timeout: the
+    launch watchdog is its sole local deadline and does not prematurely finalize command rows.
+    Each internal deadline record has Guid CommandId; private actor message names are exact
+    CaptureDeadlineFired, StopDeadlineFired and DeliveryDeadlineFired.
+    ReadyTimeout/QuietTimeout/ConfirmTimeout always come from the selected harness; fixed 5s
+    capture, 30s wire timeout plus local margins, 10s stop grace and 5min unknown are orchestration policy, not profile values.
     Reload uses stored requested_at/sent_at/last_event_at/session_since, not a fresh full interval;
     overdue timers enqueue once when resumed. Do not arm a second timer per unrelated input.
 
@@ -349,8 +426,7 @@ R14. Extend the existing actor restart reload: no relaunch or new delivery. Keep
     On successful reload, persisted pending/sent command metadata is the truth; outcomes not
     established by results remain unknown rather than success. Await SeatActorReloaded region
     publication before newly queued public requests can decide. For a current launch whose
-    reported session is Unknown, create one evidence capture (history_lines=0) through R9's
-    precommit/send path, after notification; no launch leaves none. Suppress duplicate capture
+    reported session is Unknown, request one R18 evidence capture after notification; no launch leaves none. Suppress duplicate capture
     if a pending/sent capture already exists; do not block other commands awaiting its result.
     Restore timers per R13. Reload does not reset an already final outcome or re-send a start/
     deliver command. Actor stop/restart faults pending capture waits with
@@ -367,7 +443,7 @@ R15. Add observability at committed transitions/findings and command boundaries 
     seat.transition with axis/from/to/reason/cause. Finding changes emit Warning
     "Seat {SeatAddress} finding {Kind} {Status}" with status open/resolved. Meter name Aiakos.Seats;
     counters aiakos.seat.launches(mode,decision,outcome), aiakos.seat.deliveries(outcome,forced),
-    aiakos_seat_commands_total(kind,outcome), one increment per committed respective change.
+    one increment per committed respective change. No new commands counter or spec amendment.
     Do not count rollback/prospective steps or replay duplicates. No body/token/raw/capture text,
     note, secret path, CallerContext.Sender or exception detail in any telemetry. Traceparent
     validation/linking follows 13-3; no second logging of the same commit by gateway/dispatcher.
@@ -383,14 +459,54 @@ R16. Add command service registration to the existing shell only when its named 
     AddSeatCommands(this Microsoft.Extensions.DependencyInjection.IServiceCollection services),
     returning that same IServiceCollection, to consume registered providers, not stub them.
 
+R17. Extend existing positional records with init-only properties; preserve their constructors:
+    SeatActorSnapshot.Address (string, default ""), LaunchRequestedAt (DateTimeOffset?, default
+    null); SeatStoredCommand.NodeInstanceId (Guid?), TurnId (string?), SentAt/CreatedAt/CompletedAt
+    (DateTimeOffset?), Payload and Result (JsonElement?, independent Clone), all nullable defaults. Existing
+    PostgresSeatActorReader implements new ISeatCommandReader : ISeatActorReader with member
+    Task<bool> HasPromptAsync(SeatKey key, Guid launchId, string turnId, CancellationToken ct).
+    Its existing LoadAsync repeatable-read transaction selects seat.address, current
+    seat_launch.requested_at and command.node_instance_id,turn_id,sent_at,created_at,completed_at,
+    payload,result along with previous fields. Null launch→null requested time. Hydrate exact column
+    values, no derived address and no launch-material request on every event. HasPromptAsync is
+    a tenant/seat/launch-scoped EXISTS on seat_event body_type='harness', kind='prompt-submitted',
+    attributes->>'turn_id'=turnId. No raw parsing/event replay. R12 also examines current batch's
+    normalized prompt inputs before commit. R11 compares new attachment id to each stored sent
+    command id; R13 uses LaunchRequestedAt/SentAt and selected profile deadlines. Fake command
+    readers populate these properties explicitly; event-only fake readers remain valid. Reader
+    constructor remains PostgresSeatActorReader(NpgsqlDataSource). Declare no default query result.
+
+R18. Execute each committed pure RequestCapture(launchId) effect through the one actor after its
+    input commit+refresh and before returning effects to external callers. Filter consumed
+    RequestCapture from external Effects, as AdoptRotatedSession is already filtered; no external
+    second executor. For matching current launch and connected node, use R9 insertion/send path
+    with history_lines=0, requested_by='seat-actor', independent command UUID, trusted tenant/seat,
+    no public caller/wait, and ordinary result evidence processing. Suppress if a pending/sent
+    capture for that launch exists. Reload R14 uses this same action after notification. For
+    disconnected node or mismatched/no launch, insert/send nothing; keep gap/overlay findings,
+    do not mark session healthy or retain a queued send for reconnect. A later committed gap or
+    reload may request a new evidence capture. Failed automatic send records R4 failure, never
+    throws port details or creates a successful outcome. No internal capture has an invented
+    human identity; fixed requested_by is actor attribution only.
+
 ## Changes to earlier behavior
 
 C1. The 13-3 actor's unsupported public command branch now admits this slice's typed command
     request through region/gateway, while unsupported generic ApplyAsync inputs still fail
     SEAT_INPUT_NOT_SUPPORTED. Update only tests that explicitly asserted new public commands
     were unsupported; no pure-machine or existing event/ingest expectation changes. New store
-    factoring must preserve every existing reader/writer/actor test. The 15-2 API bridge consumes
-    Core.ISeatCommandDispatcher and Core.SeatCommandEnvelope; it owns its matching bridge edit.
+    factoring must preserve every existing reader/writer/actor test.
+
+C3. Extend earlier reader snapshot expected values with the new init-only fields from R17
+    where tests compare entire loaded records; old field values and positional constructors
+    remain unchanged. No query semantics or earlier failures are relaxed.
+
+C2. Existing external RequestCapture effects are now consumed by R18 only after commit; update
+    the earlier actor effect-output tests to assert consumption when command services exist.
+    Without services retain 13-3 effect output, preserving event-only operation. No generic input
+    or pure-machine output changes.
+
+
 
 ## Expected outputs: exact text
 
@@ -403,46 +519,53 @@ All actor cases assert commit and metadata refresh occur before sends/replies.
 
 | ID | Change | Exact output |
 |---|---|---|
-| `PROTOCOL` | reflect seam and all reply records; invalid tenant/UUID/body/note/history | exact properties/signatures above; invalid returns SeatCommandRejected("INVALID_SEAT_COMMAND"), zero queued requests/rows/sends |
+| `PROTOCOL` | reflect seam and all reply records without invoking dispatcher | exact R1 properties/signatures above; protocol-only S1 constructs immutable records and ports; runtime validation/forwarding cases belong to RESULT-order in R7 |
 | `STORE-shape` | reflect transaction records and store interface | every R2 property/signature exactly above; immutable insert/update/transaction data; no implementation or SQL required here |
 | `STORE-inserts` | prepared fresh launch with session J2/L2/C and step Starting | every R3 column exact; session decision new-session, launch fresh/new-session, command pending/start/attempts0; version8, pointers J2/L2; desired_up attributed owner; no secret bytes; unchanged transaction with no mutation returns SeatStoreReceipt(7,J)/no writes |
 | `STORE-rollback` | state version mismatch or invalid NOT NULL/check/FK after insert | SEAT_VERSION_CONFLICT or SEAT_COMMIT_REJECTED/no inner; zero new session/launch/command/transitions/findings; old desired/pointers/abandonment unchanged |
 | `STORE-status` | send success/failure then late success after final event | R4 exact sent/failed fields; late send ack does not overwrite final outcome; foreign/missing update SEAT_COMMIT_REJECTED/no partial writes |
 | `LAUNCH-build` | fresh/resume and shared/seat-worktree, fake adapter/files/profile | StartSeat matches R5 fields, timeout30s, native id chosen solely by effect/profile; no new id on resume; token only Secrets[0] seat_token/FilePath secrets/seat-token, SHA256 only in launch row |
 | `LAUNCH-invalid` | missing source/mismatched node/invalid native id/build error | LAUNCH_MATERIAL_UNAVAILABLE or INVALID_LAUNCH, no token in exception, zero commit/send |
-| `UP-matrix` | connected/disconnected, each Session and Resumability, Fresh flag | pure-machine precedence in R6; starting/present SeatAlreadyUp(L), unknown SEAT_STATE_UNKNOWN, disconnected NODE_NOT_CONNECTED, lost without Fresh RESUME_LOST; no-op/rejection no launch/command/token |
-| `UP-start` | absent/exited, None/FreshOnly/Resumable/Unknown/Lost plus explicit Fresh | L2/session/native/mode/decision exactly pure StartLaunch; accepted SeatCommandAccepted(L2,C) after commit/send ack; explicit Fresh abandons old row and records owner/note; no fallback |
-| `RESULT-order` | capture/delivery result blocked at writer, duplicate/foreign/stale result | no final reply before commit+refresh; matching committed result completes exactly once; no direct port outcome; mailbox serves other requests while capture waits |
-| `DOWN-stop` | absent; live launch; completed stop and failed/timed-out stop | absent→SeatAlreadyDown; live→SeatCommandAccepted(L,C), desired Down and stop payload grace10 before send; completed stop→Absent/None; failed/timed-out→Unknown/stop-failed; original resumability retained |
-| `CAPTURE-result` | launch in each state; missing launch; successful/failed result or5s timeout | no launch SEAT_NOT_PRESENT; completed returns SeatCaptureCompleted(exact cloned PaneCapture); failure CAPTURE_FAILED; timeout SeatCommandTimedOut("CAPTURE_TIMEOUT") after timed-out row commit; capture admission no axis change |
-| `SEND-reject` | each invalid admission state and Force | R10 exact rejection precedence; zero deliver row/send; Force only unknown activity, sets forced=true; present idle Force=true records forced=false |
+| `UP-matrix` | connected/disconnected, each Session and Resumability, Fresh flag | pure-machine precedence in R6; starting/present SeatAlreadyUp(L), unknown SEAT_STATE_UNKNOWN, disconnected NODE_NOT_CONNECTED, lost without Fresh RESUME_LOST; no-op/rejection no launch/command/token; disconnected pure rejection commits node-not-connected finding before reply |
+| `UP-start` | absent/exited, None/FreshOnly/Resumable/Unknown/Lost plus explicit Fresh | L2/session/native/mode/decision exactly pure StartLaunch; accepted SeatCommandAccepted(L2,C) after commit/send ack; explicit Fresh abandons old row and records owner/note; missing/null material→SeatCommandRejected("LAUNCH_MATERIAL_UNAVAILABLE"), builder signal→SeatCommandRejected("INVALID_LAUNCH"), no preparation-failure mutation/send; no fallback |
+| `RESULT-order` | capture/delivery result blocked at writer, duplicate/foreign/stale result | valid without bundle SEAT_COMMAND_SERVICE_UNAVAILABLE; R7 validation/eligibility exact; invalid queues nothing; no final reply before commit+refresh; matching committed result completes exactly once; no direct port outcome; mailbox serves other requests while capture waits |
+| `DOWN-stop` | absent; live launch; completed stop and failed/timed-out stop | absent→SeatAlreadyDown; live→SeatCommandAccepted(L,C), desired Down and stop payload grace10 before send; completed stop→Absent/None; failed/timed-out→Unknown/stop-failed; original resumability retained; disconnected DispatchStop→NODE_NOT_CONNECTED, desired-down/StopRequested committed, no stop row/send; no DispatchStop→SeatAlreadyDown regardless link |
+| `CAPTURE-result` | launch in each state; missing launch; successful/failed result or5s timeout | no launch, even disconnected→SEAT_NOT_PRESENT; launch but disconnected→NODE_NOT_CONNECTED; link loss sent capture row unknown/NODE_NOT_CONNECTED before wait completion; completed returns SeatCaptureCompleted(exact cloned PaneCapture); failure CAPTURE_FAILED; timeout SeatCommandTimedOut("CAPTURE_TIMEOUT") after timed-out row commit; capture admission no axis change |
+| `SEND-reject` | each invalid admission state and Force | R10 exact rejection precedence; zero deliver row/send; rejected pure findings committed; Force only unknown activity, sets forced=true; present idle Force=true records forced=false |
 | `SEND-accepted` | adapter derives delivery from trusted lead and body; ack success/failure | accepted SeatCommandAccepted(L,C); exact lead/body/expect_confirmation payload; profile ConfirmTimeout wire; ack failure failed/not-delivered, COMMAND_DISPATCH_FAILED; no activity change |
-| `SEND-outcome` | all delivery results/noncompleted status/node loss/deadline/replay | R11 exact immutable outcomes; node loss unknown; pending no send not-delivered; deadline failed/COMMAND_TIMEOUT; one original send, no actor resend |
+| `SEND-outcome` | all delivery results/noncompleted status/node loss/deadline/replay | R11 exact immutable outcomes; different node instance unknown; same-instance link loss stays sent; pending replaced before send not-delivered; injected local deadline unknown/COMMAND_RESULT_MISSING; node timed-out result failed; one original send, no actor resend |
 | `SEND-evidence` | confirmed turn with/without matching prompt after next commit | missing→one open sources-disagree; matching→no such new finding; stale launch ignored; activity still only pure harness conclusions |
-| `TIMERS` | varied profiles, fake time just before/at due; stale generation | exact R13 timer/input/deadlines, no action before due, one after; quiet uses profile, watchdog ready+60s, unknown5min, no reissue; overdue reload does not restart interval |
+| `TIMERS` | varied profiles, fake time just before/at due; stale generation | exact R13 timer/input/deadlines, no action before due, one after; quiet uses profile, watchdog ready+60s is sole start deadline; delivery deadline30s+confirm+30s yields unknown; stop60s, unknown5min, no reissue; overdue reload does not restart interval |
 | `RELOAD` | restart/load handshake blocked; final/pending commands; no/live launch | no public request/send before SeatActorReloaded; live unknown→one capture C/history0 after notification; no launch→none; no start/deliver resend; final outcomes preserved |
 | `CANCEL` | cancellation pre/post admission, capture waiter canceled, link lost, actor stop | pre: canceled Task/no rows/send; post: canceled wait/commit may complete; link after commit NODE_NOT_CONNECTED, stop SEAT_ACTOR_UNAVAILABLE; no rollback or resend |
+| `READER-command` | snapshot and prompt query on tenant/seat fixtures | exact R17 added columns/defaults, actual seat address for event telemetry, tenant-scoped prompt true/false, old constructors valid |
+| `CAPTURE-effect` | committed gap/reload RequestCapture, connected/disconnected/deduped | connected one capture row requested_by seat-actor/history0 after commit; disconnected or duplicate zero insert/send; consumed effect absent externally, no axis fabrication |
 | `OBSERVE` | committed transition/finding and duplicate/rollback with sentinel body/token/note/raw | exact R15 templates/names/tag allowlist; one committed transition counter/event; Warning finding; zero telemetry occurrences of sensitive sentinels; duplicate/rollback no increments |
 | `HOST-command` | DI with fake real seams; services absent; dispose | same existing gateway/region for all ports; supplied dispatcher works; absent rejects SEAT_COMMAND_SERVICE_UNAVAILABLE; old health/event tests unchanged, termination awaited |
 
 ## Permanent tests
 
-T1. Commit tests for PROTOCOL, immutability and G1 validation, including valid non-BMP/U+FFFE,
-    newline body/note versus invalid isolated surrogate/NUL; null top-level parameter names.
+T1. Commit protocol-only reflection and record/port immutability tests for PROTOCOL; no valid
+    dispatch or actor behavior required before R7 lands.
 T2. Commit transaction/insert/rollback/status Postgres tests for R2–R4 with tenant isolation,
     existing history preservation, exact finite fields and not-null schema constraints.
 T3. Commit launch factory/token tests with fake adapter and injected opaque token bytes, hash
     equality, new token each launch, mutable input cloning, no secret in row/argv/env/telemetry.
 T4. Commit up matrix/atomic-order tests including failed resume result then RESUME_LOST and
     explicit Fresh; return no success before refresh; store failures use existing supervision.
-T5. Commit pending outcome tests with controlled event writer and fast-result race, malformed/
+T5. Commit R7 runtime validation (Unicode/control/null/history/body/tenant) and eligibility
+    mapping tests, missing-bundle valid-command rejection, plus pending outcome tests with controlled event writer and fast-result race, malformed/
     unknown/duplicate/foreign/stale results, bounded cancellation and no two outcome sources.
 T6. Commit down tests with all StopOutcome/status variants, unchanged resumability, desired
     attribution and safe send failure.
 T7. Commit capture tests for all launch states/history bounds, successful cloned bytes, timeout
     versus event commit ordering, dead-pane evidence and actor continuing while caller waits.
-T8. Commit send tests for every R10 admission and R11 outcome, at-most-once/node replacement/
-    timeout; prompt-evidence confirmation finding in R12 and activity never set by receipts.
+T8. Commit send tests for every R10 admission and R11 outcome, at-most-once/different-instance
+    versus link loss/injected deadline; no premature failure and activity never set by receipts.
+T12. Commit R12 prompt-evidence comparison and conservative reload-recheck tests separately.
+T13. Commit R17 reader/property/query tests for exact persisted metadata and tenant isolation.
+T14. Commit R18 automatic capture-effect order, attribution, dedupe, unavailable-node and
+    consumed-effect tests with controlled store/port completions.
 T9. Commit fake-time timer/reload/cancel tests for each R13 arm/cancel rule, varied profiles,
     overdue deadlines, duplicate capture suppression and queued-request publication order.
 T10. Commit MeterListener/ActivityListener/captured-log tests pinning R15 names and secret/body/
