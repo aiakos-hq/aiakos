@@ -84,6 +84,11 @@ look() {
       echo "$(date +%H:%M:%S) would renew $seat (last item closed $newest)"
       continue
     fi
+    # The checks above took a moment; look again, so that a seat that just received an item
+    # is not stopped. OpenRig has no "stop only if idle", so a gap of about a second remains.
+    seats | grep -qx "$seat idle" || continue
+    read -r count newest < <(items "$seat" in-progress) || continue
+    [ "$count" = "0" ] || continue
     now="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
     if rig seat launch "$seat" --fresh --stop --reason "new conversation between items (fresh.sh)" > /dev/null 2> "$STATE/$seat.err"; then
       printf '%s\n' "$now" > "$STATE/$seat"

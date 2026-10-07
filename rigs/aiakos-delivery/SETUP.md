@@ -25,7 +25,8 @@ logins, per-seat permission choices and OpenRig's own state (`~/.openrig`).
    ```
 
    The script installs nothing. It lists what is missing.
-6. Start the rig for the first time, then do [Running unattended](#running-unattended):
+6. Start the rig for the first time ([Running unattended](#running-unattended) says how the
+   seats are allowed to work without asking):
 
    ```bash
    rig up rigs/aiakos-delivery/rig.yaml
@@ -58,8 +59,9 @@ and after `rig.yaml` changed (see [After a change to rig.yaml](#after-a-change-t
 By default a seat stops and asks before it runs a command its harness does not already allow.
 One unanswered prompt stalls the whole queue. `permission_policy: builtin:open` in `rig.yaml`
 does not prevent this: OpenRig records that policy but does not change how a seat is launched
-(`rig policy permissions current` shows `launch_posture=floor`). Two settings do change it. The
-maintainer makes both; no seat may change its own or another seat's permissions.
+(`rig policy permissions current` shows `launch_posture=floor`). A policy on the member does
+change it, and every member has one. The maintainer sets them; no seat may change its own or
+another seat's permissions.
 
 **What you give up.** A Codex seat with full access has no sandbox: it can read and write
 anything your WSL user can, including `/mnt/c`, the `gh` token and key files. A Claude seat in
@@ -84,53 +86,26 @@ ps -eo args | grep "[c]odex --no-daemon" | grep aiakos
 The first command lists the five members with `launch_posture=full_bypass`. The second, with
 the rig running, shows `-s danger-full-access -a never` on every Codex seat.
 
-### 2. Claude seats: auto mode (per rig start from the file)
+### 2. Claude seats: auto mode (in the repository, already there)
 
-`rig.yaml` has no field for Claude's auto mode. OpenRig stores it on the seat, so it has to be
-set again whenever the seats are new: on a new machine, and after every start from the file.
+Each Claude member in `rig.yaml` (`lead`, `architect`, `reviewer`) has this line:
 
-With the rig running, record the choice. OpenRig takes the caller from the environment, so a
-plain shell must say who it is:
-
-```bash
-for seat in lead-lead analysis-architect verify-reviewer; do
-  OPENRIG_SESSION_NAME=operator-human@kernel rig seat set-permissions "$seat@aiakos-delivery" \
-    --mode auto --reason "Unattended delivery rig"
-done
+```yaml
+        permission_policy: builtin:auto
 ```
 
-Without `OPENRIG_SESSION_NAME` the command answers
-`Sender identity, mode and reason are required`.
-
-Check that it was recorded (`selectionState` must not be `inherit`):
-
-```bash
-rig seat status lead-lead@aiakos-delivery --json | grep -A3 '"permissions"'
-```
-
-The choice applies when a seat is launched, so restart the same rig by name:
-
-```bash
-rig down aiakos-delivery && rig up aiakos-delivery --existing
-```
-
-Then check how the Claude seats were launched:
+Nothing to do on a new machine. The first command above lists the three members with
+`launch_posture=auto`. With the rig running:
 
 ```bash
 ps -eo args | grep "[c]laude --permission-mode" | grep aiakos-delivery
 ```
 
-Every line must say `--permission-mode auto`.
-
-**If a line still says `acceptEdits`**, the stored choice was not used. Switch that seat by
-hand: open its terminal and press Shift+Tab until it shows "auto mode on". This lasts until the
-seat is launched again. The restart by name and the check above have not been confirmed on
-OpenRig 0.6.4 yet; the hand switch has.
+Every line must say `--permission-mode auto`, and each seat's terminal shows "auto mode on".
 
 ### Going back
 
-Remove the `permission_policy: builtin:yolo` lines from `rig.yaml`, and run the
-`set-permissions` loop with `--mode inherit`. Then start from the file.
+Remove the `permission_policy` lines of the members from `rig.yaml`, then start from the file.
 
 ## New conversations between items
 
@@ -175,9 +150,8 @@ rig down aiakos-delivery
 rig up rigs/aiakos-delivery/rig.yaml
 ```
 
-Wait until the queue is quiet first. Queue
-items and the files in `docs/briefs/` and `artifacts/trials/` are kept. Then repeat step 2 of
-[Running unattended](#running-unattended) for the Claude seats.
+Wait until the queue is quiet first. Queue items and the files in `docs/briefs/` and
+`artifacts/trials/` are kept.
 
 ## What the rig writes into the checkout
 
