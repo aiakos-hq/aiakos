@@ -175,6 +175,23 @@ R2. Grammar (all names case-sensitive; System.CommandLine standard `--` end-of-o
     No resolved instance or Request is produced. Missing option values/unrecognized tokens still
     fail grammar; this exception ignores only the instance value, not arbitrary syntax errors.
     Empty option strings and empty required seat/text/file/rig/node/distro values fail.
+    Implementation guidance for the information-option boundary (same behavior, no added rule):
+    System.CommandLine2.0.12 RootCommand already contains HelpOption and VersionOption.
+    Do not register a duplicate --version; the built-in VersionOption disallows other explicit
+    options, and built-in HelpAction clears unrelated grammar errors. A validation tree may
+    remove those defaults, register ordinary zero-arity bool --help/-h and root-only --version,
+    and give root a no-op action so valid root information requests do not acquire the library's
+    missing-subcommand error. Let System.CommandLine recognize tokens and reject unknown/extra
+    tokens; inspect parsed option values and the selected command, not raw token presence.
+    For this validation pass, positional minimum arities may be zero: enforce the R2 required
+    positional counts after valid help/version has been handled, so capture --help remains valid
+    but capture without a seat is invalid. Scalar option values must still be present/nonempty,
+    duplicates and numeric bounds checked before returning information; only instance slug
+    validation is bypassed. --version with a selected subcommand is invalid even if the flag
+    occurred before it; tokens after -- remain positional. Render generated help only after this
+    validation, using the library HelpAction/HelpBuilder rather than handwritten help. This is
+    one verified private approach, not authorization for a handwritten token parser, Program
+    wiring, information short-circuit before grammar validation, or changed public results.
 R3. CliRequestValidator.Validate is pure and returns null or exactly `Invalid command line.`.
     `up --fresh` requires at least one seat; note requires fresh; no-wait/dry-run combination
     is accepted (no-wait has no local effect). Down requires exactly one nonempty selector:
