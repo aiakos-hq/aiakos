@@ -11,7 +11,7 @@ logins, per-seat permission choices and OpenRig's own state (`~/.openrig`).
 2. Agents and OpenRig:
 
    ```bash
-   npm install -g @openrig/cli@0.6.4 @openai/codex
+   npm install -g @openrig/cli@0.6.6 @openai/codex
    ```
 
    Claude Code is installed with its own installer.
@@ -35,17 +35,22 @@ logins, per-seat permission choices and OpenRig's own state (`~/.openrig`).
 
 ```bash
 cd ~/aiakos
-rig up aiakos-delivery --existing        # start the rig that was stopped; sessions resume
+rig up aiakos-delivery --existing        # start the rig that was stopped; new conversations
+bash rigs/aiakos-delivery/fresh.sh       # in a terminal of its own, while the rig runs
 rig tui                                  # the board; "terminal rig:aiakos-delivery" opens herdr
-rig down aiakos-delivery                 # stop; sessions are kept for the next start
+rig down aiakos-delivery                 # stop; queue items are kept for the next start
 ```
+
+Every seat starts with an empty conversation (`restore_policy: relaunch_fresh` in `rig.yaml`)
+and reads its queue. See [New conversations between items](#new-conversations-between-items)
+for `fresh.sh`.
 
 Give the team work by telling the `lead` seat which issue or slice to take
 (`rig send lead-lead@aiakos-delivery "..."`, or type in its terminal).
 
 **Start by name, not from the file.** `rig up rigs/aiakos-delivery/rig.yaml` on a stopped rig
 does not resume it: it creates a new rig with new seats and archives the old one. The new seats
-have no conversation history and no per-seat settings. Use the file only for the first start
+have no per-seat settings. Use the file only for the first start
 and after `rig.yaml` changed (see [After a change to rig.yaml](#after-a-change-to-rigyaml)).
 
 ## Running unattended
@@ -127,6 +132,39 @@ OpenRig 0.6.4 yet; the hand switch has.
 Remove the `permission_policy: builtin:yolo` lines from `rig.yaml`, and run the
 `set-permissions` loop with `--mode inherit`. Then start from the file.
 
+## New conversations between items
+
+A seat sends its whole conversation again with every request. On 5–6 October the Claude seats
+ran at a median of 316k to 477k tokens per request and the Codex seats at 100k to 130k, almost
+all of it finished work (issue #278). So a seat does not keep its conversation between items.
+
+```bash
+bash rigs/aiakos-delivery/fresh.sh              # watch the rig until Ctrl+C
+bash rigs/aiakos-delivery/fresh.sh --once --dry-run
+```
+
+The script gives a seat a new, empty conversation (`rig seat launch <seat> --fresh --stop`)
+when it has seen the seat idle for 30 seconds (15 minutes for `lead`, so that it does not cut a
+conversation with you), the seat has no item in progress, and the seat closed or handed off an
+item since its last new conversation. Pending and parked items stay in the queue and the new
+conversation reads them when it starts. `QUIET`, `QUIET_LEAD` and `INTERVAL` (seconds) change
+the timing. It must run outside the seats: Claude's auto mode refuses a seat that tries to
+replace its own conversation.
+
+If the script reports `FAILED` for a seat, that seat may be stopped. Start it with
+`rig seat launch <seat>@aiakos-delivery --fresh --reason recover`.
+
+**A long single item** can still grow. OpenRig can compact a Claude seat at a threshold; it is
+off by default and its threshold is 80% of a 1M window. To turn it on at about 150k tokens:
+
+```bash
+rig config set policies.claude_compaction.enabled true
+rig config set policies.claude_compaction.threshold_percent 15
+```
+
+This is a setting of the machine, not of the repository, and it has not been tried on this rig
+yet. Codex compacts by itself when its window (258k) is nearly full.
+
 ## After a change to rig.yaml
 
 A new seat, another model or a changed policy only takes effect on a start from the file, which
@@ -137,7 +175,7 @@ rig down aiakos-delivery
 rig up rigs/aiakos-delivery/rig.yaml
 ```
 
-Wait until the queue is quiet first: the new seats start with no conversation history. Queue
+Wait until the queue is quiet first. Queue
 items and the files in `docs/briefs/` and `artifacts/trials/` are kept. Then repeat step 2 of
 [Running unattended](#running-unattended) for the Claude seats.
 
@@ -162,4 +200,4 @@ rig spec reference. To use Pi again for a seat:
 
 ## Versions
 
-The rig was set up with OpenRig 0.6.4 and Codex 0.160.
+The rig runs on OpenRig 0.6.6 and Codex 0.160. It was first set up with OpenRig 0.6.4.

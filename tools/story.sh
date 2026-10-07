@@ -18,6 +18,9 @@
 #
 # Development (one GitHub sub-issue per story, created when the story is ready):
 #   tools/story.sh status                 briefs, their stories and the state of each
+#   tools/story.sh owner <slice|story|chore-<issue>> [<seat>]
+#                                         records the seat a slice or a story was given to,
+#                                         or prints it; "status" lists them
 #   tools/story.sh ready <slice> <n> [--dry-run]
 #                                         checks the definition of ready, then creates the
 #                                         sub-issue with the label "ready"
@@ -402,6 +405,30 @@ cmd_status() {
     printf '  %s run %s: %s\n' "$(basename "$(dirname "$record")")" "$(basename "$record" .waived | cut -d- -f2)" "$(sed -n 's/^kind: //p' "$record")"
   done
   [ -n "$found_waiver" ] || echo "  none"
+  echo
+  echo "Owners (newest last):"
+  if [ -f "$main_root/artifacts/owners.tsv" ]; then
+    awk -F'\t' '{ seat[$1] = $2; at[$1] = NR } END { for (k in seat) printf "%d\t  %-10s %s\n", at[k], k, seat[k] }' "$main_root/artifacts/owners.tsv" | sort -n | cut -f2- | tail -n 20
+  else
+    echo "  none"
+  fi
+}
+
+# Which seat a slice or a story was given to. A seat keeps no conversation between items
+# (rigs/aiakos-delivery/fresh.sh), so the lead writes each assignment here and reads it back.
+# The record is local, like the acceptance tests: artifacts/owners.tsv of the main checkout.
+cmd_owner() {
+  local key="$1" seat="${2:-}" file="$main_root/artifacts/owners.tsv" found
+  [[ "$key" =~ ^([0-9]+-[0-9]+(-[0-9]+)?|chore-[0-9]+)$ ]] || die "usage: story.sh owner <slice|story|chore-<issue>> [<seat>]"
+  if [ -z "$seat" ]; then
+    found="$([ -f "$file" ] && awk -F'\t' -v k="$key" '$1 == k { s = $2 } END { print s }' "$file" || true)"
+    [ -n "$found" ] || die "no owner recorded for $key"
+    echo "$found"
+    return
+  fi
+  mkdir -p "$(dirname "$file")"
+  printf '%s\t%s\t%s\n' "$key" "$seat" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$file"
+  echo "owner of $key: $seat"
 }
 
 cmd_ready() {
@@ -1037,6 +1064,7 @@ case "${1:-}" in
   split-done) cmd_split_done "${2:-}" ;;
   show)       cmd_show "${2:-}" "${3:-}" ;;
   status)     cmd_status ;;
+  owner)      cmd_owner "${2:-}" "${3:-}" ;;
   ready)      cmd_ready "${2:-}" "${3:-}" "${4:-}" ;;
   next)       cmd_next "${2:-}" ;;
   start)      cmd_start "${2:-}" "${3:-}" ;;

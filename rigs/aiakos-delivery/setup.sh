@@ -5,7 +5,7 @@
 set -u
 
 RIG=aiakos-delivery
-OPENRIG_VERSION=0.6.4
+OPENRIG_VERSION=0.6.6
 PI_VERSION=1.0.1
 KEY_FILE="$HOME/.config/opencode-go/key"
 # Seats that run on Pi (pod-member, for example "verify-qa"). None at the moment: Pi and the

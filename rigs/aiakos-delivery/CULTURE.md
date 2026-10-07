@@ -11,10 +11,24 @@ the seats work together.
 - Every item names a slice (`10-2`) or a story (`10-2-1`) and, for a story, its GitHub issue.
 - A slice has one author, from its brief to its last acceptance test. There are two author
   seats; work on a slice goes back to the author that owns it, never to the other one.
+  `bash tools/story.sh owner <slice>` prints that seat.
 - Hand work on with `rig queue handoff`. State the story, the branch, the commit and what you
   ran. A chat message is not a handoff.
 - When you must stop and wait, park the item with `rig queue block` and say what resumes it.
   Do not stop silently.
+
+## Your conversation does not last
+
+When you are idle and have no item in progress, the rig gives your seat a new, empty
+conversation. Nothing you remember survives it, and you cannot tell when it happens.
+
+- When a conversation starts, run `rig whoami --json` and `rig queue list --owned`, and go on
+  with the item that is in progress or pending. If there is none, wait.
+- Before you hand off, park or close an item, write what the next seat or your later self
+  needs into the item, the repository or `artifacts/`: the story or slice, the worktree, the
+  commit, what you ran and what you did not check. An item must make sense to a seat that
+  knows nothing else.
+- Do not rely on "as I said before". Read the item and the files it names.
 
 ## Rules that do not bend
 

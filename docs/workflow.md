@@ -38,8 +38,17 @@ per role under `agents/`, `CULTURE.md` and `SETUP.md`. It is started from the WS
 
 ```bash
 rig up rigs/aiakos-delivery/rig.yaml     # first start, and after rig.yaml changed (new seats)
-rig up aiakos-delivery --existing        # every other start: the same rig resumes
+rig up aiakos-delivery --existing        # every other start: the same rig, new conversations
+bash rigs/aiakos-delivery/fresh.sh       # next to the running rig: new conversation between items
 ```
+
+**A seat keeps no conversation between items.** A long conversation is sent again with every
+request, so a seat that carried its finished work along spent most of its allowance on it.
+`fresh.sh` watches the rig and gives a seat a new, empty conversation when it is idle, has no
+item in progress and has closed or handed off an item since the last one. A start of the rig
+does the same for every seat (`restore_policy: relaunch_fresh` in `rig.yaml`). What a seat needs
+later is therefore in the queue item, the repository or `artifacts/`, never only in what it
+remembers. `tools/story.sh owner` records which seat a slice or a story was given to.
 
 | Seat | Runtime | Role |
 |---|---|---|
@@ -286,6 +295,7 @@ bash tools/story.sh show <slice> <n>
 bash tools/story.sh analysis <slice> [--remove]
 bash tools/story.sh analysis-pr <slice> [--look "<reason>"]
 bash tools/story.sh status
+bash tools/story.sh owner <slice|story|chore-<issue>> [<seat>]
 bash tools/story.sh baseline <slice> <n>
 bash tools/story.sh ready <slice> <n> [--dry-run]
 bash tools/story.sh next [<route>]
