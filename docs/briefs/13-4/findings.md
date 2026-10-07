@@ -1,6 +1,6 @@
 # Story review: slice 13-4
 
-Reviewed at commit f497030. Stories: 6. Check: ok.
+Reviewed at commit c02aa68. Stories: 13. Check: ok.
 
 ## Findings
 
@@ -64,3 +64,36 @@ bridge seam. Merged origin/main 8d06d44 into the analysis branch before rewritin
 All boxes are author-resolved for fresh independent architect review, not an architect verdict.
 Verification: tools/story.sh split/split-done/check: ok, 13 stories/51 items; git diff --check.
 No implementation, build, gate, push or PR for this analysis was performed by the author.
+
+## Round 3: full rewrite c02aa68
+
+Read as a new brief. The earlier boxes are closed by the rewrite: the seam, the real columns of
+migration 0002, the send-only port and the committed-result waits are now as asked. The findings
+below are new and are the open ones.
+
+- [ ] S6, S10 (judgment-gap): R13's "command" timer fires for start at SentAt+30s and injects `StartNotCompletedBody(TimedOut)`, but the node may report up to its command timeout plus `ready_timeout` after receipt (spec 0002 R17) and spec 0006 R26 has one local deadline, `ready_timeout + command timeout + 30 s`; a launch that reports ready at 40 s therefore meets session Unknown and a final `timed-out` command, and the watchdog can no longer fire because it needs `starting`. Fix: remove the local command timer for start and leave the launch watchdog as its only local deadline.
+- [ ] S9, S10 (judgment-gap): R11 and R13 end a sent delivery at SentAt+30s as `timed-out` with outcome `failed`, the same instant as the node's own 30 s timeout and with no margin, so a delivery the node confirmed at 29.9 s is recorded as failed and final, and the operator sends it again. Fix: make the local deadline later than the node's (timeout plus confirm timeout plus a margin) and record outcome `unknown`, not `failed`, when the orchestrator does not know.
+- [ ] S9 (judgment-gap): R11 makes a sent delivery final `unknown` on `NodeLinkLost`, but spec 0006 R31 does so only for a node instance that is gone, and R11 itself leaves the same-instance resend to NodeProxy, whose result would then meet an immutable final row. Fix: change the outcome only when a different node instance attaches, and leave the row `sent` on link loss.
+- [ ] S7 (context-gap): R8 decides on the "reported session", while the pure step emits `DispatchStop` from `KnownSession` (under an overlay the two differ), and it gives no answer for `down` when the node is not connected, where the port needs a `nodeInstanceId` that does not exist. Fix: send a stop exactly when the pure step returns `DispatchStop`, and state the rows, the state change and the reply for the disconnected case.
+- [ ] S5, S11 (context-gap): the pure machine returns a `RequestCapture` effect on an observation gap and 13-3 leaves its execution to this slice, but no rule here executes it, and `requested_by` (NOT NULL) has no value for a capture without a caller, including R14's reload capture. Fix: add the rule that turns `RequestCapture` into an R9 capture, with the fixed `requested_by` and what happens when the node is not connected.
+- [ ] S9, S10, S11 (context-gap): R11 needs the node instance a delivery was sent to, R12 needs `turn_id` of confirmed deliveries and the `PROMPT_SUBMITTED` events of the launch, and R13/R14 need `sent_at` and the launch's `requested_at` after a reload, but `SeatStoredCommand` carries only id, launch, kind, status and outcome, `ISeatActorReader` has no event query, and the brief says to keep the existing interfaces without naming an extension. Fix: declare the added snapshot fields and reader members in the public surface, with the story that owns them.
+- [ ] S5–S11 (context-gap): the concrete types `SeatCommandDispatcher`, `PostgresSeatCommandStore`, `SeatTokenGenerator` and `SeatLaunchFactory` have no constructors, and the actor receives its command services through unnamed "optional service bundles or overloads", so the acceptance tests written before the run cannot construct the actor, the factory (which must find adapters by harness) or the store. Fix: declare each constructor and the bundle type or overload by which `SeatActor`, `SeatRegion` and `SeatActorGateway` take the services.
+- [ ] S1 (judgment-gap): R1 gives S1 the forwarding through the region and the mapping of region eligibility failures, but the actor's command branch arrives with C1 in S5, and `PROTOCOL` tests only shapes and invalid input, so nothing says what a valid command returns after S1 alone. Fix: move the forwarding and eligibility sentences to R7, or state S1's reply for a valid command and add it to `PROTOCOL`.
+- [ ] S8, S9, S10 (judgment-gap): `CAPTURE-result` (S8) and `SEND-outcome` (S9) require the 5 s and 30 s deadlines, but R13 in S10 owns those timers, so S8 and S9 each build a deadline that S10 then replaces; only S8's note admits it. Fix: give R9 and R11 the handling of a "deadline fired" message and leave R13 only the arming, or move the capture and command rows of R13 into R9 and R11.
+- [ ] S6 (context-gap): R5 has the factory throw `LAUNCH_MATERIAL_UNAVAILABLE`, calls build errors "fixed INVALID_LAUNCH rejections" without a type, and gives no result for `ISeatLaunchMaterialSource.LoadAsync` returning null; R6 and the `UP` outputs do not say what `up` replies in these three cases. Fix: state the factory's signal for `INVALID_LAUNCH` and the exact `SeatCommandRejected` reason `up` returns for each, and add the cases to `UP-start`.
+- [ ] S6, S9 (context-gap): the pure step for a disconnected `up` or `send` returns a rejection together with an open `node-not-connected` finding, and R6, R10 and their outputs say only "no rows", so whether the finding is committed is the implementer's decision; R3 also gives `cause_type` only for a transaction that creates a command, not for one that only updates one (dispatch failure, link loss). Fix: say that a rejection's findings are committed in a transaction without a command row, and give `cause_type` and `cause_command_id` for the update-only transactions.
+- [ ] S3 (context-gap): R3 writes `abandoned_reason='fresh-explicit'` for every abandoned session, but the pure step also abandons the previous session on a `no-conversation-yet` launch when the profile does not reuse the native id, which is not an explicit fresh start. Fix: take the reason from the launch decision, or state the value for that case.
+- [ ] S12 (context-gap): R15's log template and span tag need the seat address on every committed transition, including 13-3's event commits, but `SeatActorSnapshot` has no address and the material source that has one is loaded only for `up`. Fix: name where the actor obtains the address (a snapshot field with its reader column, declared with the finding on reader members above).
+- [ ] S12 (context-gap): R15 adds a counter `aiakos_seat_commands_total(kind,outcome)` that spec 0006's telemetry table does not have and that breaks the dotted naming of the other three. Fix: remove it, or name it in the spec's style and record the spec amendment as an item.
+- [ ] S8 (context-gap): R9 gives `SEAT_NOT_PRESENT` for no launch and `NODE_NOT_CONNECTED` for a lost link without an order between them, and it does not say what becomes of the `sent` capture row when R14 completes the wait on link loss. Fix: state the precedence and the row's final status, and add both to `CAPTURE-result`.
+- [ ] S9 (context-gap): the story holds admission and send (R10), every final outcome with node replacement and deadline (R11), and the prompt-evidence comparison with its recheck after reload (R12), with four outputs; the third is a separate concern that reads events, not commands. Fix: make R12 with `SEND-evidence` its own story after S9.
+
+Architect, round 3: the brief at c02aa68 was read whole, with `SeatSurface.cs`, `SeatProtocol.cs`,
+`SeatStateMachine.cs` (up, down, send, timers, start/stop results), `DeliveryStateMachine.cs`,
+`HarnessAdapter.cs`, `0002_seat_model.sql`, `node_link.proto` (Command, StartSeat, SeatSecret),
+spec 0002 R17 and R45, and spec 0006 R21–R32 and its telemetry table. Confirmed against the
+source: R3's column lists and CHECK values, R6's precedence, R10's rejection order, the
+`StartLaunch` properties R5 uses, and the profile members. Not checked in this round: the story
+texts from `tools/story.sh show`; whether the node expands `${AIAKOS_SEAT_HOME}` in `env` values
+or sets `AIAKOS_SEAT_TOKEN_FILE` itself (spec 0002 R45 says the node gives the path); the 13-3
+actor, region, gateway and writer stages, which are not on `main`; nothing was built.
