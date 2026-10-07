@@ -22,7 +22,8 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
         foreach (var input in accepted)
             ValidateStage(before, input);
         if (accepted.Length == 0 || !accepted.Any(input => input.Event is not null ||
-            input.Step.State != before.State || input.Step.Transitions.Count != 0))
+            input.Step.State != before.State || input.Step.Transitions.Count != 0 ||
+            input.Step.Findings.Count != 0 || input.Step.Effects.Any(effect => effect is AdoptRotatedSession)))
             return new(before.Version, before.CurrentSessionId);
 
         await using var connection = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
@@ -31,8 +32,18 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
         {
             string? usage = null;
             var hasUsage = false;
+            var currentSessionId = before.CurrentSessionId;
+            var previousState = before.State;
+            var wrote = false;
+            var actorStoppedCleared = false;
             foreach (var input in accepted)
             {
+                if (!actorStoppedCleared)
+                {
+                    actorStoppedCleared = true;
+                    wrote |= await ResolveFindingAsync(connection, transaction, before.Key,
+                        SeatVocabulary.FindingActorStopped, input.At, ct).ConfigureAwait(false);
+                }
                 Guid? eventId = null;
                 if (input.Event is { } value)
                 {
@@ -40,6 +51,7 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
                     var opaque = IsOpaque(value);
                     await WriteEventAsync(connection, transaction, before.Key, input, eventId.Value, opaque, ct)
                         .ConfigureAwait(false);
+                    wrote = true;
                     if (!opaque && value.Harness?.Usage is { } telemetry &&
                         input.Input is EventReceived received && received.LaunchId is { } launchId &&
                         launchId == input.Step.State.Launch?.LaunchId)
@@ -49,13 +61,50 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
                     }
                 }
                 foreach (var transition in input.Step.Transitions)
+                {
                     await WriteTransitionAsync(connection, transaction, before.Key, input, transition, eventId, ct)
                         .ConfigureAwait(false);
+                    wrote = true;
+                }
+                foreach (var finding in input.Step.Findings)
+                    wrote |= await WriteFindingAsync(connection, transaction, before.Key, input, finding, ct)
+                        .ConfigureAwait(false);
+                foreach (var effect in input.Step.Effects)
+                {
+                    if (effect is AdoptRotatedSession rotated)
+                    {
+                        if (!string.Equals(previousState.NativeSessionId, rotated.PreviousNativeSessionId,
+                                StringComparison.Ordinal) ||
+                            !string.Equals(input.Step.State.NativeSessionId, rotated.NativeSessionId,
+                                StringComparison.Ordinal))
+                            throw new SeatStoreRejectedException();
+                        var adopted = await AdoptSessionAsync(connection, transaction, before, rotated,
+                            input.At, ct).ConfigureAwait(false);
+                        currentSessionId = adopted;
+                        wrote = true;
+                    }
+                }
+                wrote |= input.Step.State != previousState;
+                if (previousState.Resumability != input.Step.State.Resumability)
+                {
+                    if (input.Step.State.Resumability == ResumabilityValue.Resumable)
+                        wrote |= await SetSessionHistoryAsync(connection, transaction, before.Key,
+                            currentSessionId, "conversation_at", input.At, ct).ConfigureAwait(false);
+                    else if (input.Step.State.Resumability == ResumabilityValue.Lost)
+                        wrote |= await SetSessionHistoryAsync(connection, transaction, before.Key,
+                            currentSessionId, "lost_at", input.At, ct).ConfigureAwait(false);
+                }
+                previousState = input.Step.State;
             }
             var final = accepted[^1];
-            await UpdateStateAsync(connection, transaction, before, final, hasUsage, usage, ct).ConfigureAwait(false);
+            if (hasUsage || wrote)
+            {
+                await UpdateStateAsync(connection, transaction, before, final, hasUsage, usage,
+                    currentSessionId, ct).ConfigureAwait(false);
+                wrote = true;
+            }
             await transaction.CommitAsync(ct).ConfigureAwait(false);
-            return new(checked(before.Version + 1), before.CurrentSessionId);
+            return new(wrote ? checked(before.Version + 1) : before.Version, currentSessionId);
         }
         catch (PostgresException exception) when (exception.SqlState is "23514" or "23502" or "23503")
         {
@@ -78,8 +127,7 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
         if (input.Event?.ObservedAt is { } observedAt && !IsValidTimestamp(observedAt))
             throw new SeatStoreRejectedException();
         var opaque = input.Event is { } evidence && IsOpaque(evidence);
-        if (input.Step.Findings.Count != 0 || input.Step.Effects.Any(effect => effect is not RequestCapture) ||
-            input.Step.State.NativeSessionId != before.State.NativeSessionId ||
+        if (input.Step.Effects.Any(effect => effect is not RequestCapture and not AdoptRotatedSession) ||
             (!opaque && input.Input is EventReceived { Body: LaunchResultBody or StartNotCompletedBody or
                 StopResultBody or StopNotCompletedBody or ProcessExitedBody }))
             throw new SeatStoreRejectedException();
@@ -158,8 +206,118 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
         ], ct);
     }
 
+    private static async Task<bool> WriteFindingAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        SeatKey key, SeatAppliedInput input, FindingChange finding, CancellationToken ct)
+    {
+        if (!finding.Open)
+            return await ResolveFindingAsync(connection, transaction, key, finding.Kind, input.At, ct)
+                .ConfigureAwait(false);
+
+        var severity = finding.Kind is SeatVocabulary.FindingLaunchRejected or SeatVocabulary.FindingLaunchFailed or
+            SeatVocabulary.FindingResumeLost or SeatVocabulary.FindingSessionIdMismatch or
+            SeatVocabulary.FindingTurnFailed or SeatVocabulary.FindingActorStopped ? "error" : "warning";
+        await using var command = new NpgsqlCommand("""
+            INSERT INTO aiakos.seat_finding
+                (tenant_id,finding_id,seat_id,node_name,kind,severity,status,summary,evidence,launch_id,
+                 occurrences,first_seen_at,last_seen_at)
+            VALUES (@tenant,@id,@seat,NULL,@kind,@severity,'open',@summary,NULL,@launch,1,@at,@at)
+            ON CONFLICT (tenant_id,seat_id,kind) WHERE status='open' AND seat_id IS NOT NULL
+            DO UPDATE SET occurrences=aiakos.seat_finding.occurrences+1,
+                          last_seen_at=EXCLUDED.last_seen_at,launch_id=EXCLUDED.launch_id
+            """, connection, transaction);
+        command.Parameters.AddWithValue("tenant", key.TenantId);
+        command.Parameters.AddWithValue("id", Guid.CreateVersion7());
+        command.Parameters.AddWithValue("seat", key.SeatId);
+        command.Parameters.AddWithValue("kind", finding.Kind);
+        command.Parameters.AddWithValue("severity", severity);
+        command.Parameters.AddWithValue("summary", $"Seat finding: {finding.Kind}.");
+        command.Parameters.AddWithValue("launch", input.Step.State.Launch?.LaunchId ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("at", input.At);
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        return true;
+    }
+
+    private static async Task<bool> ResolveFindingAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        SeatKey key, string kind, DateTimeOffset at, CancellationToken ct)
+    {
+        await using var command = new NpgsqlCommand("""
+            UPDATE aiakos.seat_finding SET status='resolved',resolved_at=@at,resolved_reason='state-changed'
+            WHERE tenant_id=@tenant AND seat_id=@seat AND kind=@kind AND status='open'
+            """, connection, transaction);
+        command.Parameters.AddWithValue("at", at);
+        command.Parameters.AddWithValue("tenant", key.TenantId);
+        command.Parameters.AddWithValue("seat", key.SeatId);
+        command.Parameters.AddWithValue("kind", kind);
+        return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 0;
+    }
+
+    private static async Task<Guid> AdoptSessionAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        SeatActorSnapshot before, AdoptRotatedSession effect, DateTimeOffset at, CancellationToken ct)
+    {
+        await using var previous = new NpgsqlCommand("""
+            SELECT session_id FROM aiakos.seat_session
+            WHERE tenant_id=@tenant AND seat_id=@seat AND harness=@harness AND native_session_id=@native
+            """, connection, transaction);
+        previous.Parameters.AddWithValue("tenant", before.Key.TenantId);
+        previous.Parameters.AddWithValue("seat", before.Key.SeatId);
+        previous.Parameters.AddWithValue("harness", before.Harness ?? (object)DBNull.Value);
+        previous.Parameters.AddWithValue("native", effect.PreviousNativeSessionId);
+        var previousValue = await previous.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        if (previousValue is not Guid previousId) throw new SeatStoreRejectedException();
+
+        var newId = Guid.CreateVersion7();
+        await using var insert = new NpgsqlCommand("""
+            INSERT INTO aiakos.seat_session
+                (tenant_id,session_id,seat_id,harness,native_session_id,decision,previous_session_id,created_at)
+            VALUES (@tenant,@id,@seat,@harness,@native,'harness-cleared',@previous,@at)
+            ON CONFLICT (tenant_id,harness,native_session_id) DO NOTHING
+            RETURNING session_id
+            """, connection, transaction);
+        insert.Parameters.AddWithValue("tenant", before.Key.TenantId);
+        insert.Parameters.AddWithValue("id", newId);
+        insert.Parameters.AddWithValue("seat", before.Key.SeatId);
+        insert.Parameters.AddWithValue("harness", before.Harness ?? (object)DBNull.Value);
+        insert.Parameters.AddWithValue("native", effect.NativeSessionId);
+        insert.Parameters.AddWithValue("previous", previousId);
+        insert.Parameters.AddWithValue("at", at);
+        if (await insert.ExecuteScalarAsync(ct).ConfigureAwait(false) is Guid insertedId) return insertedId;
+
+        await using var owner = new NpgsqlCommand("""
+            SELECT seat_id,session_id FROM aiakos.seat_session
+            WHERE tenant_id=@tenant AND harness=@harness AND native_session_id=@native
+            """, connection, transaction);
+        owner.Parameters.AddWithValue("tenant", before.Key.TenantId);
+        owner.Parameters.AddWithValue("harness", before.Harness ?? (object)DBNull.Value);
+        owner.Parameters.AddWithValue("native", effect.NativeSessionId);
+        await using var row = await owner.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await row.ReadAsync(ct).ConfigureAwait(false)) throw new SeatStoreRejectedException();
+        if (row.GetGuid(0) != before.Key.SeatId)
+        {
+            await row.DisposeAsync().ConfigureAwait(false);
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw new InvalidOperationException("SEAT_SESSION_CONFLICT");
+        }
+        return row.GetGuid(1);
+    }
+
+    private static async Task<bool> SetSessionHistoryAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        SeatKey key, Guid? sessionId, string column, DateTimeOffset at, CancellationToken ct)
+    {
+        if (sessionId is null) return false;
+        if (column is not ("conversation_at" or "lost_at")) throw new ArgumentOutOfRangeException(nameof(column));
+        await using var command = new NpgsqlCommand($"""
+            UPDATE aiakos.seat_session SET {column}=COALESCE({column},@at)
+            WHERE tenant_id=@tenant AND session_id=@session AND {column} IS NULL
+            """, connection, transaction);
+        command.Parameters.AddWithValue("at", at);
+        command.Parameters.AddWithValue("tenant", key.TenantId);
+        command.Parameters.AddWithValue("session", sessionId.Value);
+        return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 0;
+    }
+
     private static async Task UpdateStateAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
-        SeatActorSnapshot before, SeatAppliedInput final, bool hasUsage, string? usage, CancellationToken ct)
+        SeatActorSnapshot before, SeatAppliedInput final, bool hasUsage, string? usage,
+        Guid? currentSessionId, CancellationToken ct)
     {
         var state = final.Step.State;
         Column[] columns =
@@ -173,7 +331,7 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
             Text("known_session", SeatVocabulary.ToStored(state.KnownSession)), Text("known_session_reason", state.KnownSessionReason),
             Text("known_activity", SeatVocabulary.ToStored(state.KnownActivity)), Text("known_activity_detail", state.KnownActivityDetail),
             Text("known_activity_reason", state.KnownActivityReason), Uuid("current_launch_id", state.Launch?.LaunchId),
-            Uuid("current_session_id", before.CurrentSessionId), Text("pending_input_request", state.PendingInputRequest),
+            Uuid("current_session_id", currentSessionId), Text("pending_input_request", state.PendingInputRequest),
             Text("pre_compaction_activity", state.PreCompactionActivity is { } activity ? SeatVocabulary.ToStored(activity) : null),
             Bool("readiness_seen", state.ReadinessSeen), Uuid("node_instance_id", state.NodeInstanceId),
             Number("next_seq", state.NextSeq), Number("last_source_seq", state.LastSourceSeq), Number("catch_up_seq", state.CatchUpSeq),
