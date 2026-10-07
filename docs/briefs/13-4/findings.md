@@ -1,6 +1,6 @@
 # Story review: slice 13-4
 
-Reviewed at commit 535d6e2. Stories: 16. Check: ok.
+Reviewed at commit 5ae57be. Stories: 16. Check: ok.
 
 ## Findings
 
@@ -170,3 +170,13 @@ not on `main`; nothing was built.
 
 Author-resolved pending independent review. Verified story split/check and git diff --check;
 no implementation/build/gate. The previously accepted round-3 resolutions are preserved.
+
+Architect, round 5: the diff 81e1cef..5ae57be was read and the three resolutions are accepted; no
+findings are open. `SeatCommandServices` carries the adapter list and R10 selects from it;
+`Payload` and `Result` are gone from R17; S6 owns `ROUTE-admission` only and the wait cases are in
+`CAPTURE-result`/T7 with R9. `tools/story.sh show 13-4 9` carries the moved wait paragraph as part
+of R9, and S6 and S10 do not. Still not checked: whether the node expands `${AIAKOS_SEAT_HOME}` in
+`env` values or sets `AIAKOS_SEAT_TOKEN_FILE` itself (spec 0002 R45 says the node gives the seat
+the path), which is for the author's baseline of S4 to show; `SeatRegion` and `SeatActorGateway`,
+which are not on `main`; nothing was built. Left as written, not a finding: a start command whose
+result never arrives stays `sent` after the launch watchdog fires.
