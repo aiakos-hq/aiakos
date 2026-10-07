@@ -381,20 +381,26 @@ public sealed class NodeLinkEventAckTests
     }
 
     [Fact]
-    public async Task BoundsConnectedAndDisconnectedStateCallbacksDuringCleanup()
+    public async Task BoundsConnectedStateCallbackAtLivenessExpiry()
     {
         var time = new ManualTimeProvider();
         var connectedEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var disconnectedEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var connectedCanceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var unknownObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var connectedCalls = 0;
         var committer = new FakeCommitter
         {
-            StateChanged = (_, state, _) =>
+            StateChanged = (_, state, ct) =>
             {
-                if (state == NodeLinkState.Connected)
+                if (state == NodeLinkState.Connected && Interlocked.Increment(ref connectedCalls) == 1)
+                {
                     connectedEntered.TrySetResult();
-                if (state == NodeLinkState.Disconnected)
-                    disconnectedEntered.TrySetResult();
-                return new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously).Task;
+                    ct.Register(() => connectedCanceled.TrySetResult());
+                    return new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously).Task;
+                }
+                if (state == NodeLinkState.Unknown)
+                    unknownObserved.TrySetResult();
+                return Task.CompletedTask;
             }
         };
         using var actorSystem = ActorSystem.Create("node-link-bounded-state-test");
@@ -407,12 +413,47 @@ public sealed class NodeLinkEventAckTests
         await call.RequestStream.WriteAsync(new ConnectRequest { Hello = Hello() }, TestContext.Current.CancellationToken);
         Assert.True(await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
         await connectedEntered.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        time.Advance(TimeSpan.FromSeconds(5));
+        await connectedCanceled.Task.WaitAsync(TestContext.Current.CancellationToken);
+        await unknownObserved.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        await call.RequestStream.WriteAsync(new ConnectRequest { Goodbye = new Goodbye() },
+            TestContext.Current.CancellationToken);
+        await call.RequestStream.CompleteAsync();
+        Assert.False(await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task BoundsDisconnectedStateCallbackDuringCleanup()
+    {
+        var time = new ManualTimeProvider();
+        var disconnectedEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var committer = new FakeCommitter
+        {
+            StateChanged = (_, state, _) =>
+            {
+                if (state == NodeLinkState.Disconnected)
+                {
+                    disconnectedEntered.TrySetResult();
+                    return new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously).Task;
+                }
+                return Task.CompletedTask;
+            }
+        };
+        using var actorSystem = ActorSystem.Create("node-link-bounded-cleanup-test");
+        await using var server = await StartServerAsync(new EventNodeLinkApplication(committer), actorSystem,
+            time, TimeSpan.FromSeconds(5));
+        using var channel = GrpcChannel.ForAddress(ServerAddress(server));
+        var client = new Aiakos.Contracts.Node.V1.NodeLinkService.NodeLinkServiceClient(channel);
+        using var call = client.Connect(new Metadata { { "authorization", "Bearer node-secret" } },
+            cancellationToken: TestContext.Current.CancellationToken);
+        await call.RequestStream.WriteAsync(new ConnectRequest { Hello = Hello() }, TestContext.Current.CancellationToken);
+        Assert.True(await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken));
         await call.RequestStream.WriteAsync(new ConnectRequest { Goodbye = new Goodbye() },
             TestContext.Current.CancellationToken);
         await call.RequestStream.CompleteAsync();
         var response = call.ResponseStream.MoveNext(TestContext.Current.CancellationToken);
-
-        time.Advance(TimeSpan.FromSeconds(5));
         await disconnectedEntered.Task.WaitAsync(TestContext.Current.CancellationToken);
         Assert.False(response.IsCompleted);
         time.Advance(TimeSpan.FromSeconds(5));
