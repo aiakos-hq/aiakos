@@ -24,78 +24,65 @@ public static partial class CliCommandLine
     public static CliParseResult Parse(string[] args, string? environmentInstance)
     {
         ArgumentNullException.ThrowIfNull(args);
-        if (args.Any(static argument => argument is null || argument.StartsWith('@')))
-        {
+        if (args.Any(static argument => argument is null))
             return InvalidResult();
-        }
-
-        if (args.Contains("--version", StringComparer.Ordinal) &&
-            !args.Any(static argument => argument is "instance" or "up" or "down" or "send" or "capture" or "ps" or "attach" or "init" or "start" or "stop" or "status" or "run"))
-        {
-            return new CliParseResult(null, null, null, true);
-        }
-
-        var repeatedOptions = args.Where(static argument => argument.StartsWith("--", StringComparison.Ordinal))
-            .GroupBy(static argument => argument, StringComparer.Ordinal);
-        if (repeatedOptions.Any(static group => group.Count() > 1 && group.Key != "--seat"))
-        {
-            return InvalidResult();
-        }
 
         var tree = CreateTree();
-        var parseArgs = args.Length == 0 ? ["--help"] :
-            args.SequenceEqual(["instance"], StringComparer.Ordinal) ? ["instance", "--help"] : args;
-        var parse = tree.Root.Parse(parseArgs);
+        var parseArgs = args.Length == 0 ? new[] { "--help" } : args;
+        var parse = tree.Root.Parse(parseArgs, new ParserConfiguration { ResponseFileTokenReplacer = null });
         if (parse.Errors.Count != 0 || parse.UnmatchedTokens.Count != 0)
-        {
             return InvalidResult();
-        }
 
         var command = parse.CommandResult.Command;
-        var helpRequested = parse.Action is HelpAction;
-        if (args.SequenceEqual(["instance"], StringComparer.Ordinal))
-        {
-            helpRequested = true;
-        }
-
-        if (helpRequested)
-        {
-            return new CliParseResult(null, null, null, false)
-            {
-                Help = tree.RenderHelp(parse, command, parseArgs)
-            };
-        }
-
-        if (parse.Tokens.Any(static token => token.Value is "--version"))
-        {
-            return new CliParseResult(null, null, null, true);
-        }
-
         var path = tree.Paths[command];
+        foreach (var option in tree.Options)
+        {
+            var result = parse.GetResult(option);
+            if (result is null || result.Implicit)
+                continue;
+            if (option.Name == "--seat")
+            {
+                if (result.IdentifierTokenCount != result.Tokens.Count)
+                    return InvalidResult();
+            }
+            else if (result.IdentifierTokenCount > 1)
+                return InvalidResult();
+        }
+
+        var literal = false;
+        foreach (var token in parse.Tokens)
+        {
+            if (token.Type == TokenType.DoubleDash)
+                literal = true;
+            else if (!literal && token.Type == TokenType.Argument && token.Value.StartsWith('-') &&
+                     !(path == "send" && token.Value == "-"))
+                return InvalidResult();
+        }
+
         var explicitInstance = parse.GetValue(tree.Instance);
-        var selectedInstance = explicitInstance is not null
-            ? explicitInstance
-            : string.IsNullOrEmpty(environmentInstance) ? "release" : environmentInstance;
-        if (selectedInstance.Length == 0 || !InstancePattern.IsMatch(selectedInstance))
-        {
+        if (explicitInstance is { Length: 0 } ||
+            !tree.TryReadOptions(path, parse, out var options) || !ValidateOptionValues(options))
             return InvalidResult();
-        }
-
-        if (!tree.TryReadOptions(path, parse, out var options))
-        {
-            return InvalidResult();
-        }
-
-        if (!ValidateOptionValues(options))
-        {
-            return InvalidResult();
-        }
 
         var positionals = tree.PositionalArguments(command, parse);
-        if (positionals.Any(static value => value.StartsWith("--", StringComparison.Ordinal)))
-        {
+        if (positionals.Any(static value => value.Length == 0))
             return InvalidResult();
-        }
+
+        var versionRequested = parse.GetValue(tree.Version);
+        if (versionRequested && path.Length != 0)
+            return InvalidResult();
+        if (parse.GetValue(tree.Help) || path == "instance")
+            return new CliParseResult(null, null, tree.RenderHelp(command), false);
+        if (versionRequested)
+            return new CliParseResult(null, null, null, true);
+        if (path.Length == 0 || (path is "capture" or "send" or "attach" && positionals.Count == 0))
+            return InvalidResult();
+
+        var selectedInstance = explicitInstance ??
+            (string.IsNullOrEmpty(environmentInstance) ? "release" : environmentInstance);
+        if (!InstancePattern.IsMatch(selectedInstance))
+            return InvalidResult();
+
         var immutableOptions = new ReadOnlyDictionary<string, IReadOnlyList<string>>(
             options.ToDictionary(static pair => pair.Key,
                 static pair => (IReadOnlyList<string>)Array.AsReadOnly(pair.Value.ToArray()),
@@ -142,17 +129,19 @@ public static partial class CliCommandLine
 
     private static string EnsureFinalLf(string text) => text.EndsWith('\n') ? text : text + "\n";
 
-    [GeneratedRegex("^[a-z][a-z0-9-]{0,62}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\A[a-z][a-z0-9-]{0,62}\z", RegexOptions.CultureInvariant)]
     private static partial Regex InstanceRegex();
 
     private static CommandTree CreateTree()
     {
         var root = new RootCommand(RootDescription) { TreatUnmatchedTokensAsErrors = true };
-        var help = new HelpOption { Recursive = true };
+        root.Options.Clear();
+        root.SetAction(static _ => { });
+        var help = new Option<bool>("--help", "-h") { Recursive = true, Arity = ArgumentArity.Zero, Description = "Show help information." };
         var instance = new Option<string>("--instance") { Recursive = true, Description = "Released instance name." };
-        var json = new Option<bool>("--json") { Recursive = true, Description = "Write JSON output." };
-        var verbose = new Option<bool>("--verbose", "-v") { Recursive = true, Description = "Enable verbose output." };
-        var version = new Option<bool>("--version") { Description = "Show version information." };
+        var json = new Option<bool>("--json") { Recursive = true, Arity = ArgumentArity.Zero, Description = "Write JSON output." };
+        var verbose = new Option<bool>("--verbose", "-v") { Recursive = true, Arity = ArgumentArity.Zero, Description = "Enable verbose output." };
+        var version = new Option<bool>("--version") { Arity = ArgumentArity.Zero, Description = "Show version information." };
         root.Options.Add(help);
         root.Options.Add(instance);
         root.Options.Add(json);
@@ -209,6 +198,7 @@ public static partial class CliCommandLine
         }
 
         var instanceCommand = AddCommand(root, "instance", "instance", "Manage a released instance.");
+        instanceCommand.SetAction(static _ => { });
         var init = AddCommand(instanceCommand, "init", "instance init", "Initialize instance configuration.");
         AddOption<string>(init, "instance init", "--port-base", "Base port for the instance.");
         AddOption<string>(init, "instance init", "--distro", "WSL distribution name.", "Ubuntu");
@@ -227,7 +217,8 @@ public static partial class CliCommandLine
         AddArgument<string>(up, "rig-dir", ArgumentArity.ZeroOrOne);
         AddOption<string>(up, "up", "--env", "Environment file.");
         var seats = AddOption<string[]>(up, "up", "--seat", "Seat to launch.");
-        seats.Arity = ArgumentArity.ZeroOrMore;
+        seats.Arity = ArgumentArity.OneOrMore;
+        seats.AllowMultipleArgumentsPerToken = false;
         AddOption<bool>(up, "up", "--fresh", "Start fresh sessions.", flag: true);
         AddOption<string>(up, "up", "--note", "Note for launch records.");
         AddOption<bool>(up, "up", "--dry-run", "Validate and describe without launching.", flag: true);
@@ -240,15 +231,15 @@ public static partial class CliCommandLine
         AddOption<bool>(down, "down", "--no-wait", "Return without waiting for seats.", flag: true);
 
         var send = AddCommand(root, "send", "send", "Deliver input to a seat.");
-        AddArgument<string>(send, "seat", ArgumentArity.ExactlyOne);
+        AddArgument<string>(send, "seat", ArgumentArity.ZeroOrOne);
         AddArgument<string>(send, "text", ArgumentArity.ZeroOrOne);
         AddOption<string>(send, "send", "--file", "Read input from a file.");
         AddOption<bool>(send, "send", "--force", "Force delivery.", flag: true);
-        AddOption<bool>(send, "send", "--wait", "Wait for delivery.", flag: true);
+        AddOption<string>(send, "send", "--wait", "Wait for delivery.", "delivery");
         AddOption<string>(send, "send", "--timeout", "Delivery timeout in seconds.", "1800");
 
         var capture = AddCommand(root, "capture", "capture", "Capture pane evidence.");
-        AddArgument<string>(capture, "seat", ArgumentArity.ExactlyOne);
+        AddArgument<string>(capture, "seat", ArgumentArity.ZeroOrOne);
         AddOption<string>(capture, "capture", "--lines", "Number of lines to capture.", "200");
 
         var ps = AddCommand(root, "ps", "ps", "Show seat state.");
@@ -258,7 +249,7 @@ public static partial class CliCommandLine
         AddOption<bool>(ps, "ps", "--watch", "Watch state changes.", flag: true);
 
         var attach = AddCommand(root, "attach", "attach", "Attach to a seat pane.");
-        AddArgument<string>(attach, "seat", ArgumentArity.ExactlyOne);
+        AddArgument<string>(attach, "seat", ArgumentArity.ZeroOrOne);
         AddOption<bool>(attach, "attach", "--write", "Allow writing to the pane.", flag: true);
 
         return new CommandTree(root, help, instance, json, verbose, version, paths, local, positional);
@@ -269,7 +260,7 @@ public static partial class CliCommandLine
         private readonly IReadOnlyDictionary<string, List<Option>> _local;
         private readonly IReadOnlyDictionary<Command, List<Argument>> _positional;
         private readonly Command _root;
-        public CommandTree(Command root, HelpOption help, Option<string> instance, Option<bool> json,
+        public CommandTree(Command root, Option<bool> help, Option<string> instance, Option<bool> json,
             Option<bool> verbose, Option<bool> version, IReadOnlyDictionary<Command, string> paths,
             IReadOnlyDictionary<string, List<Option>> local, IReadOnlyDictionary<Command, List<Argument>> positional)
         {
@@ -279,38 +270,40 @@ public static partial class CliCommandLine
             Root = root; Help = help; Instance = instance; Json = json; Verbose = verbose; Version = version; Paths = paths;
         }
         public Command Root { get; }
-        public HelpOption Help { get; }
+        public Option<bool> Help { get; }
         public Option<string> Instance { get; }
         public Option<bool> Json { get; }
         public Option<bool> Verbose { get; }
         public Option<bool> Version { get; }
         public IReadOnlyDictionary<Command, string> Paths { get; }
 
-        public string RenderHelp(ParseResult parsed, Command command, IReadOnlyList<string> input)
+        public IEnumerable<Option> Options => Root.Options.Concat(_local.Values.SelectMany(static options => options));
+
+        public string RenderHelp(Command command)
         {
             using var writer = new StringWriter(CultureInfo.InvariantCulture);
-            parsed.Invoke(new InvocationConfiguration { Output = writer, Error = writer });
-            if (command == _root)
+            Root.Options.Remove(Help);
+            Root.Options.Add(new HelpOption { Recursive = true });
+            void WriteHelp(Command selected)
             {
-                foreach (var (candidate, path) in Paths.Where(static item => item.Value.Length > 0)
-                             .OrderBy(static item => item.Value, StringComparer.Ordinal))
-                {
-                    var helpParse = _root.Parse(path.Split(' ').Append("--help").ToArray());
-                    if (helpParse.Errors.Count == 0 && helpParse.Action is HelpAction)
-                    {
-                        helpParse.Invoke(new InvocationConfiguration { Output = writer, Error = writer });
-                    }
-                }
+                var tokens = Paths[selected].Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Append("--help").ToArray();
+                var helpParse = Root.Parse(tokens, new ParserConfiguration { ResponseFileTokenReplacer = null });
+                helpParse.Invoke(new InvocationConfiguration { Output = writer, Error = writer });
             }
-
+            WriteHelp(command);
+            if (command == _root)
+                foreach (var candidate in Paths.Where(static item => item.Value.Length > 0)
+                             .OrderBy(static item => item.Value, StringComparer.Ordinal))
+                    WriteHelp(candidate.Key);
             writer.WriteLine(ExitCodes);
-            return EnsureFinalLf(writer.ToString());
+            return EnsureFinalLf(writer.ToString().Replace("\r\n", "\n", StringComparison.Ordinal));
         }
 
         public bool TryReadOptions(string path, ParseResult parse, out Dictionary<string, string[]> values)
         {
             values = new Dictionary<string, string[]>(StringComparer.Ordinal);
-            foreach (var option in _local[path])
+            foreach (var option in _local.GetValueOrDefault(path) ?? [])
             {
                 var result = parse.GetResult(option);
                 var key = option.Name.TrimStart('-');
