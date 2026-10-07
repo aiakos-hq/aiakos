@@ -38,13 +38,13 @@ outputs: READER-command
 tests: T13
 notes: Extend PostgresSeatActorReader with exact columns/query, preserving old constructors. Supplies address/epochs/timestamps/turn id before consumers.
 
-## S6: Serialized routing and committed outcome waits
+## S6: Serialized command admission and routing
 goal: Implement serialized routing and committed outcome waits with the exact owned rules and outputs.
 depends: S1, S3, S5
 owns: R7, C1
-outputs: RESULT-order
+outputs: ROUTE-admission
 tests: T5
-notes: Requires 13-3 SeatActor/SeatRegion/SeatActorGateway and committed outcome writer. Owns exact service bundle/overloads and validation; valid command without bundle safely rejects.
+notes: Requires 13-3 SeatActor/SeatRegion/SeatActorGateway and committed outcome writer. Owns exact service bundle/overloads and validation; no pending outcome registry/tests until S9. Valid command without bundle safely rejects.
 
 ## S7: Up lifecycle decisions
 goal: Implement up lifecycle decisions with the exact owned rules and outputs.
@@ -68,7 +68,7 @@ depends: S3, S6
 owns: R9
 outputs: CAPTURE-result
 tests: T7
-notes: Owns CaptureDeadlineFired handling through injected message before scheduler; no-launch precedence and link-loss row finalization exact.
+notes: Owns CaptureDeadlineFired handling through injected message before scheduler; no-launch precedence and link-loss row finalization exact. Owns pending outcome registry and committed-result ordering tests.
 
 ## S10: At-most-once delivery admission and outcomes
 goal: Implement at-most-once delivery admission and outcomes with the exact owned rules and outputs.

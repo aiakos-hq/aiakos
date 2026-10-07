@@ -149,10 +149,24 @@ fields, constructors and bundle are declared; S1 is the protocol only; the deadl
 owned by R8, R9 and R11. The actor and region overloads agree with `SeatActor` as merged on
 `origin/main` (6b03d98). Three points are open, all in the new text.
 
-- [ ] S10 (context-gap): R10 calls `adapter.BuildDelivery` in the actor, but `SeatCommandServices` carries the store, port, connections, materials and launch factory only, and the actor's constructor has profiles, not adapters, so the actor has no adapter to call. Fix: add the adapter list (or a delivery-building port) to `SeatCommandServices` and name it in R10.
-- [ ] S5 (context-gap): R17 adds `Payload` and `Result` to every `SeatStoredCommand`, and the reader's existing query loads every command of the seat with no filter, so each refresh after a commit reads every delivery body and capture text in the seat's history into the snapshot; no rule reads either field, and a record that holds bodies prints them in `ToString`. Fix: remove `Payload` and `Result` from R17 and `READER-command`.
-- [ ] S6 (judgment-gap): `RESULT-order` and T5 require a capture or delivery wait that completes from a committed result, but only R9 (S9) and R10 (S10) create commands and register waits, so S6 cannot produce its own output; with the validation matrix, the routing, the overloads and the wait registry it is also the largest story of the slice. Fix: keep validation, routing and the missing-bundle reply in S6 with their own output, and move the wait cases of `RESULT-order` and T5 to `CAPTURE-result`/T7 (or to a story after S9).
+- [x] S10 (context-gap): R10 calls `adapter.BuildDelivery` in the actor, but `SeatCommandServices` carries the store, port, connections, materials and launch factory only, and the actor's constructor has profiles, not adapters, so the actor has no adapter to call. Fix: add the adapter list (or a delivery-building port) to `SeatCommandServices` and name it in R10.
+- [x] S5 (context-gap): R17 adds `Payload` and `Result` to every `SeatStoredCommand`, and the reader's existing query loads every command of the seat with no filter, so each refresh after a commit reads every delivery body and capture text in the seat's history into the snapshot; no rule reads either field, and a record that holds bodies prints them in `ToString`. Fix: remove `Payload` and `Result` from R17 and `READER-command`.
+- [x] S6 (judgment-gap): `RESULT-order` and T5 require a capture or delivery wait that completes from a committed result, but only R9 (S9) and R10 (S10) create commands and register waits, so S6 cannot produce its own output; with the validation matrix, the routing, the overloads and the wait registry it is also the largest story of the slice. Fix: keep validation, routing and the missing-bundle reply in S6 with their own output, and move the wait cases of `RESULT-order` and T5 to `CAPTURE-result`/T7 (or to a story after S9).
 
 Not checked in this round: the filtered story texts beyond their size (S6: see above); whether the
 node expands `${AIAKOS_SEAT_HOME}` in `env` values; `SeatRegion` and `SeatActorGateway`, which are
 not on `main`; nothing was built.
+
+
+## Author resolution of round 4
+
+1. SeatCommandServices now includes the exact IHarnessAdapter list. R10 selects from its
+   Adapters property; missing match is fixed INVALID_DELIVERY with no write/send.
+2. R17 removes unused Payload/Result properties and columns from command snapshot hydration.
+   Reload faults old waits rather than loading bodies to reconstruct replies.
+3. S6 now owns ROUTE-admission/T5 only: validation, eligibility, routing and missing bundle.
+   Pending wait/registry/fast-result/commit-order cases move into R9 CAPTURE-result/T7, whose
+   story creates the actual capture. Earlier generic commit behavior remains unchanged.
+
+Author-resolved pending independent review. Verified story split/check and git diff --check;
+no implementation/build/gate. The previously accepted round-3 resolutions are preserved.

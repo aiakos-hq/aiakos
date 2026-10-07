@@ -143,7 +143,8 @@ public sealed class SeatLaunchFactory : ISeatLaunchFactory
 }
 public sealed record SeatCommandServices(ISeatCommandStore Store, ISeatCommandPort Port,
     ISeatNodeConnectionSource Connections, ISeatLaunchMaterialSource Materials,
-    ISeatLaunchFactory Launches);
+    ISeatLaunchFactory Launches,
+    IReadOnlyList<Aiakos.Orchestrator.Harnesses.IHarnessAdapter> Adapters);
 // Additional overloads; existing 13-3 constructors remain usable:
 public SeatActor(SeatKey key, ISeatActorReader reader, ISeatActorWriter writer,
     IReadOnlyList<IHarnessStateProfile> profiles, TimeProvider timeProvider, SeatCommandServices commands);
@@ -305,22 +306,7 @@ R7. Dispatch validates caller/envelope match, nonempty seat and
     services route serially to the owned handlers, never independent SQL. Connection is live only
     when Connected=true and NodeInstanceId is a nonempty UUID; otherwise use disconnected
     branches for every command/effect, never pass a fabricated instance to the port. Commands/result
-    integration runs within the existing SeatActor mailbox. Successful send
-    acknowledgment is transport acceptance only, not LaunchReceipt/PaneCapture/DeliveryReceipt.
-    Existing 13-3 mapping/writer owns CommandResult launch/stop/delivery/capture results, launch
-    metadata, resumability changes and event/axis/finding transaction. Refresh the committed
-    command after event commit before completing an outcome wait. Waits are keyed by CommandId;
-    capture registers its completion before send so a fast event cannot race registration.
-    Validate same tenant/seat, stored command kind and launch; duplicate/stale/foreign/missing
-    results cannot complete another wait. A result received while port send is outstanding is
-    enqueued and handled after that mailbox operation; never wait for a CommandResult inside
-    the actor's send handler. Continue processing mailbox while capture caller awaits. No port
-    result ever bypasses the event transaction. Already-final command metadata from reload may
-    satisfy a matching existing wait; prospective events may not. Public send/down/up return
-    admission accepted, as 15-2 specifies; they do not wait for terminal outcomes. Any internal
-    waiter/subscriber for a delivery outcome follows this same committed-event rule. Pending
-    replies use TrySetResult/Exception so event/timeout/node loss/cancellation completes at most
-    once. Store/refresh failure uses 13-3 SeatCommitFailedException and supervision; no success.
+    integration runs within the existing SeatActor mailbox.
 
 R8. Down applies DownRequested and commits desired-down (caller.User) plus the pure step.
     Execute stop exactly when that step emits DispatchStop; never infer it separately from the
@@ -356,13 +342,31 @@ R9. Capture checks launch first, then connection: it requires a current launch, 
     still supplies event evidence but cannot revive the canceled/completed wait. PaneDead is evidence only:
     use existing 13-3 CaptureBody behavior/finding, never infer a healthy axis from a capture.
 
+
+    Successful send
+    acknowledgment is transport acceptance only, not LaunchReceipt/PaneCapture/DeliveryReceipt.
+    Existing 13-3 mapping/writer owns CommandResult launch/stop/delivery/capture results, launch
+    metadata, resumability changes and event/axis/finding transaction. Refresh the committed
+    command after event commit before completing an outcome wait. Waits are keyed by CommandId;
+    capture registers its completion before send so a fast event cannot race registration.
+    Validate same tenant/seat, stored command kind and launch; duplicate/stale/foreign/missing
+    results cannot complete another wait. A result received while port send is outstanding is
+    enqueued and handled after that mailbox operation; never wait for a CommandResult inside
+    the actor's send handler. Continue processing mailbox while capture caller awaits. No port
+    result ever bypasses the event transaction. Reload faults old waits per R14; no capture/delivery bodies are loaded to reconstruct them.
+    Prospective events may never satisfy a wait. Public send/down/up return
+    admission accepted, as 15-2 specifies; they do not wait for terminal outcomes. Any internal
+    waiter/subscriber for a delivery outcome follows this same committed-event rule. Pending
+    replies use TrySetResult/Exception so event/timeout/node loss/cancellation completes at most
+    once. Store/refresh failure uses 13-3 SeatCommitFailedException and supervision; no success.
 R10. Send runs InputValidator before admission and pure SendRequested(Force,connected,
     DeliveryInFlight). In-flight means the same seat has an existing deliver status pending/sent.
     Commit any rejected step findings without creating a deliver command (node-not-connected
     included), then return its rejection. Rejection order is disconnected NODE_NOT_CONNECTED; unknown session SEAT_STATE_UNKNOWN;
     session not Present SEAT_NOT_PRESENT; in-flight DELIVERY_IN_FLIGHT; Working SEAT_WORKING;
     NeedsInput SEAT_NEEDS_INPUT; Unknown activity without Force SEAT_ACTIVITY_UNKNOWN.
-    Force permits Unknown activity only, never an overlay/working/input dialog. Use matching
+    Force permits Unknown activity only, never an overlay/working/input dialog. Select the matching adapter ordinally by Harness from SeatCommandServices.Adapters;
+    absence returns SeatCommandRejected("INVALID_DELIVERY") with no rows/send. Call
     adapter.BuildDelivery(caller.Sender,InputValidator.CheckBody(Body).Normalized,commandId) to build lead/body/expect_confirmation/
     ConfirmTimeout; request carries no sender/lead override. Adapter failure is fixed
     INVALID_DELIVERY rejection with no rows/send. Commit pending deliver with JSON payload
@@ -462,12 +466,12 @@ R16. Add command service registration to the existing shell only when its named 
 R17. Extend existing positional records with init-only properties; preserve their constructors:
     SeatActorSnapshot.Address (string, default ""), LaunchRequestedAt (DateTimeOffset?, default
     null); SeatStoredCommand.NodeInstanceId (Guid?), TurnId (string?), SentAt/CreatedAt/CompletedAt
-    (DateTimeOffset?), Payload and Result (JsonElement?, independent Clone), all nullable defaults. Existing
+    (DateTimeOffset?), all nullable defaults. Neither Payload nor Result is added to this snapshot. Existing
     PostgresSeatActorReader implements new ISeatCommandReader : ISeatActorReader with member
     Task<bool> HasPromptAsync(SeatKey key, Guid launchId, string turnId, CancellationToken ct).
     Its existing LoadAsync repeatable-read transaction selects seat.address, current
-    seat_launch.requested_at and command.node_instance_id,turn_id,sent_at,created_at,completed_at,
-    payload,result along with previous fields. Null launch→null requested time. Hydrate exact column
+    seat_launch.requested_at and command.node_instance_id,turn_id,sent_at,created_at,completed_at
+    along with previous fields; no payload/result columns are loaded. Null launch→null requested time. Hydrate exact column
     values, no derived address and no launch-material request on every event. HasPromptAsync is
     a tenant/seat/launch-scoped EXISTS on seat_event body_type='harness', kind='prompt-submitted',
     attributes->>'turn_id'=turnId. No raw parsing/event replay. R12 also examines current batch's
@@ -519,7 +523,7 @@ All actor cases assert commit and metadata refresh occur before sends/replies.
 
 | ID | Change | Exact output |
 |---|---|---|
-| `PROTOCOL` | reflect seam and all reply records without invoking dispatcher | exact R1 properties/signatures above; protocol-only S1 constructs immutable records and ports; runtime validation/forwarding cases belong to RESULT-order in R7 |
+| `PROTOCOL` | reflect seam and all reply records without invoking dispatcher | exact R1 properties/signatures above; protocol-only S1 constructs immutable records and ports; runtime validation/forwarding cases belong to ROUTE-admission in R7 |
 | `STORE-shape` | reflect transaction records and store interface | every R2 property/signature exactly above; immutable insert/update/transaction data; no implementation or SQL required here |
 | `STORE-inserts` | prepared fresh launch with session J2/L2/C and step Starting | every R3 column exact; session decision new-session, launch fresh/new-session, command pending/start/attempts0; version8, pointers J2/L2; desired_up attributed owner; no secret bytes; unchanged transaction with no mutation returns SeatStoreReceipt(7,J)/no writes |
 | `STORE-rollback` | state version mismatch or invalid NOT NULL/check/FK after insert | SEAT_VERSION_CONFLICT or SEAT_COMMIT_REJECTED/no inner; zero new session/launch/command/transitions/findings; old desired/pointers/abandonment unchanged |
@@ -528,9 +532,9 @@ All actor cases assert commit and metadata refresh occur before sends/replies.
 | `LAUNCH-invalid` | missing source/mismatched node/invalid native id/build error | LAUNCH_MATERIAL_UNAVAILABLE or INVALID_LAUNCH, no token in exception, zero commit/send |
 | `UP-matrix` | connected/disconnected, each Session and Resumability, Fresh flag | pure-machine precedence in R6; starting/present SeatAlreadyUp(L), unknown SEAT_STATE_UNKNOWN, disconnected NODE_NOT_CONNECTED, lost without Fresh RESUME_LOST; no-op/rejection no launch/command/token; disconnected pure rejection commits node-not-connected finding before reply |
 | `UP-start` | absent/exited, None/FreshOnly/Resumable/Unknown/Lost plus explicit Fresh | L2/session/native/mode/decision exactly pure StartLaunch; accepted SeatCommandAccepted(L2,C) after commit/send ack; explicit Fresh abandons old row and records owner/note; missing/null material→SeatCommandRejected("LAUNCH_MATERIAL_UNAVAILABLE"), builder signal→SeatCommandRejected("INVALID_LAUNCH"), no preparation-failure mutation/send; no fallback |
-| `RESULT-order` | capture/delivery result blocked at writer, duplicate/foreign/stale result | valid without bundle SEAT_COMMAND_SERVICE_UNAVAILABLE; R7 validation/eligibility exact; invalid queues nothing; no final reply before commit+refresh; matching committed result completes exactly once; no direct port outcome; mailbox serves other requests while capture waits |
+| `ROUTE-admission` | valid request without bundle and invalid command/tenant/body/history/eligibility | valid without bundle SeatCommandRejected("SEAT_COMMAND_SERVICE_UNAVAILABLE"); R7 exact validation/eligibility reasons; invalid queues nothing; valid fake region probe receives trusted envelope/caller exactly once; no capture/delivery wait required |
 | `DOWN-stop` | absent; live launch; completed stop and failed/timed-out stop | absent→SeatAlreadyDown; live→SeatCommandAccepted(L,C), desired Down and stop payload grace10 before send; completed stop→Absent/None; failed/timed-out→Unknown/stop-failed; original resumability retained; disconnected DispatchStop→NODE_NOT_CONNECTED, desired-down/StopRequested committed, no stop row/send; no DispatchStop→SeatAlreadyDown regardless link |
-| `CAPTURE-result` | launch in each state; missing launch; successful/failed result or5s timeout | no launch, even disconnected→SEAT_NOT_PRESENT; launch but disconnected→NODE_NOT_CONNECTED; link loss sent capture row unknown/NODE_NOT_CONNECTED before wait completion; completed returns SeatCaptureCompleted(exact cloned PaneCapture); failure CAPTURE_FAILED; timeout SeatCommandTimedOut("CAPTURE_TIMEOUT") after timed-out row commit; capture admission no axis change |
+| `CAPTURE-result` | launch in each state; missing launch; successful/failed result or5s timeout | no launch, even disconnected→SEAT_NOT_PRESENT; launch but disconnected→NODE_NOT_CONNECTED; link loss sent capture row unknown/NODE_NOT_CONNECTED before wait completion; completed returns SeatCaptureCompleted(exact cloned PaneCapture); failure CAPTURE_FAILED; timeout SeatCommandTimedOut("CAPTURE_TIMEOUT") after timed-out row commit; capture admission no axis change; blocked result commit/refresh gives no final reply, matching committed result completes once, duplicate/foreign/stale ignored, mailbox continues while capture waits |
 | `SEND-reject` | each invalid admission state and Force | R10 exact rejection precedence; zero deliver row/send; rejected pure findings committed; Force only unknown activity, sets forced=true; present idle Force=true records forced=false |
 | `SEND-accepted` | adapter derives delivery from trusted lead and body; ack success/failure | accepted SeatCommandAccepted(L,C); exact lead/body/expect_confirmation payload; profile ConfirmTimeout wire; ack failure failed/not-delivered, COMMAND_DISPATCH_FAILED; no activity change |
 | `SEND-outcome` | all delivery results/noncompleted status/node loss/deadline/replay | R11 exact immutable outcomes; different node instance unknown; same-instance link loss stays sent; pending replaced before send not-delivered; injected local deadline unknown/COMMAND_RESULT_MISSING; node timed-out result failed; one original send, no actor resend |
@@ -554,12 +558,14 @@ T3. Commit launch factory/token tests with fake adapter and injected opaque toke
 T4. Commit up matrix/atomic-order tests including failed resume result then RESUME_LOST and
     explicit Fresh; return no success before refresh; store failures use existing supervision.
 T5. Commit R7 runtime validation (Unicode/control/null/history/body/tenant) and eligibility
-    mapping tests, missing-bundle valid-command rejection, plus pending outcome tests with controlled event writer and fast-result race, malformed/
-    unknown/duplicate/foreign/stale results, bounded cancellation and no two outcome sources.
+    mapping tests, missing-bundle valid-command rejection and fake region routing probes only;
+    no capture/delivery command creation or pending outcome wait belongs to this story.
 T6. Commit down tests with all StopOutcome/status variants, unchanged resumability, desired
     attribution and safe send failure.
 T7. Commit capture tests for all launch states/history bounds, successful cloned bytes, timeout
-    versus event commit ordering, dead-pane evidence and actor continuing while caller waits.
+    versus event commit ordering, fast-result registration race, blocked commit/refresh,
+    duplicate/foreign/stale result filtering, dead-pane evidence, bounded cancellation and actor
+    continuing while caller waits. No port outcome bypasses committed result evidence.
 T8. Commit send tests for every R10 admission and R11 outcome, at-most-once/different-instance
     versus link loss/injected deadline; no premature failure and activity never set by receipts.
 T12. Commit R12 prompt-evidence comparison and conservative reload-recheck tests separately.

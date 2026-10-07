@@ -31,7 +31,7 @@ LAUNCH-build	output	once	R5
 LAUNCH-invalid	output	once	R5
 UP-matrix	output	once	R6
 UP-start	output	once	R6
-RESULT-order	output	once	R7
+ROUTE-admission	output	once	R7
 DOWN-stop	output	once	R8
 CAPTURE-result	output	once	R9
 SEND-reject	output	once	R10
