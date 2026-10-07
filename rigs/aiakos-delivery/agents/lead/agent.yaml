@@ -1,6 +1,6 @@
 name: aiakos-lead
 version: "1.0"
-description: Runs tools/story.sh, creates sub-issues, opens pull requests and owns closure
+description: The console of the maintainer - shows the board and runs commands on request
 
 imports:
   - ref: local:../shared

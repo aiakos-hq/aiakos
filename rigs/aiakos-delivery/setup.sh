@@ -8,7 +8,7 @@ RIG=aiakos-delivery
 OPENRIG_VERSION=0.6.6
 PI_VERSION=1.0.1
 KEY_FILE="$HOME/.config/opencode-go/key"
-# Seats that run on Pi (pod-member, for example "verify-qa"). None at the moment: Pi and the
+# Seats that run on Pi (pod-member, for example "team-low1"). None at the moment: Pi and the
 # OpenCode Go key are only checked when this list is not empty (see docs/spikes/0006).
 PI_SEATS=""
 

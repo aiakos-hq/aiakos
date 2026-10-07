@@ -1,6 +1,6 @@
-name: aiakos-impl
+name: aiakos-gate
 version: "1.0"
-description: Implements one story in its own worktree
+description: Runs the baseline and the acceptance gate and reports the result
 
 imports:
   - ref: local:../shared

@@ -44,7 +44,8 @@ Story <id>, commit <sha>. Gate: pass.
 - <what you did not verify>
 ```
 
-Write `None.` under a heading that has nothing. Hand the story to `lead-lead` with the verdict.
+Write `None.` under a heading that has nothing. Hand the story to `router` with the verdict and
+the path of `review.md`.
 
 ## A chore or a bug
 

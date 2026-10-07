@@ -1,6 +1,6 @@
-name: aiakos-qa
+name: aiakos-router
 version: "1.0"
-description: Runs the acceptance gate and probes the behaviour
+description: Receives every report of the team and makes the next move with tools/story.sh
 
 imports:
   - ref: local:../shared

@@ -37,17 +37,18 @@ logins, per-seat permission choices and OpenRig's own state (`~/.openrig`).
 ```bash
 cd ~/aiakos
 rig up aiakos-delivery --existing        # start the rig that was stopped; new conversations
-bash rigs/aiakos-delivery/fresh.sh       # in a terminal of its own, while the rig runs
 rig tui                                  # the board; "terminal rig:aiakos-delivery" opens herdr
 rig down aiakos-delivery                 # stop; queue items are kept for the next start
 ```
 
 Every seat starts with an empty conversation (`restore_policy: relaunch_fresh` in `rig.yaml`)
-and reads its queue. See [New conversations between items](#new-conversations-between-items)
-for `fresh.sh`.
+and reads its queue.
 
-Give the team work by telling the `lead` seat which issue or slice to take
-(`rig send lead-lead@aiakos-delivery "..."`, or type in its terminal).
+The rig has two pods. `desk` holds the two seats to keep open: `desk-lead`, which you talk to,
+and `desk-router`, which moves the work. `team` holds the seven seats that do it; look at them
+now and then. Give the team work by typing in the terminal of `desk-lead`. Nothing else writes
+there, so a message you are typing is not cut. Do not type into `desk-router`: the seats' reports
+arrive in it.
 
 **Start by name, not from the file.** `rig up rigs/aiakos-delivery/rig.yaml` on a stopped rig
 does not resume it: it creates a new rig with new seats and archives the old one. The new seats
@@ -70,7 +71,7 @@ blocked by branch protection in both cases.
 
 ### 1. Codex seats: full access (in the repository, already there)
 
-Each Codex member in `rig.yaml` (`author`, `author2`, `impl`, `senior`, `qa`) has this line:
+Each Codex member in `rig.yaml` (`low1`, `low2`, `high1`, `high2`) has this line:
 
 ```yaml
         permission_policy: builtin:yolo
@@ -83,18 +84,18 @@ rig policy permissions current --spec rigs/aiakos-delivery/rig.yaml
 ps -eo args | grep "[c]odex --no-daemon" | grep aiakos
 ```
 
-The first command lists the five members with `launch_posture=full_bypass`. The second, with
+The first command lists the four members with `launch_posture=full_bypass`. The second, with
 the rig running, shows `-s danger-full-access -a never` on every Codex seat.
 
 ### 2. Claude seats: auto mode (in the repository, already there)
 
-Each Claude member in `rig.yaml` (`lead`, `architect`, `reviewer`) has this line:
+Each Claude member in `rig.yaml` (`lead`, `router`, `architect`, `reviewer`, `gate`) has this line:
 
 ```yaml
         permission_policy: builtin:auto
 ```
 
-Nothing to do on a new machine. The first command above lists the three members with
+Nothing to do on a new machine. The first command above lists the five members with
 `launch_posture=auto`. With the rig running:
 
 ```bash
@@ -107,30 +108,33 @@ Every line must say `--permission-mode auto`, and each seat's terminal shows "au
 
 Remove the `permission_policy` lines of the members from `rig.yaml`, then start from the file.
 
-## New conversations between items
+## Clean conversations
 
 A seat sends its whole conversation again with every request. On 5–6 October the Claude seats
 ran at a median of 316k to 477k tokens per request and the Codex seats at 100k to 130k, almost
-all of it finished work (issue #278). So a seat does not keep its conversation between items.
+all of it finished work (issue #278). So a seat does not keep its conversation between items:
+
+- **Every start of the rig** begins with empty conversations.
+- **Every delivery** goes through `tools/story.sh hand`. When the destination is idle and has
+  nothing in progress, it gets an empty conversation first: `/new` for a Codex seat of a pool, a
+  fresh launch (`rig seat launch --fresh --stop`) for `team-architect` and `team-reviewer`. A
+  busy seat is never touched; its item is queued.
+- **`desk-lead`, `desk-router` and `team-gate`** keep their conversation until the rig stops.
+
+`artifacts/hand.log` in the main checkout has one line per delivery: when, from, to, the role
+and whether the conversation was cleared (`new`, `fresh`, or `no` with the reason). Read it to
+see how often an item went to a busy seat.
 
 ```bash
-bash rigs/aiakos-delivery/fresh.sh              # watch the rig until Ctrl+C
-bash rigs/aiakos-delivery/fresh.sh --once --dry-run
+tail -n 20 artifacts/hand.log
+AIAKOS_NO_WRITE=1 bash tools/story.sh hand low --role impl --summary "try" --body "try"
 ```
 
-The script gives a seat a new, empty conversation (`rig seat launch <seat> --fresh --stop`)
-when it has seen the seat idle for 30 seconds (15 minutes for `lead`, so that it does not cut a
-conversation with you), the seat has no item in progress, and the seat closed or handed off an
-item since its last new conversation. Pending and parked items stay in the queue and the new
-conversation reads them when it starts. `QUIET`, `QUIET_LEAD` and `INTERVAL` (seconds) change
-the timing. It must run outside the seats: Claude's auto mode refuses a seat that tries to
-replace its own conversation.
+The second command shows which seat would be picked and changes nothing.
 
-If the script reports `FAILED` for a seat, that seat may be stopped. Start it with
-`rig seat launch <seat>@aiakos-delivery --fresh --reason recover`.
-
-**A long single item** can still grow. OpenRig can compact a Claude seat at a threshold; it is
-off by default and its threshold is 80% of a 1M window. To turn it on at about 150k tokens:
+**A long single item** can still grow, and so can the three seats that are not cleared.
+OpenRig can compact a Claude seat at a threshold; it is off by default and its threshold is 80%
+of a 1M window. To turn it on at about 150k tokens:
 
 ```bash
 rig config set policies.claude_compaction.enabled true
@@ -169,7 +173,7 @@ rig spec reference. To use Pi again for a seat:
 2. Put the OpenCode Go key in `~/.config/opencode-go/key` (mode 600).
 3. Set the member to `runtime: pi` and `model: opencode-go/<model>`
    (`pi --list-models opencode-go` lists them).
-4. Add the seat to `PI_SEATS` in `setup.sh` (for example `verify-qa`) and run the script: it
+4. Add the seat to `PI_SEATS` in `setup.sh` (for example `team-low1`) and run the script: it
    writes the seat's `auth.json`, which points at the key file.
 
 ## Versions
