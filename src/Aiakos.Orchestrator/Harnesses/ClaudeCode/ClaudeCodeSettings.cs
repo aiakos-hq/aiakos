@@ -45,6 +45,7 @@ public sealed class ClaudeCodeSettings
         using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions
         {
             Indented = true,
+            NewLine = "\n",
             IndentSize = 2,
             IndentCharacter = ' ',
             Encoder = JavaScriptEncoder.Default
