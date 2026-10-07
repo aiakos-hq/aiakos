@@ -25,12 +25,22 @@ public sealed class NodeLinkRegistry(ActorSystem actorSystem, INodeLinkApplicati
         }
     }
 
-    internal static async Task ReceiveAsync(NodeLinkSession session, ConnectRequest request, CancellationToken cancellationToken)
+    internal static async Task<EventAck?> ReceiveAsync(NodeLinkSession session, ConnectRequest request,
+        CancellationToken cancellationToken)
     {
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completion = new TaskCompletionSource<EventAck?>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, session.CallbackToken);
         session.Actor.Tell(new ReceiveNodeMessage(request, completion, Activity.Current, linked.Token));
-        await completion.Task.WaitAsync(linked.Token).ConfigureAwait(false);
+        try
+        {
+            return await completion.Task.WaitAsync(linked.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested)
+        {
+            _ = completion.Task.ContinueWith(static task => _ = task.Exception,
+                TaskContinuationOptions.OnlyOnFaulted);
+            throw;
+        }
     }
 
     internal void Remove(NodeIdentity identity, NodeLinkSession session)

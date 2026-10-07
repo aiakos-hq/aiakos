@@ -34,9 +34,19 @@ public sealed class NodeProxyActor : ReceiveActor
         try
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(message.CancellationToken, _sessionToken);
-            await _application.ReceiveAsync(_identity, _nodeInstanceId, message.Request, linked.Token)
-                .ConfigureAwait(false);
-            message.Completion.TrySetResult();
+            EventAck? acknowledgement = null;
+            if (message.Request.BodyCase == ConnectRequest.BodyOneofCase.SeatEvent &&
+                _application is INodeEventApplication eventApplication)
+            {
+                acknowledgement = await eventApplication.ReceiveEventAsync(
+                    _identity, _nodeInstanceId, message.Request, linked.Token).ConfigureAwait(false);
+            }
+            else
+            {
+                await _application.ReceiveAsync(_identity, _nodeInstanceId, message.Request, linked.Token)
+                    .ConfigureAwait(false);
+            }
+            message.Completion.TrySetResult(acknowledgement?.Clone());
         }
         catch (Exception exception)
         {
@@ -51,6 +61,6 @@ public sealed class NodeProxyActor : ReceiveActor
 
 internal sealed record ReceiveNodeMessage(
     ConnectRequest Request,
-    TaskCompletionSource Completion,
+    TaskCompletionSource<EventAck?> Completion,
     Activity? ReceiveActivity,
     CancellationToken CancellationToken);
