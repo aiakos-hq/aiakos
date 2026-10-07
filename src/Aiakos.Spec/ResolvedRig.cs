@@ -27,6 +27,7 @@ public sealed record ResolvedSeatParameters(string Seat, string Rig, string Node
 {
     public string? SpecHash { get; init; }
     public string? BindingHash { get; init; }
+    public ResolvedProjection? Projection { get; init; }
 }
 public sealed record ResolvedRig(string Name, string Description, EmbeddedFile? Culture,
     IReadOnlyList<ResolvedRepo> Repos, IReadOnlyList<ResolvedAgent> Agents,
