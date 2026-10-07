@@ -256,6 +256,29 @@ public sealed class PostgresSeatActorWriterTests(PostgresContainerFixture postgr
     }
 
     [Fact]
+    public async Task InvalidFindingKindsRejectBeforeDatabaseWrites()
+    {
+        await using var db = await SeedAsync();
+        var before = Snapshot();
+        var writer = new PostgresSeatActorWriter(db);
+        foreach (var (kind, open) in new[]
+        {
+            ("observation-gap\0", true),
+            ("observation-gap\0", false),
+            ("\ud800", true),
+            ("\ud800", false)
+        })
+        {
+            var exception = await Assert.ThrowsAsync<SeatStoreRejectedException>(() =>
+                writer.CommitAsync(before, [FindingInput(before.State, kind, open, At.AddSeconds(1))], Ct));
+            Assert.Equal("SEAT_COMMIT_REJECTED", exception.Message);
+            Assert.Null(exception.InnerException);
+        }
+        Assert.Equal(7L, await ScalarAsync(db, "SELECT version FROM aiakos.seat_state"));
+        Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_finding"));
+    }
+
+    [Fact]
     public async Task FindingsMergeResolveReopenAndClearActorStoppedOnNextCommit()
     {
         await using var db = await SeedAsync();

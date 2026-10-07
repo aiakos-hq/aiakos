@@ -145,6 +145,8 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
             ValidateStoredText(transition.To);
             ValidateStoredText(transition.Reason);
         }
+        foreach (var finding in input.Step.Findings)
+            ValidateStoredText(finding.Kind);
     }
 
     private static async Task WriteEventAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
