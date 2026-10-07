@@ -2,7 +2,7 @@
 id: 13-4
 title: "#13 slice 4 — SeatActor lifecycle and delivery"
 issue: 13
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Core/, src/Aiakos.Orchestrator/, tests/Aiakos.Orchestrator.Tests/]
 date: 2026-10-07

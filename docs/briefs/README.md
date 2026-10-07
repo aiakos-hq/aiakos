@@ -42,7 +42,7 @@ Acceptance tests are not here: they stay local, so that an implementer cannot re
 | [13-1 Pure seat state machine and harness state profile](13-1/brief.md) | #13 | `impl/sonnet` | approved | [12](13-1/stories.md) |  | |
 | [13-2 Seat model migration and `SeatQueries`](13-2/brief.md) | #13 | `impl/sonnet` | approved | [2](13-2/stories.md) |  | |
 | [13-3 Transactional SeatActor shell](13-3/brief.md) | #13 | `impl` | approved | [9](13-3/stories.md) | | |
-| [13-4 SeatActor lifecycle and delivery](13-4/brief.md) | #13 | `impl` | draft | [6](13-4/stories.md) | | |
+| [13-4 SeatActor lifecycle and delivery](13-4/brief.md) | #13 | `impl` | approved | [16](13-4/stories.md) | | |
 | [14-1 Rig file envelope and diagnostics](14-1/brief.md) | #14 | `impl/opencode` | implemented | not split (before the story workflow) | | PR #43 |
 | [14-2 Semantic validation of the three YAML files](14-2/brief.md) | #14 | `impl/opencode` | implemented | not split (before the story workflow) | | #45 |
 | [14-3 File references and the resolved rig](14-3/brief.md) | #14 | `impl` | approved | [6](14-3/stories.md) | | |
