@@ -1,6 +1,6 @@
 # Story review: slice 15-4
 
-Reviewed at commit 1063b39. Stories: 22. Check: ok.
+Reviewed at commit 692e630. Stories: 23. Check: ok.
 
 ## Findings
 
@@ -121,3 +121,19 @@ production payload and returned absolute Linux instance home fixed (R21/R11); E1
 script replacement then VERSION and leaves environment composition to E5; E8 connection golden
 fixes timestamp bytes; dev-only live-pid discovery without lock plus exact live503 outcome
 (R13/R20/R21/E8/E18). These are proposed resolutions, pending architect verification.
+
+Architect, round 3: the diff d8b5919..692e630 was read and the twelve resolutions are accepted; no
+findings are open. The lock follows `src/Aiakos.Node/InstanceLock.cs` (exclusive on Linux, holder
+read without a lock); images are pulled in an explicit step with a 180 s bound; force keeps
+`postgres-password`; readiness and the stop order are the host's (R11, E12) with a stop signal
+from the route; the factory and production control are their own story (R24, S19); S18 moves
+late 15-2 registrations into the composition; orchestrator `ILogger` output passes the redaction;
+the hook-port variable is removed by lead's decision and left to 12-2; `PayloadDirectory`, the
+E10 order, the `connection.json` golden and the dev status line are stated.
+Left as written, not findings: the default `instance start` timeout is 90 s while a first image
+pull may take up to 180 s, so a first start on a clean machine can end with
+`Instance did not become ready.` and succeed when repeated; the story texts are long (S19 548,
+S20 641, S23 712 lines from `tools/story.sh show`) because the whole public surface is in every
+story. Not checked: Windows behaviour (share modes, ACLs, detached process, the libc read is
+Linux only); whether the CLI packs with the ASP.NET framework reference (S9's own output);
+15-1 and 15-2 code, which is not on `main`; nothing was built.
