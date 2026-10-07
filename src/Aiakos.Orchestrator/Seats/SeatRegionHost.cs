@@ -20,7 +20,7 @@ internal sealed class SeatRegionHost(
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         var region = actorSystem.ActorOf(Props.Create(() => new SeatRegion(reader, writer,
-            profiles.ToArray(), timeProvider, _stopping.Token)), "seats");
+            profiles.ToArray(), timeProvider)), "seats");
         _region = region;
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         region.Tell(new StartSeatRegion(ready));
