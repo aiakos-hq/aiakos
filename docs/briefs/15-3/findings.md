@@ -1,6 +1,6 @@
 # Story review: slice 15-3
 
-Reviewed at commit a5ba03d. Stories: 12. Check: ok.
+Reviewed at commit 69b9198. Stories: 12. Check: ok.
 
 ## Findings
 
@@ -68,3 +68,11 @@ Not checked in round 3: `story.sh show` output; the reason strings brief 15-2 us
 The S1 CliApiException surface now exposes IsServerProblem with constructor default false. R1 sets it for retained valid server problems and keeps fixed 401/503 diagnostics local. R2 checks the flag before local special cases and specifies the exact generic server line `<reason>: <JSON-quoted error.Message>\n`; handler-specific R9 rejection handling still precedes the outer catch. E2 gives literal stderr for the server 404 NOT_FOUND/x case and the local NOT_FOUND diagnostic; T2 includes both renderer cases. Item ownership and split are unchanged. Architect verification is pending.
 
 Verification is recorded in the handoff; no implementation, build, acceptance tests or live instance/Windows checks were run. The architect’s remaining unchecked areas are unchanged.
+
+## Architect, round 4
+
+The diff f58de9c..69b9198 was read: the `CliApiException` surface, R1, R2, E2 and T2 of brief.md; items.tsv and stories.md are unchanged. The round-3 finding is accepted: `IsServerProblem` is in the S1 surface with default false, R1 says when the client sets it, R2 gives the one line `<reason>: <JSON-quoted error.Message>\n` and checks the flag before the local branches, and E2 has the literal stderr for the server 404 and for the local `NOT_FOUND`. The generic line agrees with R9's line for reasons it does not list. The new flag makes one earlier rule contradict another, below.
+
+- [ ] S5 (context-gap): R1 now makes every valid problem response other than 401/503 a server problem, so a capture 504 `{"reason":"CAPTURE_TIMEOUT","detail":"Seat capture timed out.","retryable":true}` reaches `WriteError` with `IsServerProblem=true` and is written as `CAPTURE_TIMEOUT: "Seat capture timed out."\n`, while R5 and E5 expect `Capture timed out.\n`; `CliApiException` carries no status code, R5 does not name the reason, and R2 keeps only the R9 handling ahead of the outer catch, so neither S1 nor S5 can tell who produces the fixed text. Fix: say in one place which component turns the capture 504 into `Capture timed out.\n` (R1 lists 504 with 401/503 as a local exception with that fixed detail, or R5 names the reason `CAPTURE_TIMEOUT` that the capture handler catches before its outer catch), and put the 504 body and the literal stderr in E5.
+
+Not checked in round 4: `story.sh show` output; whether any other fixed text in R4–R8 and R10 is expected for a response that R1 now marks as a server problem (I checked R5, R6, R7 and R9 only); everything listed under "Not checked" above still stands.
