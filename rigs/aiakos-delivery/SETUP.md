@@ -6,7 +6,7 @@ logins, per-seat permission choices and OpenRig's own state (`~/.openrig`).
 
 ## Once per machine
 
-1. Tools in WSL: `tmux`, `git`, `gh`, Node, the .NET SDK from `global.json`, Docker (Docker
+1. Tools in WSL: `tmux`, `git`, `gh`, `rg` (ripgrep), Node, the .NET SDK from `global.json`, Docker (Docker
    Desktop with WSL integration), and optionally `herdr`.
 2. Agents and OpenRig:
 
@@ -44,9 +44,9 @@ rig down aiakos-delivery                 # stop; queue items are kept for the ne
 Every seat starts with an empty conversation (`restore_policy: relaunch_fresh` in `rig.yaml`)
 and reads its queue.
 
-The rig has two pods. `desk` holds the two seats to keep open: `desk-lead`, which you talk to,
-and `desk-router`, which moves the work. `team` holds the seven seats that do it; look at them
-now and then. Give the team work by typing in the terminal of `desk-lead`. Nothing else writes
+The rig has two pods. `desk` holds what to keep open: `desk-lead`, which you talk to,
+`desk-router`, which moves the work, and `desk-board`, a terminal that shows what waits for
+you. `team` holds the seven seats that do the work; look at them now and then. Give the team work by typing in the terminal of `desk-lead`. Nothing else writes
 there, so a message you are typing is not cut. Do not type into `desk-router`: the seats' reports
 arrive in it.
 
@@ -107,6 +107,21 @@ Every line must say `--permission-mode auto`, and each seat's terminal shows "au
 ### Going back
 
 Remove the `permission_policy` lines of the members from `rig.yaml`, then start from the file.
+
+## The board
+
+`desk-board` is not an agent. The rig starts `rigs/aiakos-delivery/board.sh` in it, which
+uses no model. Once a minute it:
+
+- shows the items that wait for you, each with the file or pull request to look at and its
+  item ID, then the open pull requests, the seats and the last deliveries;
+- runs `tools/story.sh events`, which hands the router an item when a pull request was merged
+  or you labelled a chore or a bug `ready`, and closes an item that asked you to merge a pull
+  request once it is merged. So you do not have to tell anyone that you merged.
+
+Answer a waiting decision by telling `desk-lead`; it passes the answer to the router and closes
+the item. `bash rigs/aiakos-delivery/board.sh --once` prints the board in any shell. If the
+terminal was closed, run `bash rigs/aiakos-delivery/board.sh` in it again.
 
 ## Clean conversations
 

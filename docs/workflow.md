@@ -47,6 +47,7 @@ The seats are in two pods: `desk`, which the maintainer keeps open, and `team`.
 |---|---|---|
 | `desk-lead` | Claude Code (Sonnet) | The maintainer's console: shows the board and what waits for the maintainer, passes on what the maintainer asks for. No seat writes to it |
 | `desk-router` | Claude Code (Haiku) | Receives every report and makes the next move: runs `tools/story.sh`, creates sub-issues, opens pull requests |
+| `desk-board` | A terminal, no model | Runs `rigs/aiakos-delivery/board.sh`: shows what waits for the maintainer, and tells the router when a pull request was merged or a chore or bug was labelled `ready` |
 | `team-architect` | Claude Code (Opus) | Checks the brief and the split; attacks them before they are approved. Judges an odd baseline and tags the failures of a second failed gate |
 | `team-reviewer` | Claude Code (Opus) | Reads the diff once |
 | `team-gate` | Claude Code (Haiku) | Runs the baseline and the gate. Both are scripts |
@@ -90,7 +91,9 @@ Credentials and the OpenRig state (`~/.openrig`) stay on the machine.
 | 10. Diff read | `reviewer` | Reads the diff once | Pass, or one of the four blocking kinds |
 | 11. Pull request | `router`, then the maintainer | `tools/story.sh pr <issue>`; the maintainer merges; `cleanup` | Done |
 
-The maintainer acts at steps 5 and 11. `main` is protected, so no seat can merge.
+The maintainer acts at steps 5 and 11. `main` is protected, so no seat can merge. The board
+lists what waits for the maintainer; after a merge it tells the router, so nobody has to be told
+to go on.
 
 Steps 1 to 5 happen in files on a branch. The back and forth between the analysis and its review
 is the commit history of that branch, and `findings.md` is where the architect writes.
@@ -310,6 +313,7 @@ bash tools/story.sh done <issue>
 bash tools/story.sh waive <issue> <run> infrastructure|test-defect "<evidence>"
 bash tools/story.sh pr <issue> [--maintainer-reviewed]
 bash tools/story.sh cleanup <issue>
+bash tools/story.sh events
 bash tools/story.sh hand <low|high|architect|reviewer|gate|router|maintainer> [--role <role>] \
      [--item <qitem>] --summary "<one line>" (--body "<text>" | --body-file <path>)
 ```

@@ -9,6 +9,7 @@ You are one seat of the team that builds Aiakos. The rules of the work are in `C
 |---|---|
 | `desk-lead` | The maintainer's console. Nobody hands work to it |
 | `desk-router` | Receives every report and makes the next move |
+| `desk-board` | Not an agent: a script that shows what waits for the maintainer and tells the router what changed on GitHub |
 | `team-architect` | Checks the analysis of a slice; takes escalations |
 | `team-reviewer` | Reads the diff of a story once |
 | `team-gate` | Runs the baseline and the acceptance gate |

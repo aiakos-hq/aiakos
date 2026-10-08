@@ -57,6 +57,9 @@
 #                                         and has nothing in progress, then the item. --item
 #                                         closes the caller's own item as handed off.
 #                                         artifacts/hand.log records every delivery
+#   tools/story.sh events                 hands the router what changed on GitHub since the
+#                                         last look: merged pull requests, chores and bugs
+#                                         labelled ready. The board runs it once a minute
 #
 # A slice is one brief: docs/briefs/<slice>/ with brief.md, items.tsv, stories.md and, while it
 # is reviewed, findings.md. A story is "<slice>-<n>" (for example 14-3-2); its issue title is
@@ -1180,6 +1183,67 @@ cmd_hand() {
   echo "handed to $dest (conversation: $clear${kept:+, kept because $kept})"
 }
 
+# Tells the router what changed on GitHub since the last look: a merged pull request, or a
+# chore or bug that the maintainer labelled ready. Nothing else reports these, so without it
+# the maintainer has to say "it is merged, go on". The first run only records what exists.
+# rigs/aiakos-delivery/board.sh runs this once a minute; it uses no model.
+cmd_events() {
+  local seen="$main_root/artifacts/events.seen" now fresh count first body
+  mkdir -p "$main_root/artifacts"
+  now="$(mktemp)"; fresh="$(mktemp)"
+  if ! gh pr list --repo "$REPO" --state merged --limit 40 --json number,title,headRefName \
+      --jq '.[] | "merged:\(.number)\tPull request #\(.number) was merged: \(.title) (branch \(.headRefName))"' > "$now"; then
+    rm -f "$now" "$fresh"; die "events: cannot read the pull requests of $REPO"
+  fi
+  if ! gh issue list --repo "$REPO" --state open --label ready --limit 100 --json number,title,labels \
+      --jq '.[] | select((.title | test("^[0-9]+-[0-9]+(-[0-9]+)?: ") | not) and ([.labels[].name] | any(. == "type/chore" or . == "type/bug"))) | "ready:\(.number)\tIssue #\(.number) (chore or bug) is labelled ready: \(.title)"' >> "$now"; then
+    rm -f "$now" "$fresh"; die "events: cannot read the issues of $REPO"
+  fi
+  # An item that asked the maintainer to merge a pull request is answered by the merge.
+  if [ "${AIAKOS_NO_WRITE:-}" != "1" ] && command -v rig >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
+    rig queue list --destination "$MAINTAINER" --state pending --full --limit 200 --json 2>/dev/null | node -e '
+      let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+        let rows; try { rows = JSON.parse(s); } catch { return; }
+        for (const r of rows) { const m = /\/pull\/([0-9]+)\/?$/.exec(r.evidenceRef || ""); if (m) console.log(r.qitemId, m[1]); }
+      });' | while read -r item pr; do
+        grep -q "^merged:$pr	" "$now" || continue
+        rig queue update "$item" --state done --closure-reason no-follow-on --note "pull request #$pr is merged" >/dev/null 2>&1 || true
+      done
+  fi
+  if [ ! -f "$seen" ]; then
+    cut -f1 "$now" > "$seen"
+    echo "events: first look, $(wc -l < "$seen" | tr -d ' ') recorded, nothing handed on"
+    rm -f "$now" "$fresh"
+    return
+  fi
+  awk -F'\t' 'NR == FNR { s[$1]; next } !($1 in s)' "$seen" "$now" > "$fresh"
+  count="$(wc -l < "$fresh" | tr -d ' ')"
+  if [ "$count" = "0" ]; then
+    echo "events: nothing new"
+    rm -f "$now" "$fresh"
+    return
+  fi
+  first="$(head -n 1 "$fresh" | cut -f2)"
+  body="$(mktemp)"
+  {
+    echo "GitHub changed since the last look:"
+    echo
+    cut -f2 "$fresh" | sed 's/^/- /'
+    echo
+    echo "Run bash tools/story.sh status and make the next move for each one (your role file,"
+    echo "\"The next move\"). Nothing here is a decision of the maintainer: do not hand it back."
+  } > "$body"
+  if [ "${AIAKOS_NO_WRITE:-}" = "1" ]; then
+    echo "would hand to the router:"; sed 's/^/  /' "$body"
+  else
+    cmd_hand router --summary "GitHub: $first$([ "$count" = "1" ] || echo " (and $((count - 1)) more)")" --body-file "$body" >/dev/null \
+      || { rm -f "$now" "$fresh" "$body"; die "events: could not hand the changes to the router; they will be tried again"; }
+    cut -f1 "$fresh" >> "$seen"
+    echo "events: $count change(s) handed to the router: $first"
+  fi
+  rm -f "$now" "$fresh" "$body"
+}
+
 case "${1:-}" in
   check)      cmd_check "${2:-}" ;;
   split)      cmd_split "${2:-}" ;;
@@ -1187,6 +1251,7 @@ case "${1:-}" in
   show)       cmd_show "${2:-}" "${3:-}" ;;
   status)     cmd_status ;;
   hand)       shift; cmd_hand "$@" ;;
+  events)     cmd_events ;;
   ready)      cmd_ready "${2:-}" "${3:-}" "${4:-}" ;;
   next)       cmd_next "${2:-}" ;;
   start)      cmd_start "${2:-}" "${3:-}" ;;
