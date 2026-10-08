@@ -20,20 +20,29 @@ if [ "$post" -eq 1 ]; then
     if [ -n "${AIAKOS_SEAT_SEQ_FILE-}" ]; then
         seqfile=$AIAKOS_SEAT_SEQ_FILE
         lockfile=$seqfile.lock
-        if command -v timeout >/dev/null 2>&1; then
-            next=$(timeout 1 sh -c '
-                seqfile=$1
-                lockfile=$2
-                now=$3
-                exec 9>"$lockfile" 2>/dev/null || exit 1
-                flock -w 0.8 9 2>/dev/null || exit 1
-                old=$(cat "$seqfile" 2>/dev/null) || old=
-                case "$old" in ""|*[!0-9]*) value=$now ;; *) value=$old ;; esac
-                value=$((value + 1))
-                printf "%s\n" "$value" >"$seqfile" || exit 1
-                printf "%s" "$value"
-            ' sh "$seqfile" "$lockfile" "$(date +%s%6N 2>/dev/null)" 2>/dev/null </dev/null)
-            case "$next" in ""|*[!0-9]*) seq=0 ;; *) seq=$next ;; esac
+        now=$(date +%s%N 2>/dev/null)
+        now=${now%???}
+        if exec 9>"$lockfile" 2>/dev/null; then
+            if flock -w 0.95 9 2>/dev/null; then
+                old=
+                if [ -r "$seqfile" ]; then IFS= read -r old <"$seqfile" || :; fi
+                case "$old" in
+                    ""|*[!0-9]*)
+                        case "$now" in ""|*[!0-9]*) now= ;; esac
+                        value=$now
+                        ;;
+                    *) value=$old ;;
+                esac
+                case "$value" in
+                    ""|*[!0-9]*) ;;
+                    *)
+                        value=$((value + 1))
+                        if printf '%s\n' "$value" >"$seqfile"; then seq=$value; fi
+                        ;;
+                esac
+                flock -u 9 2>/dev/null || :
+            fi
+            exec 9>&-
         fi
     fi
     curl --connect-timeout 0.5 --max-time 2 --silent --output /dev/null \
