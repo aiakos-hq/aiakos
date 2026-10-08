@@ -1,15 +1,21 @@
 # Story review: slice 10-5
 
-Reviewed at commit d87bc80. Stories: 10. Check: ok.
+Reviewed at commit 0450012. Stories: 10. Check: ok.
 
 ## Findings
 
-Round 3, author resolutions pending architect confirmation:
+Open: None.
+
+Round 3, resolutions read at 0450012. Confirmed: the stopped-seat start fixture (R3 and the notes
+of S2 and S3; the start cases of E2 and E3 stay admissible under R4, and their launch id and
+lifecycle are left to E4), and the positive Timeout, validator-compatible fixture commands and
+the status-free unknown-seat capture case (notes of S2 and S3). Both show in
+`story.sh show 10-5 2` and `3`. Items unchanged.
 
 - [x] S3 (context-gap): the notes of S2 and S3 put every StartSeat fixture on a seat made with RegisterSeat, but R1 makes such a seat occupied, and R4 (S4) then never runs a start on it (same launch Ready: Completed with no driver call; same launch not Ready: Rejected/SEAT_NOT_READY; another launch: Rejected/SEAT_ALREADY_RUNNING), so the held start, Unknown/STOPPED and start timeout cases of E3 and the start cases of E2 turn red in S4; on a stopped seat the launch id of the result also changes from the registered to the requested one. Fix: say in R3 and in the notes of S2 and S3 that a start fixture uses a seat registered and then stopped by a successful StopSeat, and that S2 and S3 do not assert the launch id or lifecycle of a start (E4 owns them). Resolution: R3 and S2/S3 notes require RegisterSeat followed by successful StopSeat before each start fixture; S2/S3 leave start launch-id and lifecycle assertions to E4.
 - [x] S2 (context-gap): three later checks change results that S2 and S3 fixtures produce, and `story.sh show` for 2 and 3 names none of them: a command without a positive Timeout is Rejected/INVALID_LAUNCH from S3; a command that fails `CommandValidator.Validate` against the scripted driver's capabilities (harness capability, launch mode, `command.send_keys` and allowlisted keys) is Rejected/UNSUPPORTED from S4; the CapturePane on an unknown seat that the notes prescribe for the minimal inventory is Rejected/SEAT_NOT_FOUND from S5 instead of the callback's result. Fix: say in the notes of S2 and S3 that every fixture command has a positive Timeout and passes the validator against the scripted driver's capabilities, and that the unknown-seat capture case asserts the inventory and envelope fields, not the status. Resolution: S2/S3 notes require positive Timeout and validator-compatible scripted-driver capabilities (except the explicit E3 invalid-timeout case); unknown-seat CapturePane asserts inventory/envelope fields without asserting status.
 
-Round 2, resolutions read at d87bc80. Confirmed: the shared Error message (R2, visible in story 3), the same-launch waiter (R4/E4), receipt-time checks (R4/E9), commands and a second stop while stopping (R3/E3), acceptance waits across removal (R6/E6). The FIFO fixture and the RegisterSeat fixture resolutions are as asked, but what was asked was not enough: see round 3.
+Round 2, resolutions read at d87bc80, before round 3. Confirmed: the shared Error message (R2, visible in story 3), the same-launch waiter (R4/E4), receipt-time checks (R4/E9), commands and a second stop while stopping (R3/E3), acceptance waits across removal (R6/E6). The FIFO fixture and the RegisterSeat fixture resolutions are as asked, but what was asked was not enough: see round 3.
 
 - [x] S3 (context-gap): R3 emits Rejected/SEAT_STOPPING and Failed/SEAT_STOPPING, but how their Error is built (`ErrorReasons.Create` with "Command rejected.") is a sentence of R4, owned by S4 and absent from `story.sh show 10-5 3`. Fix: move that sentence to R2 or R3, or give the message in R3. Resolution: R2 now owns fixed shared Error construction, visible to S3.
 - [x] S3 (context-gap): E3 needs a queued start and FIFO order, but R4 later rejects a start with another LaunchId on a pending seat at once (SEAT_ALREADY_RUNNING) and R9 rejects a second unfinished delivery (SEAT_BUSY) and a delivery to a seat that is not Ready, so an S3 test built on two starts or two deliveries turns red in S4 or S5. Fix: name in R3 and E3 the command combinations that stay queued under R4 and R9 (for example SendKeys after SendKeys, a start behind SendKeys on a stopped seat) and put the tie in the notes of S3. Resolution: R3/E3 and S3 notes name admissible SendKeys-based FIFO fixtures.
@@ -43,7 +49,8 @@ Round 1, resolved at ed2e93e (read and confirmed):
 - The size of S6 (R5 with C1) was not judged again in round 2.
 - A StartSeat that reuses the LaunchId of a launch already stopped, and the occupancy left by a queued start that a failed stop rejected: R4 names neither and no E row asks for them; not raised.
 - Whether the S7 removal case of E6 stays green under S8 for a changed instance: R6 and the notes of S7 name the tie; not traced further.
-- Nothing was built or run. Code read: `ErrorReasons.Create`, `CommandValidator.Validate`, the public members of `NodeEventBuffer`, `NodeIdentity` and the keys of `NodeLinkRegistry`. Only story 3 was rendered with `tools/story.sh show`.
+- The scripted stop of the S2 and S3 start fixtures returning an outcome that S4 counts as successful (Stopped, Killed or NotRunning): the notes say "successful StopSeat"; left to the tests seat.
+- Nothing was built or run. Code read: `ErrorReasons.Create`, `CommandValidator.Validate`, the public members of `NodeEventBuffer`, `NodeIdentity` and the keys of `NodeLinkRegistry`. Only stories 2 and 3 were rendered with `tools/story.sh show`.
 
 ## Author resolution, round 1
 
