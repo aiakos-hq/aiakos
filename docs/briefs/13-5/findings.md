@@ -1,6 +1,6 @@
 # Story review: slice 13-5
 
-Reviewed at commit e86819f. Stories: 6. Check: ok.
+Reviewed at commit 136253f. Stories: 6. Check: ok.
 
 ## Findings
 
@@ -15,6 +15,7 @@ Reviewed at commit e86819f. Stories: 6. Check: ok.
 
 - R4 and R5 were read against `SeatStateMachine.AttachNode`, `ApplyOverlay`, `ClearOverlay`, `ReconcileInventory`, `ReconcileMissingInventory` and `ApplyObservationGap` at e86819f, not run: the same-instance overlay holds with CatchUpSeq 25, and the I2 attach gives NextSeq 1, Overlay null, Present, Activity Unknown/observation-gap and one RequestCapture. The event path (states after seq 1..20, the overlay clearing at seq 25, Idle after TurnEnded) was not replayed.
 - Round 2 read only what changed since d63104c and what the two new findings depend on; the resolutions of the four round 1 findings were read and hold. 13-4 R13, R14 and R18 agree with R1 and R7: the capture follows `SeatActorReloaded`, which `SeatRegion.ChildLoaded` publishes only after the first load.
+- Round 3 read only the R5 and `NEW` changes of 136253f against `AttachNode`, `ReconcileMissingInventory`, `ApplyObservationGap` and `ApplySession`, not run: both resolutions hold. The mismatch attach leaves Activity Unknown/session-unknown, which R5 does not state and no output asserts. That a repeated I2 attach adds no capture follows from the same-instance branch of `AttachNode` emitting no effect; the pending/sent suppression of 13-4 R18 is not in `src` and was not checked.
 - Whether spec 0006 R35 wants an evidence capture at process start (R1 now says none) was not checked.
 - The source audit behind S1 was read and holds at 5bb5ce3: `SeatActor.EnsureLoadedAsync` loads and sends `SeatChildLoaded` without applying `OrchestratorRestarted`; `SeatRegion` spawns the startup keys and tracks `InitialLoadComplete`.
 - Which existing tests C1 turns red was not looked up; nothing was built or run.
