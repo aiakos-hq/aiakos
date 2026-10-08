@@ -12,10 +12,34 @@ public static class HarnessServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.TryAddSingleton<IHarnessStateProfile, ClaudeCodeStateProfile>();
-        services.TryAddSingleton<ClaudeCodeStateProfile>(static provider =>
-            provider.GetServices<IHarnessStateProfile>().OfType<ClaudeCodeStateProfile>().First());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHarnessStateProfile, ClaudeCodeStateProfile>());
+        services.TryAddSingleton<ClaudeCodeStateProfile>();
+        var profileAlias = new ServiceDescriptor(
+            typeof(IHarnessStateProfile),
+            ProfileAlias,
+            ServiceLifetime.Singleton);
+        if (!services.Any(descriptor => descriptor.ServiceType == typeof(IHarnessStateProfile)
+            && descriptor.ImplementationFactory == profileAlias.ImplementationFactory))
+        {
+            // Keep a previously registered default profile as the last registration while
+            // adding Claude to the enumerable profile set.
+            var firstProfile = -1;
+            for (var index = 0; index < services.Count; index++)
+            {
+                if (services[index].ServiceType == typeof(IHarnessStateProfile))
+                {
+                    firstProfile = index;
+                    break;
+                }
+            }
+            if (firstProfile >= 0)
+            {
+                services.Insert(firstProfile, profileAlias);
+            }
+            else
+            {
+                services.Add(profileAlias);
+            }
+        }
         services.TryAddSingleton<ClaudeCodeSettings>();
         services.TryAddSingleton<ClaudeCodeAdapter>();
         services.TryAddSingleton<IHarnessAdapter>(static provider =>
@@ -23,4 +47,7 @@ public static class HarnessServiceCollectionExtensions
 
         return services;
     }
+
+    private static ClaudeCodeStateProfile ProfileAlias(IServiceProvider provider) =>
+        provider.GetRequiredService<ClaudeCodeStateProfile>();
 }
