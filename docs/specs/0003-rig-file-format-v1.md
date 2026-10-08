@@ -1064,3 +1064,14 @@ ADRs recording the cross-cutting decisions of this spec:
   - **Still no `ResolvedRig`.** `Load` returns none until slice 3 (file references and the
     resolved rig); the sentence above said slice 2. AIK3001, AIK3002, AIK3004 and AIK3005 follow
     there.
+
+- **2026-10-08 — #14 closing amendments (chore #286):**
+  - **AC1, fixture.** The `tests/Aiakos.Spec.Tests/Fixtures/valid/full` fixture replaces the
+    worked `aiakos-dev` example as the loader acceptance fixture. It has three seats (one
+    human) and two resolved seat parameter sets; `LoadsFullRigWithoutDiagnostics` checks it.
+  - **AC4, diagnostic ownership.** AIK5010 is checked by #15's rig compatibility validation,
+    rather than a negative fixture for the rig loader in #14.
+  - **AC7, projection files.** The golden projection includes the skill's `.metadata` file
+    alongside `CLAUDE.md` and `SKILL.md`. `LoadProjectionIntegrationTests` checks the exact
+    paths and bytes, including `.metadata`, and the header's statement that text carries no
+    authority.
