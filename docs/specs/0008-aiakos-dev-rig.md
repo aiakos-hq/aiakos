@@ -124,8 +124,8 @@ R11–R13 are recorded in [ADR 0037](../adr/0037-team-pin-in-local-tool-manifest
   `.config/dotnet-tools.json` (tool `aiakos`, command `aiakos`, exact version). The lead runs the
   team with `dotnet aiakos …` from the Windows checkout of `main`; `dotnet run --project
   src/Aiakos.Cli` is the development build and is never used for the team (ADR 0008).
-- **R12** A CI workflow `rig-compat.yml` runs on pull requests that change `rigs/aiakos-dev/**` or
-  `.config/dotnet-tools.json`, and on `main`: `dotnet tool restore`, then `dotnet aiakos up --dry-run
+- **R12** A CI workflow `rig-compat.yml` runs on every pull request targeting `main`
+  and every push to `main`, without path filters: `dotnet tool restore`, then `dotnet aiakos up --dry-run
   rigs/aiakos-dev --env rigs/aiakos-dev/rig.env.example.yaml`. A PR that makes the rig
   unloadable by the pinned release fails (spec 0003 R32, D5). It becomes a required check once it
   has passed on `main`.
