@@ -59,6 +59,8 @@ public sealed class ClaudeCodeRegistrationTests
 
         Assert.Same(overrideProfile, provider.GetRequiredService<ClaudeCodeStateProfile>());
         Assert.Same(overrideProfile, provider.GetRequiredService<IHarnessStateProfile>());
+        Assert.Same(overrideProfile,
+            Assert.Single(provider.GetServices<IHarnessStateProfile>().OfType<ClaudeCodeStateProfile>()));
         Assert.Same(overrideSettings, provider.GetRequiredService<ClaudeCodeSettings>());
         Assert.Same(overrideAdapter, provider.GetRequiredService<ClaudeCodeAdapter>());
         Assert.Same(overrideAdapter, provider.GetRequiredService<IHarnessAdapter>());

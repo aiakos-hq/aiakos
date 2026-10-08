@@ -13,32 +13,15 @@ public static class HarnessServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddSingleton<ClaudeCodeStateProfile>();
-        var profileAlias = new ServiceDescriptor(
-            typeof(IHarnessStateProfile),
-            ProfileAlias,
-            ServiceLifetime.Singleton);
-        if (!services.Any(descriptor => descriptor.ServiceType == typeof(IHarnessStateProfile)
-            && descriptor.ImplementationFactory == profileAlias.ImplementationFactory))
+        var profileAlias = ServiceDescriptor.Singleton<IHarnessStateProfile, ClaudeCodeStateProfile>(
+            static provider => provider.GetRequiredService<ClaudeCodeStateProfile>());
+        var registrationCount = services.Count;
+        services.TryAddEnumerable(profileAlias);
+        if (services.Count > registrationCount)
         {
-            // Keep a previously registered default profile as the last registration while
-            // adding Claude to the enumerable profile set.
-            var firstProfile = -1;
-            for (var index = 0; index < services.Count; index++)
-            {
-                if (services[index].ServiceType == typeof(IHarnessStateProfile))
-                {
-                    firstProfile = index;
-                    break;
-                }
-            }
-            if (firstProfile >= 0)
-            {
-                services.Insert(firstProfile, profileAlias);
-            }
-            else
-            {
-                services.Add(profileAlias);
-            }
+            // Preserve an existing default profile while adding the Claude singleton to the set.
+            services.Remove(profileAlias);
+            services.Insert(0, profileAlias);
         }
         services.TryAddSingleton<ClaudeCodeSettings>();
         services.TryAddSingleton<ClaudeCodeAdapter>();
@@ -48,6 +31,4 @@ public static class HarnessServiceCollectionExtensions
         return services;
     }
 
-    private static ClaudeCodeStateProfile ProfileAlias(IServiceProvider provider) =>
-        provider.GetRequiredService<ClaudeCodeStateProfile>();
 }
