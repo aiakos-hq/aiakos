@@ -50,9 +50,8 @@
 # Passing work on (the seats use this in place of "rig queue handoff"):
 #   tools/story.sh hand <target> [--role <role>] [--item <qitem>] --summary "<one line>"
 #                       (--body "<text>" | --body-file <path>) [--evidence <path or link>]
-#                                         <target> is a pool (low, high), a seat (architect,
-#                                         reviewer, gate, router) or "maintainer", which is
-#                                         the terminal of desk-lead. A pool needs
+#                                         <target> is a pool (low, high) or a seat (architect,
+#                                         reviewer, gate, lead). A pool needs
 #                                         --role: a file of rigs/aiakos-delivery/roles/. The
 #                                         destination gets a clean conversation when it is idle
 #                                         and has nothing in progress, then the item. --item
@@ -60,7 +59,10 @@
 #                                         artifacts/hand.log records every delivery
 #   tools/story.sh events                 prints what changed on GitHub since the last look:
 #                                         merged pull requests, chores and bugs labelled
-#                                         ready. Each change once; the router runs it
+#                                         ready. Each change once; the lead runs it
+#   tools/story.sh allowance [--every <minutes>]
+#                                         one line with the Claude and Codex allowances as
+#                                         last reported; --every prints at most that often
 #
 # A slice is one brief: docs/briefs/<slice>/ with brief.md, items.tsv, stories.md and, while it
 # is reviewed, findings.md. A story is "<slice>-<n>" (for example 14-3-2); its issue title is
@@ -1049,8 +1051,9 @@ cmd_cleanup() {
 # Passing work to a seat of the delivery rig (rigs/aiakos-delivery/). A long conversation is
 # sent again with every request, so an item is delivered into an empty conversation where that
 # can be done: a fresh launch of the seat (rig seat launch --fresh --stop), for a pool seat, the
-# architect and the reviewer. OpenRig then sends the seat its startup text again. A busy seat
-# is never touched; its item is queued and the log says that nothing was cleared.
+# architect, the reviewer and the gate. OpenRig then sends the seat its startup text again. A
+# busy seat is never touched; its item is queued and the log says that nothing was cleared.
+# The lead is never cleared: the maintainer talks to it.
 RIG="${AIAKOS_RIG:-aiakos-delivery}"
 POOL_LOW="team-low1 team-low2"
 POOL_HIGH="team-high1 team-high2"
@@ -1079,7 +1082,7 @@ in_progress() {
 }
 
 cmd_hand() {
-  local usage='usage: story.sh hand <low|high|architect|reviewer|gate|router|maintainer> [--role <role>] [--item <qitem>] --summary "<one line>" (--body "<text>" | --body-file <path>) [--evidence <path or link>]'
+  local usage='usage: story.sh hand <low|high|architect|reviewer|gate|lead> [--role <role>] [--item <qitem>] --summary "<one line>" (--body "<text>" | --body-file <path>) [--evidence <path or link>]'
   local target="${1:-}" role="" item="" summary="" body="" body_file="" evidence=""
   [ $# -eq 0 ] || shift
   while [ $# -gt 0 ]; do
@@ -1108,9 +1111,8 @@ cmd_hand() {
     high)       pool="$POOL_HIGH"; clear="fresh" ;;
     architect)  dest="team-architect@$RIG"; clear="fresh" ;;
     reviewer)   dest="team-reviewer@$RIG"; clear="fresh" ;;
-    gate)       dest="team-gate@$RIG" ;;
-    router)     dest="desk-router@$RIG" ;;
-    maintainer) dest="desk-lead@$RIG"; [ -n "$evidence" ] || die "hand maintainer needs --evidence <path or link>: what the maintainer should look at" ;;
+    gate)       dest="team-gate@$RIG"; clear="fresh" ;;
+    lead)       dest="desk-lead@$RIG" ;;
     *)          die "$usage" ;;
   esac
   if [ -n "$pool" ]; then
@@ -1136,6 +1138,8 @@ cmd_hand() {
     [ -n "$dest" ] || dest="$best"
     [ -n "$dest" ] || die "hand: no seat of pool $target is running"
   fi
+  printf '%s\n' "$table" | awk -v s="$dest" '$1 == s { found = 1 } END { exit !found }' \
+    || die "hand: $dest is not running; nothing was handed over. See: rig ps --nodes --rig $RIG"
   if [ "$clear" != "no" ]; then
     state="$(printf '%s\n' "$table" | awk -v s="$dest" '$1 == s { print $2 }')"
     count="$(in_progress "$dest")" || true
@@ -1182,7 +1186,7 @@ cmd_hand() {
 }
 
 # What changed on GitHub since the last look: a merged pull request, or a chore or bug that
-# the maintainer labelled ready. Nothing reports these to the rig, so the router runs this at
+# the maintainer labelled ready. Nothing reports these to the rig, so the lead runs this at
 # the start of each move and acts on what it prints. Each change is printed once. The first
 # run only records what exists.
 cmd_events() {
@@ -1196,17 +1200,6 @@ cmd_events() {
   if ! gh issue list --repo "$REPO" --state open --label ready --limit 100 --json number,title,labels \
       --jq '.[] | select((.title | test("^[0-9]+-[0-9]+(-[0-9]+)?: ") | not) and ([.labels[].name] | any(. == "type/chore" or . == "type/bug"))) | "ready:\(.number)\tIssue #\(.number) (chore or bug) is labelled ready: \(.title)"' >> "$now"; then
     rm -f "$now" "$fresh"; die "events: cannot read the issues of $REPO"
-  fi
-  # An item that asked the maintainer to merge a pull request is answered by the merge.
-  if [ "${AIAKOS_NO_WRITE:-}" != "1" ] && command -v rig >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
-    rig queue list --destination "desk-lead@$RIG" --state pending,in-progress,blocked --full --limit 200 --json 2>/dev/null | node -e '
-      let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
-        let rows; try { rows = JSON.parse(s); } catch { return; }
-        for (const r of rows) { const m = /\/pull\/([0-9]+)\/?$/.exec(r.evidenceRef || ""); if (m) console.log(r.qitemId, m[1]); }
-      });' | while read -r item pr; do
-        grep -q "^merged:$pr	" "$now" || continue
-        rig queue update "$item" --state done --closure-reason no-follow-on --note "pull request #$pr is merged" >/dev/null 2>&1 || true
-      done
   fi
   if [ ! -f "$seen" ]; then
     cut -f1 "$now" > "$seen"
@@ -1225,6 +1218,65 @@ cmd_events() {
   rm -f "$now" "$fresh"
 }
 
+# The allowances of the two subscriptions, as the harnesses last reported them: Claude Code to
+# OpenRig (one file per Claude seat), Codex in its session log. "--every <minutes>" prints only
+# when that long has passed since the last print, or when a window is at 85% or more, so the
+# lead can run it at every move and pass the line on about twice an hour.
+cmd_allowance() {
+  local every="" last="$main_root/artifacts/allowance.last" line
+  if [ "${1:-}" = "--every" ]; then every="${2:-}"; [[ "$every" =~ ^[0-9]+$ ]] || die "usage: story.sh allowance [--every <minutes>]"; fi
+  command -v node >/dev/null 2>&1 || die "allowance: node is not on the PATH"
+  line="$(RIG="$RIG" OPENRIG_STATE="${OPENRIG_HOME:-$HOME/.openrig}/state/provider-usage" CODEX_SESSIONS="${CODEX_HOME:-$HOME/.codex}/sessions" node -e '
+    const fs = require("fs"), path = require("path");
+    const at = d => d.toLocaleString("en-GB", { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const win = (name, used, resets) => used == null ? name + " unknown" : name + " " + Math.round(used) + "%" + (resets ? " (resets " + at(resets) + ")" : "");
+    let worst = 0; const note = v => { if (typeof v === "number" && v > worst) worst = v; };
+    // Claude: the newest report of any Claude seat of this rig.
+    let claude = "Claude: unknown";
+    try {
+      const dir = process.env.OPENRIG_STATE;
+      const files = fs.readdirSync(dir).filter(f => f.endsWith("@" + process.env.RIG + ".json")).map(f => path.join(dir, f)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+      for (const f of files) {
+        const r = (JSON.parse(fs.readFileSync(f, "utf8")).rateLimits) || {};
+        if (!r.five_hour && !r.seven_day) continue;
+        const f5 = r.five_hour || {}, w = r.seven_day || {};
+        note(f5.usedPercent); note(w.usedPercent);
+        claude = "Claude: " + win("5h", f5.usedPercent, f5.resetsAt && new Date(f5.resetsAt)) + ", " + win("week", w.usedPercent, w.resetsAt && new Date(w.resetsAt)) + ", as of " + at(new Date(fs.statSync(f).mtimeMs));
+        break;
+      }
+    } catch {}
+    // Codex: the last rate limits in the newest session log.
+    let codex = "Codex: unknown";
+    try {
+      const logs = [];
+      const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith(".jsonl")) logs.push([fs.statSync(p).mtimeMs, p]); } };
+      walk(process.env.CODEX_SESSIONS);
+      logs.sort((a, b) => b[0] - a[0]);
+      for (const [, p] of logs.slice(0, 8)) {
+        const lines = fs.readFileSync(p, "utf8").split("\n");
+        let found = null;
+        for (let i = lines.length - 1; i >= 0 && !found; i--) {
+          if (!lines[i].includes("\"rate_limits\"")) continue;
+          try { const o = JSON.parse(lines[i]); const r = o.payload && o.payload.rate_limits; if (r && r.primary) found = [r, o.timestamp]; } catch {}
+        }
+        if (!found) continue;
+        const [r, ts] = found, p1 = r.primary || {}, p2 = r.secondary || {};
+        note(p1.used_percent); note(p2.used_percent);
+        codex = "Codex: " + win("5h", p1.used_percent, p1.resets_at && new Date(p1.resets_at * 1000)) + ", " + win("week", p2.used_percent, p2.resets_at && new Date(p2.resets_at * 1000)) + ", as of " + at(new Date(ts));
+        break;
+      }
+    } catch {}
+    console.log(worst + "\t" + (worst >= 85 ? "LOW ALLOWANCE. " : "Allowances. ") + claude + ". " + codex + ".");
+  ')" || die "allowance: could not read the allowances"
+  if [ -n "$every" ] && [ "${line%%$'\t'*}" -lt 85 ] 2>/dev/null && [ -f "$last" ] \
+      && [ $(( $(date +%s) - $(cat "$last") )) -lt $(( every * 60 )) ]; then
+    return
+  fi
+  mkdir -p "$main_root/artifacts"
+  [ -z "$every" ] || date +%s > "$last"
+  printf '%s\n' "${line#*$'\t'}"
+}
+
 case "${1:-}" in
   check)      cmd_check "${2:-}" ;;
   split)      cmd_split "${2:-}" ;;
@@ -1233,6 +1285,7 @@ case "${1:-}" in
   status)     cmd_status ;;
   hand)       shift; cmd_hand "$@" ;;
   events)     cmd_events ;;
+  allowance)  cmd_allowance "${2:-}" "${3:-}" ;;
   ready)      cmd_ready "${2:-}" "${3:-}" "${4:-}" ;;
   next)       cmd_next "${2:-}" ;;
   start)      cmd_start "${2:-}" "${3:-}" ;;

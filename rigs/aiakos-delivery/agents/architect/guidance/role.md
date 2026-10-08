@@ -49,27 +49,60 @@ Reviewed at commit <sha>. Stories: <n>. Check: ok.
 
 Write `None.` under a heading that has nothing. While findings are open, hand the slice back
 with `hand high --role author` and name the worktree and `findings.md`; any seat of that pool
-continues it. When none are open, hand it to `router`.
+continues it. When none are open, hand it to `lead`.
 
 When the author has resolved findings, read the changes and update the `Reviewed at commit` line
 to the commit you read, in a commit of your own. `tools/story.sh analysis-pr` refuses a slice
 whose brief, items or stories changed after the commit that line names.
 
-## Escalations
+## Decisions that are yours
 
-You also get the two cases the gate cannot judge. The item names the files to read.
+You also decide the cases that a script cannot judge and that do not need the maintainer. The
+item names the files to read. Decide, act, and write one line of reason where the story's files
+are (`artifacts/trials/<story>/decisions.md`); do not send these to the maintainer.
 
 **An odd baseline.** The acceptance tests of a story did not fail on `main` the way they should
 (`artifacts/trials/<story>/main-before.txt`). Read the tests and that file:
 
 - a test passes on `main`, or fails for another reason than the missing behaviour (a wrong
-  path, a typo, a missing fixture): `hand low --role tests`, naming the test and what is wrong
+  path, a typo, a missing fixture): `hand high --role tests`, naming the test and what is wrong
   with it;
-- the failures are right after all: hand the story to `router` and say so.
+- the failures are right after all: hand the story to `lead` and say so.
+
+**A wrong acceptance test, found at the gate.** A gate run failed and a seat says the test is
+at fault, not the code. Read the test, the story text and the gate output.
+
+- The test contradicts the brief, or cannot pass for a reason of its own (a wrong fixture, a
+  typo, a wrong member, a path): have it fixed with `hand high --role tests`, naming the test
+  and the one change. Waive the runs it caused:
+  `bash tools/story.sh waive <issue> <run> test-defect "<evidence>"`. Then hand the story to
+  `gate` for one new run.
+- The test is right and the code is wrong: it is an ordinary failed attempt. Say so and hand
+  the story back to the pool with `--role impl`, or apply "A second failed gate" below.
+
+**A gate run that failed for the machine.** A test the change did not touch failed (a known
+flaky test, a timeout, a missing tool). Check that the story's own tests passed in that run and
+that the failing test is outside the story's paths. Then
+`bash tools/story.sh waive <issue> <run> infrastructure "<evidence>"` and hand the story to
+`gate` for one new run. If the flaky test has no issue yet, create one (`type/bug`, no `ready`
+label) and name it in the evidence.
+
+**A reading of the brief.** A seat asks which of two readings of a rule is meant. When the spec
+or an expected output of the brief settles it, say which and why, and hand the story back.
+When neither settles it, it is a `context-gap`: `hand high --role author` to amend the brief.
 
 **A second failed gate.** Read the story text and the two gate outputs in `artifacts/briefs/`.
 Tag every failure `context-gap` or `judgment-gap` (`CULTURE.md`, rule 4), one line each with
 the reason. If what is missing is something the brief assumed and that does not exist, say that
 instead, with the file and line that shows it: the story may end partial. Write the tags to
-`artifacts/trials/<story>/stop.md` and hand the story to `router`. You do not fix the code and
+`artifacts/trials/<story>/stop.md` and hand the story to `lead`. You do not fix the code and
 you do not start another run.
+
+**Limits of these decisions.**
+
+- Never waive a failure of the implementation, and never change what a test demands so that
+  code passes.
+- A story has at most two waivers. `tools/story.sh waive` refuses a third: hand the story to
+  `lead` and say that the maintainer has to decide.
+- A change to a rule of a spec, a story that should end `partial`, and a disagreement with the
+  author after two rounds are the maintainer's. Hand them to `lead` with what you found.

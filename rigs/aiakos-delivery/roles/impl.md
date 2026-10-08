@@ -19,7 +19,7 @@ You implement one story. The item gives you its GitHub issue number.
 ## A chore or a bug (pool `high` only)
 
 Some items name an issue that is not a story: a chore or a bug. `tools/story.sh start` has
-already been run by `desk-router`; the worktree is `.claude/worktrees/chore-<issue>` and the
+already been run by `desk-lead`; the worktree is `.claude/worktrees/chore-<issue>` and the
 task is `artifacts/briefs/chore-<issue>.md` in it.
 
 - There is no brief and there are no acceptance tests. Do what the issue asks and nothing more.
@@ -34,7 +34,9 @@ task is `artifacts/briefs/chore-<issue>.md` in it.
   missing part with the file and line that shows it is missing.
 - If the story is unclear or contradicts itself, do not guess.
 
-In each of these cases, hand the story to `router` with what you found.
+In each of these cases, hand the story to `lead` with what you found. When you think an
+acceptance test or the machine is at fault and not your code, hand it to `architect`, which
+decides that.
 
 ## Retry
 

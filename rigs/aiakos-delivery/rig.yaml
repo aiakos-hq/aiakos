@@ -2,20 +2,19 @@
 # Start it from the repository root in WSL:  rig up rigs/aiakos-delivery/rig.yaml
 #
 # Models, in one place. Change a seat's model on its `model:` line below.
-#   desk   lead         claude-sonnet-5-5   the maintainer's console; gets only what needs the maintainer
-#   desk   router       claude-haiku-5-5    receives every report and makes the next move
+#   desk   lead         claude-sonnet-5-5   routes the work and talks to the maintainer
 #   team   architect    claude-opus-5-5     checks the analysis; takes escalations
 #   team   reviewer     claude-opus-5-5     reads the diff once
 #   team   gate         claude-haiku-5-5    runs the baseline and the gate (a script decides)
-#   team   low1 low2    gpt-6-luna          Codex Pool Low: implement stories, write acceptance
-#                                           tests
-#   team   high1 high2  gpt-6.1-sol         Codex Pool High: brief and split, escalated stories,
-#                                           chores and bugs
+#   team   low1 low2    gpt-6-luna          Codex Pool Low: implement stories
+#   team   high1 high2  gpt-6.1-sol         Codex Pool High: brief and split, acceptance tests,
+#                                           escalated stories, chores and bugs
 #
 # A seat of a pool has no role of its own: each item names the role file to read
 # (rigs/aiakos-delivery/roles/). `tools/story.sh hand` picks the seat and clears its
-# conversation before it delivers the item. Every start of the rig begins with empty
-# conversations (restore_policy: relaunch_fresh).
+# conversation before it delivers the item; the same for architect, reviewer and gate. The
+# lead keeps its conversation, in a 200k window (agents/shared/runtime). Every start of the
+# rig begins with empty conversations (restore_policy: relaunch_fresh).
 version: "0.2"
 name: aiakos-delivery
 summary: >
@@ -48,19 +47,14 @@ pods:
         permission_policy: builtin:auto
         restore_policy: relaunch_fresh
         cwd: "../.."
-      - id: router
-        agent_ref: "local:agents/router"
-        profile: default
-        runtime: claude-code
-        model: claude-haiku-5-5
-        effort: high
-        permission_policy: builtin:auto
-        restore_policy: relaunch_fresh
-        cwd: "../.."
-    edges:
-      - kind: delegates_to
-        from: lead
-        to: router
+        # Remote Control, so the maintainer can reach the lead from claude.ai or the phone.
+        startup:
+          actions:
+            - type: slash_command
+              value: "/remote-control aiakos-lead"
+              phase: after_ready
+              idempotent: true
+    edges: []
 
   # The seats that do the work. Nobody has to watch them one by one.
   - id: team
@@ -130,23 +124,23 @@ pods:
 
 edges:
   - kind: delegates_to
-    from: desk.router
+    from: desk.lead
     to: team.architect
   - kind: delegates_to
-    from: desk.router
+    from: desk.lead
     to: team.reviewer
   - kind: delegates_to
-    from: desk.router
+    from: desk.lead
     to: team.gate
   - kind: delegates_to
-    from: desk.router
+    from: desk.lead
     to: team.low1
   - kind: delegates_to
-    from: desk.router
+    from: desk.lead
     to: team.low2
   - kind: delegates_to
-    from: desk.router
+    from: desk.lead
     to: team.high1
   - kind: delegates_to
-    from: desk.router
+    from: desk.lead
     to: team.high2
