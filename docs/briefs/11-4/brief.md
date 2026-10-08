@@ -2,7 +2,7 @@
 id: 11-4
 title: "#11 slice 4 — stop, process tree and liveness"
 issue: 11
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Node/Sessions/, tests/Aiakos.Node.Testing/, tests/Aiakos.Node.Tests/Sessions/]
 date: 2026-10-08
