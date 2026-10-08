@@ -31,9 +31,9 @@ and capture have a component TmuxSessionInput; this slice does not depend on 11-
 11-2-5 (#215, direct launch commands) is open; TmuxLaunchCommands and TmuxSessionStarter are
 absent on this baseline. 11-2-6 (start lifecycle), 7 (attach), 8 (diagnostics) are described
 in the approved 11-2 brief but absent. Their contracts may be assumed only after their stories
-merge. S1–S5 below can proceed on the baseline with scripted handles/registry. S6 MUST wait
+merge. S1–S6 below can proceed on the baseline with scripted handles/registry. S7 and S8 MUST wait
 for 11-2-5 and 11-2-6 to merge; do not implement their missing components or create stubs.
-11-2-7/8 are not prerequisites; preserve their contracts if they merge before S6.
+11-2-7/8 are not prerequisites; preserve their contracts if they merge before S7.
 
 11-2's starter accepts an Action<SessionHostEvent> callback; its existing dead-replacement
 path persists RegistryExit.Reported, calls the callback, then marks Reported=true. That contract
@@ -119,7 +119,7 @@ public sealed class TmuxSessionStopper
 }
 ```
 
-S6 adds an optional trailing `SessionLifecycle? lifecycle = null` to the existing
+S7 adds an optional trailing `SessionLifecycle? lifecycle = null` to the existing
 TmuxSessionStarter constructor. Old callers compile with unchanged behavior. It is only a
 shared start/stop lock and registration seam, not a replacement for the existing publish callback.
 
@@ -148,6 +148,12 @@ C1. When the optional lifecycle is supplied, TmuxSessionStarter.StartAsync holds
     Without lifecycle its existing behavior is unchanged. TmuxSessionStopper uses the same
     lifecycle lock; it does not wait for any input gate. A start in progress completes before stop
     observes its result. Concurrent stops for one name serialize; different names run independently.
+
+C2. Explicit proposed narrowing of spec 0004 R30, requiring maintainer approval of this analysis:
+    socket recovery signals only a server identity learned from an earlier reachable private socket;
+    do not discover a server by argv/socket-name heuristics after restart. With no remembered server
+    and a matching live root, remain degraded without signals or vanish, per R8. Automatic recovery
+    of a socket deleted before the watcher first runs is deferred; never claim R30 fully implemented.
 
 ## Rules
 
@@ -205,6 +211,8 @@ R5. SessionLifecycle retains registered handles keyed by session name with ordin
     handle), preserve all other fields, write Exit(code,signal,now,false), Publish(PaneExited),
     then write Exit.Reported=true. Existing matching Reported=true emits nothing. Retry of a
     matching Reported=false exit uses its recorded time/status, not a new timestamp.
+    A writable handle with no registry entry -> NotFound,"Session was not found.",false
+    without persistence or event.
     A mismatching registry -> NotFound,"Session was not found.",false without overwrite/event.
     Missing -> SessionVanished once per registered launch in this process, without deleting
     registry or inventing exit status. After a terminal event, suppress subsequent terminal events
@@ -223,17 +231,22 @@ R6. Publish synchronously accepts an event into an in-memory FIFO, deduplicating
     and permits retry. As in 11-2 there is no transactional outbox: enqueue and Reported persistence
     can be interrupted by a crash; do not promise exactly-once external delivery across that window.
 
-R7. Watcher TickAsync never overlaps another tick; RunAsync ticks immediately, then waits
+R7. Watcher TickAsync serializes calls with a cancellation-aware gate; a concurrent caller
+    waits, then runs a complete tick (it does not skip polling); RunAsync ticks immediately, then waits
     PollInterval after each completed tick. On successful poll call ObserveAsync for each observation.
     Poll/observation failure logs Warning "Session host watcher degraded: {ErrorCode}" and marks
-    an internal degraded flag; continue next tick, no fabricated events. On first successful full
+    an internal degraded flag. An observation failure does not stop the remaining observations:
+    attempt each in supplied order, and classify the whole tick as degraded if any failed.
+    A failed poll has no observations to process. Continue next tick, no fabricated events. On first successful full
     tick after degradation log Information "Session host watcher recovered.". Cancellation exits
     promptly, not degradation. Watcher is an explicitly run component, not NodeProgram registration.
     Events use TimeProvider UTC. Kept dead panes and repeated ticks publish only once through R5/R6.
 
 R8. On a successful reachable poll with registered live handles, remember the private server's
     identity by display-message,-p,"#{pid}" through this same TmuxClient and matching that positive
-    PID in a same-user snapshot (GetServerAsync returns ProcessInfo or null). No discovery by
+    PID in a same-user snapshot (GetServerAsync returns ProcessInfo or null). Run GetServerAsync
+    exactly once on every successful reachable poll containing at least one Alive observation,
+    before observing any terminal rows; otherwise do not call it. No discovery by
     argv pattern. This binds the remembered PID/start time to the private socket that answered.
     On no-server with registered handles, fresh snapshots must still contain that server identity
     and at least one registered live root identity before attempting signals.SendAsync(server PID,
@@ -242,8 +255,10 @@ R8. On a successful reachable poll with registered live handles, remember the pr
     Defer all Missing events while the verified server still exists; mark degraded and poll next
     tick. Do not kill the server, delete a socket, start a server or mutate pane environment.
     After a successful poll reset the episode, preserve handles and publish no vanish for recovered
-    panes. If no remembered server or it is gone/reused, no recovery signal; the no-server Missing
-    observations may publish vanish. An unreachable server still present after the attempt remains
+    panes. If no remembered server, take a fresh snapshot: while any registered root identity
+    still matches, send no signal and defer all Missing events as degraded; if none matches,
+    Missing observations may publish vanish. If the remembered server is gone/reused, send no
+    signal and permit Missing observations even when a root remains. C2 names the R30 narrowing. An unreachable server still present after the attempt remains
     degraded/unknown (not vanished); status independently remains Missing per R3. Identification
     failures emit no events and retry next tick. Record no server identity on disk in this slice.
 
@@ -261,7 +276,9 @@ R10. For Alive, snapshot/Expand before graceful action; require the matching roo
     NotFound before signals. Default/explicit signal is sent only to root via IProcessSignals;
     Custom invokes the callback once with handle/ct and never sends automatic graceful input.
     Wait for Exited/Missing by polling status every min(100 ms, remaining Grace), starting with an
-    immediate check; Grace zero skips delay. Unknown is not proof of exit. Rescan/Expand before
+    immediate check; on every grace poll take a snapshot and Expand before querying status,
+    retaining discovered identities even if the root exits on that poll. Grace zero skips delay.
+    Unknown is not proof of exit. Rescan/Expand before
     each signal round, retaining every prior identity. If harness still Alive/Unknown at deadline,
     SIGKILL every surviving tracked identity -> Killed. If Exited/Missing during grace, SIGTERM
     every surviving tracked non-root identity, wait ChildGrace with snapshots every <=100 ms,
@@ -297,6 +314,10 @@ R12. Final cleanup occurs only if there are no leftovers, no earlier error and a
     tmux/registry evidence; no synthetic 0 or 9. Errors after a change are returned with the
     established outcome and no evidence deletion. Tmux failures before mutation throw normally.
 
+R13. Add permanent isolated real-tmux verification of the merged components using T7. This story
+    changes tests only, not production behavior. A failure is reported with the exact scenario and
+    evidence to lead; do not repair production rules or create missing prerequisites in this story.
+
 ## Expected outputs: exact text
 
 In fixtures use handle ("seat-id","launch-a","demo_worker","$1","%2",100,10,false).
@@ -310,12 +331,12 @@ Exact error strings and logs below are fixed; tests do not match arbitrary nativ
 | `E2` | Send to matching, absent, reused, errno ESRCH/EPERM identities | Sent, Gone, Reused, Gone, Failed respectively; no syscall for absent/reused; invalid -> InvalidArgument,"Invalid process signal request.",false |
 | `E3` | Alive; dead status 7/empty signal; dead empty/9; empty/0; timeout; no server | Alive/null/null; Exited/7/null; Exited/null/9; Exited/null/null; Unknown reason "tmux invocation timed out."; Missing/null/null |
 | `E4` | Poll two handles and unrelated row; malformed row; failed invocation | observations match supplied handles only; malformed -> TmuxFailed,"Pane listing could not be read.",true and zero observations; failure has zero observations/events |
-| `E5` | Exited repeated; Reported=true; vanished repeated; stale registry | one PaneExited(7,null) and persisted Reported=true; no duplicate; one SessionVanished; mismatch -> NotFound,"Session was not found.",false without overwrite |
+| `E5` | Exited repeated; Reported=true; vanished repeated; stale registry; writable no-entry | one PaneExited(7,null) and persisted Reported=true; no duplicate; one SessionVanished; mismatch -> NotFound,"Session was not found.",false without overwrite; writable no-entry -> same NotFound and no event |
 | `E6` | Publish A twice, B once; cancel reader; second concurrent reader; dispose | FIFO A,B exactly once; new reader drains buffered events; "A session event reader is already active."; disposed publish "Session lifecycle is disposed." and no acceptance |
-| `E7` | Failed tick then success; repeated dead tick | Warning "Session host watcher degraded: TmuxTimeout"; Information "Session host watcher recovered."; one exit event, pane retained |
-| `E8` | Known server 300/start30; no-server, roots alive; repeated unreachable; recovery; reused 300 | one SIGUSR1(300,30,10) per episode; Information "Recovering tmux socket for server 300."; zero vanish; repeated unreachable zero additional signals; reused server zero signal and Missing observations permitted |
+| `E7` | Failed tick then success; repeated dead tick | Warning "Session host watcher degraded: TmuxTimeout"; Information "Session host watcher recovered."; one exit event, pane retained; first handle NotFound logs Warning "Session host watcher degraded: NotFound" and does not prevent second handle exit; concurrent tick waits then polls |
+| `E8` | Known server 300/start30; no-server, roots alive; repeated unreachable; recovery; reused 300 | one SIGUSR1(300,30,10) per episode; Information "Recovering tmux socket for server 300."; zero vanish; repeated unreachable zero additional signals; reused server zero signal and Missing observations permitted; unremembered server/live root -> zero signal, zero vanish, degraded; no matching roots -> vanish permitted; exactly one GetServer call per reachable tick with Alive, none otherwise |
 | `E9` | Initially dead/missing, read-only handle, invalid duration, wrong launch | NotRunning with recorded nullable status and zero children; read-only permitted; InvalidArgument,"Invalid stop request.",false; wrong launch NotFound without deletion/signal |
-| `E10` | TERM exits root; TERM ignored; child setsid; late fork | Stopped versus Killed; initial and rescanned descendants signalled; unrelated 200 survives; children counted distinctly; no kill-session while live |
+| `E10` | TERM exits root; TERM ignored; child setsid; late fork | Stopped versus Killed; initial and rescanned descendants signalled; root initially alone, child appears on a grace poll, root then exits -> child retained and signalled to completion; unrelated 200 survives; children counted distinctly; no kill-session while live |
 | `E11` | Tracked 102/12 remains after verification; PID reused; callback throws sentinel | Leftovers=[102], LeftoverProcesses,"Processes survived stop.",false,pids="102"; reused PID omitted; callback failure returns TmuxFailed,"Stop did not complete.",false, no sentinel/no cleanup |
 | `E12` | Stop observes exit7/empty signal then removal; dead reverify becomes alive or launch changes | PaneExited(7,null) before kill-session and registry deletion; stale/alive reverify prevents removal and returns safe partial error |
 | `E13` | Start held in creation, stop arrives; concurrent input gate held | stop waits for committed handle then signals it; input gate does not delay stop; old starter callers unchanged; new handle registered once |
@@ -334,17 +355,24 @@ Unit tests run without tmux on all OS; Linux syscall tests and real tests dynami
     stale session/launch/PID/start time, no-server versus timeout and parser failure, empty exit
     fields and signal 0/9. GetServer verifies recorded private server via exact #{pid} command.
 - T3. Permanent lifecycle tests cover matching persistence before enqueue/after enqueue, retry of
-    Reported=false, persisted true, read-only/no-entry, registry mismatch, starter callback dedupe,
+    Reported=false, persisted true, read-only/no-entry, writable/no-entry NotFound without event, registry mismatch, starter callback dedupe,
     reader ownership/cancellation/FIFO, disposed publication and per-name locking. State explicitly
     in test comments that process-crash outbox atomicity is not claimed.
 - T4. Permanent watcher tests use fake time and scripted observer IO: immediate tick/interval,
-    no overlap, errors produce no events, recovery logging, one exit/vanish, remembered server
-    missing/reused, SIGUSR1 once, no signals to unremembered server, no input/kill-server.
-- T5. Permanent stopper tests cover validation-before-mutation, read-only stop, stale handle,
-    graceful success/ignored TERM/custom callback, zero grace, ChildGrace default/zero, late fork,
-    reparent/setsid, reused PIDs, leftovers, signal failures, safe partial reports and cancellation
-    before/after boundary; dead cleanup order/reverify, no cleanup on unknown/failed verification,
-    matching entry deletion only, outcome/status/counts and name-lock release on every exit.
+    concurrent call waits then polls, first observation NotFound still processes second exit
+    and marks tick degraded, poll errors produce no events, recovery logging, one exit/vanish, remembered server
+    missing/reused, SIGUSR1 once, unremembered/live-root defers vanish without signals,
+    unremembered/no-root permits vanish, exact GetServer call schedule, no input/kill-server.
+- T5. Permanent not-running stopper helper tests cover shared request validation before mutation,
+    read-only handles, stale handles, dead cleanup order/reverify, matching entry deletion only,
+    unknown status, nullable recorded exit fields, name-lock release on every exit and failures
+    before/after removal. Use an internal not-running cleanup helper called under an existing
+    lifecycle lease, with no recursive acquisition; S6 builds the public StopAsync around it.
+- T8. Permanent live stopper tests cover graceful success/ignored TERM/custom callback, zero grace,
+    ChildGrace default/zero, root initially alone then forks on a grace poll and exits leaving the
+    tracked child, reparent/setsid, reused PIDs, leftovers, signal failures, safe partial reports,
+    cancellation before/after boundary, no cleanup on unknown/failed verification, outcome/counts
+    and lease release. S6 reuses S5 validation and cleanup without changing their tested behavior.
 - T6. Permanent integrated start/stop tests use the actual starter only after prerequisites merge,
     shared lifecycle and blocking scripted runner. Start holds creation, stop waits, different seats
     proceed, input operations remain independent, cancelled waiter mutates nothing, constructor
@@ -361,12 +389,14 @@ Unit tests run without tmux on all OS; Linux syscall tests and real tests dynami
     bounded assertion timeout for scheduling, record observed latency). Teardown may kill-server
     only the unique test socket; retain recorded process identities to clean failed test children.
     Never inspect or signal owner sessions. Record tmux version; do not claim unrun 3.4 coverage.
+    Also start a watcher only after deleting its test socket: with a live recorded root it must
+    stay degraded, send no signal and emit no vanish (C2); this is not proof of restart recovery.
 
 ## Definition of done
 
 - `dotnet build -c Release` in the story worktree: zero warnings/errors.
 - `dotnet test --project tests/Aiakos.Node.Tests -c Release`: existing and new unit tests green.
-- For S6 run opt-in real tests with AIAKOS_TEST_TMUX=1; skipped tests are not proof of real behavior.
+- For S8 run opt-in real tests with AIAKOS_TEST_TMUX=1; skipped tests are not proof of real behavior.
 - LF, UTF-8 without BOM, final newline; one commit on the story branch, subject
   `feat(node): <story title> (<story ID>, #11)`. Body names silent choices and scoped risk evidence.
 - Do not push or open a PR. Required prerequisites absent -> report the missing capability; do

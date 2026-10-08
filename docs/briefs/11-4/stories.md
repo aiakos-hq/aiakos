@@ -25,23 +25,39 @@ notes: Uses existing RegistryExit. ObserveAsync takes a lease; S5 uses its inter
 ## S4: Liveness watcher and private socket recovery
 goal: Polling emits terminal events once and restores a missing socket through the recorded server identity.
 depends: S1, S2, S3
-owns: R7, R8
+owns: R7, R8, C2
 outputs: E7, E8
 tests: T4
 notes: R4 supplies observations, R5/R6 own publication, R2 protects SIGUSR1. Learn identity through the responding private socket; no node registration or automatic seat action.
 
-## S5: Verified process-tree stop and dead cleanup
-goal: Explicit stop terminates tracked identities, reports partial progress and leftovers, and removes only a verified dead matching session.
-depends: S1, S2, S3
-owns: R9, R10, R11, R12
-outputs: E9, E10, E11, E12
+## S5: Not-running stop validation and evidence cleanup
+goal: Shared stop validation and an internal leased cleanup helper remove only verified dead or missing launches.
+depends: S2, S3
+owns: R9, R12
+outputs: E9, E12
 tests: T5
-notes: One stop state machine. R1/R2 provide expansion/signals, R3 status, R5 the name lease and non-locking exit helper. Never recursively acquire ObserveAsync. Scripted handles allow merging before the starter exists; R11 defines a conservative outcome with error on early partial failure.
+notes: Implement internal helpers for request/registry validation and the not-running cleanup path; public StopAsync is completed in S6. No temporary public Alive behavior or missing live-path stub. Test helpers directly using the existing test friend assembly. R12 is a reusable postcondition; S6 invokes it only after successful live verification. Never recursively acquire ObserveAsync.
 
-## S6: Start-stop lifecycle integration and real tmux proof
-goal: The real starter shares lifecycle exclusion/registration with opt-in end-to-end evidence for exit, stop and socket recovery.
-depends: S3, S4, S5
+## S6: Live process-tree termination and partial reports
+goal: Public StopAsync uses the merged validation/cleanup helpers and terminates tracked live identities with verified leftovers.
+depends: S1, S2, S3, S5
+owns: R10, R11
+outputs: E10, E11
+tests: T8
+notes: Reuse S5 for validation, initial NotRunning and final cleanup; this story owns graceful waits, identity tracking, signal rounds and the partial-report boundary. Grace polling includes snapshots before status. No cleanup on a failed live verification.
+
+## S7: Start-stop lifecycle integration
+goal: The actual starter shares lifecycle exclusion and registers committed handles while preserving old callers.
+depends: S3, S6
 owns: C1
 outputs: E13
-tests: T6, T7
-notes: MERGE PREREQUISITES: 11-2-5 (#215) and 11-2-6 must merge before baseline/ready; no missing starter/launch stubs. C1 adds an optional constructor parameter preserving existing serialization/callbacks. T7 covers AC7/8/10/16 on unique sockets. 11-2-7/8 are not prerequisites; preserve their contracts if present. No DI/facade.
+tests: T6
+notes: MERGE PREREQUISITES: 11-2-5 (#215) and 11-2-6 must merge before baseline/ready. No launch/starter stubs. Optional trailing constructor parameter; retain callback and existing serialization. No DI/facade.
+
+## S8: Isolated real tmux lifecycle verification
+goal: Permanent opt-in tests prove exit, stop, socket recovery and vanished-server behavior on unique test sockets.
+depends: S4, S6, S7
+owns: R13
+outputs: -
+tests: T7
+notes: Tests only; R13 makes the verification requirement explicit. Actual merged starter required. Run AIAKOS_TEST_TMUX=1 and report version/latency; skipped tests are not proof. Production failures go to lead without extending this story. Includes C2 cold-watcher degraded case.
