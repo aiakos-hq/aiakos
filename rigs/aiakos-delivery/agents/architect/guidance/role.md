@@ -47,10 +47,29 @@ Reviewed at commit <sha>. Stories: <n>. Check: ok.
 - <what you did not verify>
 ```
 
-Write `None.` under a heading that has nothing. Hand the slice back to the author seat that
-handed it to you while
-findings are open, and to `lead-lead` when none are.
+Write `None.` under a heading that has nothing. While findings are open, hand the slice back
+with `hand high --role author` and name the worktree and `findings.md`; any seat of that pool
+continues it. When none are open, hand it to `router`.
 
 When the author has resolved findings, read the changes and update the `Reviewed at commit` line
 to the commit you read, in a commit of your own. `tools/story.sh analysis-pr` refuses a slice
 whose brief, items or stories changed after the commit that line names.
+
+## Escalations
+
+You also get the two cases the gate cannot judge. The item names the files to read.
+
+**An odd baseline.** The acceptance tests of a story did not fail on `main` the way they should
+(`artifacts/trials/<story>/main-before.txt`). Read the tests and that file:
+
+- a test passes on `main`, or fails for another reason than the missing behaviour (a wrong
+  path, a typo, a missing fixture): `hand low --role tests`, naming the test and what is wrong
+  with it;
+- the failures are right after all: hand the story to `router` and say so.
+
+**A second failed gate.** Read the story text and the two gate outputs in `artifacts/briefs/`.
+Tag every failure `context-gap` or `judgment-gap` (`CULTURE.md`, rule 4), one line each with
+the reason. If what is missing is something the brief assumed and that does not exist, say that
+instead, with the file and line that shows it: the story may end partial. Write the tags to
+`artifacts/trials/<story>/stop.md` and hand the story to `router`. You do not fix the code and
+you do not start another run.

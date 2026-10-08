@@ -61,7 +61,7 @@ edit docs there) and `aiakos-hq/.github` (org profile, CONTRIBUTING, SECURITY, C
 - **Slices and stories** (stage A): an M1 issue is implemented as several slices. A slice is one
   **brief**, `docs/briefs/<issue>-<n>/brief.md`, written from
   [`docs/briefs/TEMPLATE.md`](docs/briefs/TEMPLATE.md): a closed description in which every rule,
-  change, expected output and test is an item with an ID (`items.tsv`). The `author` seat splits
+  change, expected output and test is an item with an ID (`items.tsv`). A seat in the `author` role splits
   the brief into small **stories** (`stories.md`), a script checks the split, the `architect`
   seat writes `findings.md`, and merging that analysis is its approval. Stories are sized for a
   Sonnet-level implementer; a story goes to a stronger model only when it cannot be split
@@ -73,7 +73,7 @@ edit docs there) and `aiakos-hq/.github` (org profile, CONTRIBUTING, SECURITY, C
   gate. Only a failed acceptance test, an exception, a leaked secret or an earlier test turned
   red blocks a story; anything else becomes a new item. One retry at most, and no follow-up
   briefs. Judgment is checked by another vendor: Codex writes and implements, Claude
-  checks the analysis and reads the diff; the gate is a script that a Codex seat runs. The whole flow, with the seats and the
+  checks the analysis and reads the diff; the gate is a script that the `gate` seat runs. The whole flow, with the seats and the
   definitions of ready, done and partial, is in
   [`docs/workflow.md`](docs/workflow.md); the index of briefs is
   [`docs/briefs/README.md`](docs/briefs/README.md). `tools/story.sh` is where the rules are
@@ -82,7 +82,7 @@ edit docs there) and `aiakos-hq/.github` (org profile, CONTRIBUTING, SECURITY, C
   the earlier slice review loop (`tools/slice.sh`, `/slice`, follow-up briefs): it is removed.
 
 - **Chores and bugs** (`type/chore`, `type/bug`) that change no spec or brief rule have no brief:
-  once the maintainer labels one `ready`, the `senior` seat does it, gated by the build and every
+  once the maintainer labels one `ready`, a seat of the stronger Codex pool does it, gated by the build and every
   existing test (see `docs/workflow.md`, "Chores and bugs").
 
 Labels: `type/*` (feature, bug, spike, chore, docs), `area/*`, routing labels `impl`

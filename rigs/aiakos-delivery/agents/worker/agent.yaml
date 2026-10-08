@@ -1,6 +1,6 @@
-name: aiakos-author
+name: aiakos-worker
 version: "1.0"
-description: Writes briefs, item lists and acceptance tests, and splits briefs into stories
+description: A Codex seat of a pool; its role arrives with each item
 
 imports:
   - ref: local:../shared

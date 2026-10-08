@@ -11,7 +11,7 @@ logins, per-seat permission choices and OpenRig's own state (`~/.openrig`).
 2. Agents and OpenRig:
 
    ```bash
-   npm install -g @openrig/cli@0.6.4 @openai/codex
+   npm install -g @openrig/cli@0.6.6 @openai/codex
    ```
 
    Claude Code is installed with its own installer.
@@ -25,7 +25,8 @@ logins, per-seat permission choices and OpenRig's own state (`~/.openrig`).
    ```
 
    The script installs nothing. It lists what is missing.
-6. Start the rig for the first time, then do [Running unattended](#running-unattended):
+6. Start the rig for the first time ([Running unattended](#running-unattended) says how the
+   seats are allowed to work without asking):
 
    ```bash
    rig up rigs/aiakos-delivery/rig.yaml
@@ -35,17 +36,23 @@ logins, per-seat permission choices and OpenRig's own state (`~/.openrig`).
 
 ```bash
 cd ~/aiakos
-rig up aiakos-delivery --existing        # start the rig that was stopped; sessions resume
+rig up aiakos-delivery --existing        # start the rig that was stopped; new conversations
 rig tui                                  # the board; "terminal rig:aiakos-delivery" opens herdr
-rig down aiakos-delivery                 # stop; sessions are kept for the next start
+rig down aiakos-delivery                 # stop; queue items are kept for the next start
 ```
 
-Give the team work by telling the `lead` seat which issue or slice to take
-(`rig send lead-lead@aiakos-delivery "..."`, or type in its terminal).
+Every seat starts with an empty conversation (`restore_policy: relaunch_fresh` in `rig.yaml`)
+and reads its queue.
+
+The rig has two pods. `desk` holds the two seats to keep open: `desk-lead`, which you talk to,
+and `desk-router`, which moves the work. `team` holds the seven seats that do it; look at them
+now and then. Give the team work by typing in the terminal of `desk-lead`. Nothing else writes
+there, so a message you are typing is not cut. Do not type into `desk-router`: the seats' reports
+arrive in it.
 
 **Start by name, not from the file.** `rig up rigs/aiakos-delivery/rig.yaml` on a stopped rig
 does not resume it: it creates a new rig with new seats and archives the old one. The new seats
-have no conversation history and no per-seat settings. Use the file only for the first start
+have no per-seat settings. Use the file only for the first start
 and after `rig.yaml` changed (see [After a change to rig.yaml](#after-a-change-to-rigyaml)).
 
 ## Running unattended
@@ -53,8 +60,9 @@ and after `rig.yaml` changed (see [After a change to rig.yaml](#after-a-change-t
 By default a seat stops and asks before it runs a command its harness does not already allow.
 One unanswered prompt stalls the whole queue. `permission_policy: builtin:open` in `rig.yaml`
 does not prevent this: OpenRig records that policy but does not change how a seat is launched
-(`rig policy permissions current` shows `launch_posture=floor`). Two settings do change it. The
-maintainer makes both; no seat may change its own or another seat's permissions.
+(`rig policy permissions current` shows `launch_posture=floor`). A policy on the member does
+change it, and every member has one. The maintainer sets them; no seat may change its own or
+another seat's permissions.
 
 **What you give up.** A Codex seat with full access has no sandbox: it can read and write
 anything your WSL user can, including `/mnt/c`, the `gh` token and key files. A Claude seat in
@@ -63,7 +71,7 @@ blocked by branch protection in both cases.
 
 ### 1. Codex seats: full access (in the repository, already there)
 
-Each Codex member in `rig.yaml` (`author`, `author2`, `impl`, `senior`, `qa`) has this line:
+Each Codex member in `rig.yaml` (`low1`, `low2`, `high1`, `high2`) has this line:
 
 ```yaml
         permission_policy: builtin:yolo
@@ -76,56 +84,65 @@ rig policy permissions current --spec rigs/aiakos-delivery/rig.yaml
 ps -eo args | grep "[c]odex --no-daemon" | grep aiakos
 ```
 
-The first command lists the five members with `launch_posture=full_bypass`. The second, with
+The first command lists the four members with `launch_posture=full_bypass`. The second, with
 the rig running, shows `-s danger-full-access -a never` on every Codex seat.
 
-### 2. Claude seats: auto mode (per rig start from the file)
+### 2. Claude seats: auto mode (in the repository, already there)
 
-`rig.yaml` has no field for Claude's auto mode. OpenRig stores it on the seat, so it has to be
-set again whenever the seats are new: on a new machine, and after every start from the file.
+Each Claude member in `rig.yaml` (`lead`, `router`, `architect`, `reviewer`, `gate`) has this line:
 
-With the rig running, record the choice. OpenRig takes the caller from the environment, so a
-plain shell must say who it is:
-
-```bash
-for seat in lead-lead analysis-architect verify-reviewer; do
-  OPENRIG_SESSION_NAME=operator-human@kernel rig seat set-permissions "$seat@aiakos-delivery" \
-    --mode auto --reason "Unattended delivery rig"
-done
+```yaml
+        permission_policy: builtin:auto
 ```
 
-Without `OPENRIG_SESSION_NAME` the command answers
-`Sender identity, mode and reason are required`.
-
-Check that it was recorded (`selectionState` must not be `inherit`):
-
-```bash
-rig seat status lead-lead@aiakos-delivery --json | grep -A3 '"permissions"'
-```
-
-The choice applies when a seat is launched, so restart the same rig by name:
-
-```bash
-rig down aiakos-delivery && rig up aiakos-delivery --existing
-```
-
-Then check how the Claude seats were launched:
+Nothing to do on a new machine. The first command above lists the five members with
+`launch_posture=auto`. With the rig running:
 
 ```bash
 ps -eo args | grep "[c]laude --permission-mode" | grep aiakos-delivery
 ```
 
-Every line must say `--permission-mode auto`.
-
-**If a line still says `acceptEdits`**, the stored choice was not used. Switch that seat by
-hand: open its terminal and press Shift+Tab until it shows "auto mode on". This lasts until the
-seat is launched again. The restart by name and the check above have not been confirmed on
-OpenRig 0.6.4 yet; the hand switch has.
+Every line must say `--permission-mode auto`, and each seat's terminal shows "auto mode on".
 
 ### Going back
 
-Remove the `permission_policy: builtin:yolo` lines from `rig.yaml`, and run the
-`set-permissions` loop with `--mode inherit`. Then start from the file.
+Remove the `permission_policy` lines of the members from `rig.yaml`, then start from the file.
+
+## Clean conversations
+
+A seat sends its whole conversation again with every request. On 5–6 October the Claude seats
+ran at a median of 316k to 477k tokens per request and the Codex seats at 100k to 130k, almost
+all of it finished work (issue #278). So a seat does not keep its conversation between items:
+
+- **Every start of the rig** begins with empty conversations.
+- **Every delivery** goes through `tools/story.sh hand`. When the destination is idle and has
+  nothing in progress, it gets an empty conversation first: a fresh launch
+  (`rig seat launch --fresh --stop`) of a pool seat, `team-architect` or `team-reviewer`. It
+  takes 5 to 12 seconds. A busy seat is never touched; its item is queued.
+- **`desk-lead`, `desk-router` and `team-gate`** keep their conversation until the rig stops.
+
+`artifacts/hand.log` in the main checkout has one line per delivery: when, from, to, the role
+and whether the conversation was cleared (`fresh`, or `no` with the reason). Read it to
+see how often an item went to a busy seat.
+
+```bash
+tail -n 20 artifacts/hand.log
+AIAKOS_NO_WRITE=1 bash tools/story.sh hand low --role impl --summary "try" --body "try"
+```
+
+The second command shows which seat would be picked and changes nothing.
+
+**A long single item** can still grow, and so can the three seats that are not cleared.
+OpenRig can compact a Claude seat at a threshold; it is off by default and its threshold is 80%
+of a 1M window. To turn it on at about 150k tokens:
+
+```bash
+rig config set policies.claude_compaction.enabled true
+rig config set policies.claude_compaction.threshold_percent 15
+```
+
+This is a setting of the machine, not of the repository, and it has not been tried on this rig
+yet. Codex compacts by itself when its window (258k) is nearly full.
 
 ## After a change to rig.yaml
 
@@ -137,9 +154,8 @@ rig down aiakos-delivery
 rig up rigs/aiakos-delivery/rig.yaml
 ```
 
-Wait until the queue is quiet first: the new seats start with no conversation history. Queue
-items and the files in `docs/briefs/` and `artifacts/trials/` are kept. Then repeat step 2 of
-[Running unattended](#running-unattended) for the Claude seats.
+Wait until the queue is quiet first. Queue items and the files in `docs/briefs/` and
+`artifacts/trials/` are kept.
 
 ## What the rig writes into the checkout
 
@@ -157,9 +173,9 @@ rig spec reference. To use Pi again for a seat:
 2. Put the OpenCode Go key in `~/.config/opencode-go/key` (mode 600).
 3. Set the member to `runtime: pi` and `model: opencode-go/<model>`
    (`pi --list-models opencode-go` lists them).
-4. Add the seat to `PI_SEATS` in `setup.sh` (for example `verify-qa`) and run the script: it
+4. Add the seat to `PI_SEATS` in `setup.sh` (for example `team-low1`) and run the script: it
    writes the seat's `auth.json`, which points at the key file.
 
 ## Versions
 
-The rig was set up with OpenRig 0.6.4 and Codex 0.160.
+The rig runs on OpenRig 0.6.6 and Codex 0.160. It was first set up with OpenRig 0.6.4.

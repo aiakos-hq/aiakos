@@ -12,7 +12,7 @@ Three ideas carry the flow:
 - **Work is small.** A brief is split into stories that a Sonnet-level implementer can finish.
   A stronger model is the exception, for a story that cannot be split further.
 - **Judgment is checked by another vendor.** Codex writes and implements; Claude checks the
-  analysis and reads the diff. The gate is a script, so the seat that runs it (`qa`, Codex) decides
+  analysis and reads the diff. The gate is a script, so the seat that runs it (`gate`) decides
   nothing.
 
 The earlier slice review loop, in which a reviewer looked for problems after each run and wrote
@@ -38,23 +38,38 @@ per role under `agents/`, `CULTURE.md` and `SETUP.md`. It is started from the WS
 
 ```bash
 rig up rigs/aiakos-delivery/rig.yaml     # first start, and after rig.yaml changed (new seats)
-rig up aiakos-delivery --existing        # every other start: the same rig resumes
+rig up aiakos-delivery --existing        # every other start: the same rig, new conversations
 ```
+
+The seats are in two pods: `desk`, which the maintainer keeps open, and `team`.
 
 | Seat | Runtime | Role |
 |---|---|---|
-| `lead` | Claude Code | Runs `tools/story.sh`, creates sub-issues, opens pull requests, owns closure |
-| `author`, `author2` | Codex | Write the brief, the item list and the acceptance tests; split the brief. Two seats, so two slices can be analysed at once; a slice stays with one author |
-| `architect` | Claude Code (Opus) | Checks the brief and the split; attacks them before they are approved |
-| `impl`, `impl2` | Codex | Implement one story each, in its own worktree. Two stories run at the same time only when neither depends on the other |
-| `senior` | Codex, stronger model | Implements a story that was escalated, and every chore and bug (see "Chores and bugs") |
-| `qa` | Codex | Runs the gate and probes the behaviour |
-| `reviewer` | Claude Code | Reads the diff once |
+| `desk-lead` | Claude Code (Sonnet) | The maintainer's console: shows the board and what waits for the maintainer, passes on what the maintainer asks for. No seat writes to it |
+| `desk-router` | Claude Code (Haiku) | Receives every report and makes the next move: runs `tools/story.sh`, creates sub-issues, opens pull requests |
+| `team-architect` | Claude Code (Opus) | Checks the brief and the split; attacks them before they are approved. Judges an odd baseline and tags the failures of a second failed gate |
+| `team-reviewer` | Claude Code (Opus) | Reads the diff once |
+| `team-gate` | Claude Code (Haiku) | Runs the baseline and the gate. Both are scripts |
+| `team-low1`, `team-low2` | Codex | Pool `low`: write a story's acceptance tests; implement one story each, in its own worktree. Two stories run at the same time only when neither depends on the other |
+| `team-high1`, `team-high2` | Codex, stronger model | Pool `high`: write the brief, the item list and the split; implement a story that was escalated, and every chore and bug (see "Chores and bugs") |
 
-Which model sits behind a seat is one `model:` line in `rig.yaml`. Seats hand work to each other
-through the OpenRig queue (`rig queue handoff`); every queue item names the story and its
-sub-issue. To watch the team, open the rig TUI (`rig tui`) and run `terminal rig:aiakos-delivery`,
-which opens every seat as a tile in herdr.
+Which model sits behind a seat is one `model:` line in `rig.yaml`. A seat of a pool has no
+role of its own: every item names a role file in
+[`rigs/aiakos-delivery/roles/`](../rigs/aiakos-delivery/roles/) (`author`, `tests`, `impl`).
+Below, "`author`", "`tests`" and "`impl`" mean a pool seat working in that role.
+
+Seats pass work to each other with `tools/story.sh hand`, which puts an item in the OpenRig
+queue; every item names the story and its sub-issue. To watch the team, open the rig TUI
+(`rig tui`) and run `terminal rig:aiakos-delivery`, which opens the seats as tiles in herdr.
+
+**A seat keeps no conversation between items.** A long conversation is sent again with every
+request, so a seat that carried its finished work along spent most of its allowance on it.
+`hand` picks an idle seat of a pool and gives the destination an empty conversation before it
+delivers the item (a fresh launch of a pool seat, the architect or the reviewer); a busy seat
+is never touched. A start of the rig does the same for every seat. What a seat needs
+later is therefore in the queue item, the repository or `artifacts/`, never only in what it
+remembers; a slice lives in its analysis worktree and a story in its story worktree, so any seat
+of the right pool continues it.
 
 Credentials and the OpenRig state (`~/.openrig`) stay on the machine.
 [`SETUP.md`](../rigs/aiakos-delivery/SETUP.md) lists what a new machine needs.
@@ -67,13 +82,13 @@ Credentials and the OpenRig state (`~/.openrig`) stay on the machine.
 | 2. Split | `author` | `tools/story.sh split <slice>`: sorts the items into stories, IDs only | `stories.md` |
 | 3. Check | Script | `tools/story.sh check <slice>`: traceability and size | Pass or a list of errors |
 | 4. Story review | `architect` | Reads the brief and the split once; looks for ties the script cannot see and for a story that is too large | `findings.md` |
-| 5. Approval | `lead`, then the maintainer | Findings are resolved by commits. `lead` runs `tools/story.sh analysis-pr <slice>`: it checks the split and the review, sets the status and the index row, and opens one pull request, marked "routine" or "read this one". The maintainer merges it | The analysis is on `main`, `approved` |
-| 6. Acceptance | `author`, then `qa` | `author` writes the story's acceptance tests and `gate.sh`; `qa` runs `tools/story.sh baseline <slice> <n>` and reads why they fail on `main` | `artifacts/trials/<story>/` (local), with `main-before.txt` |
-| 7. Ready | `lead` | `tools/story.sh ready <slice> <n>`: checks the definition of ready and creates the sub-issue | A GitHub issue labelled `ready` |
-| 8. Run | `impl` (or `senior`) | `tools/story.sh start <issue>`, then implements in the worktree | One commit on a local branch |
-| 9. Gate | `qa` | `tools/story.sh done <issue>`: paths, build, acceptance tests | `needs-review`, one retry, `partial` or `blocked` |
+| 5. Approval | `router`, then the maintainer | Findings are resolved by commits. `router` runs `tools/story.sh analysis-pr <slice>`: it checks the split and the review, sets the status and the index row, and opens one pull request, marked "routine" or "read this one". The maintainer merges it | The analysis is on `main`, `approved` |
+| 6. Acceptance | `tests`, then `gate` | `tests` writes the story's acceptance tests and `gate.sh`; `gate` runs `tools/story.sh baseline <slice> <n>`; when the result is not a plain failure for missing behaviour, `architect` reads why | `artifacts/trials/<story>/` (local), with `main-before.txt` |
+| 7. Ready | `router` | `tools/story.sh ready <slice> <n>`: checks the definition of ready and creates the sub-issue | A GitHub issue labelled `ready` |
+| 8. Run | `impl`, in pool `low` (or `high` when escalated) | `tools/story.sh start <issue>`, then implements in the worktree | One commit on a local branch |
+| 9. Gate | `gate` | `tools/story.sh done <issue>`: paths, build, acceptance tests | `needs-review`, one retry, `partial` or `blocked` |
 | 10. Diff read | `reviewer` | Reads the diff once | Pass, or one of the four blocking kinds |
-| 11. Pull request | `lead`, then the maintainer | `tools/story.sh pr <issue>`; the maintainer merges; `cleanup` | Done |
+| 11. Pull request | `router`, then the maintainer | `tools/story.sh pr <issue>`; the maintainer merges; `cleanup` | Done |
 
 The maintainer acts at steps 5 and 11. `main` is protected, so no seat can merge.
 
@@ -107,7 +122,7 @@ caps as a whole is one story.
 
 ### 3. Escalation
 
-A story goes to the `senior` seat only when it cannot be split further. The architect writes the
+A story goes to the stronger pool (`high`) only when it cannot be split further. The architect writes the
 reason in the story's block in `stories.md` (`route: impl/senior` and `escalation: <reason>`);
 a story with that route and no reason fails the check. Most stories never need it.
 
@@ -118,7 +133,7 @@ A story gets its GitHub issue and the label `ready` when:
 1. the brief is approved;
 2. the story lists its items and is under the size cap;
 3. its acceptance tests exist and fail on `main` for the right reason (`baseline` records the
-   failure; `qa` reads the reason);
+   failure; `architect` reads the reason when it is not plain);
 4. every story it depends on is done;
 5. the review findings are resolved or filed as their own items;
 6. its route is set (`impl`, or `impl/senior` with a reason).
@@ -173,7 +188,7 @@ attempt. The gate preserves the raw cause, ends with `GATE: infrastructure failu
 the issue label unchanged. Such logs do not count in the retry history; rerun the gate. When
 the output has a compiler or analyzer error code, it is an ordinary failure even if one of those
 texts also appears. After three infrastructure failures in a row the gate sets `blocked` and the
-story goes to `lead`: the same crash every time is a broken machine or a change that crashes the
+story goes to `router`: the same crash every time is a broken machine or a change that crashes the
 compiler, and rerunning does not fix either.
 Compiler errors, warnings treated as errors and acceptance test failures still count.
 
@@ -186,7 +201,7 @@ gate run it followed. Nobody has to authorise "one more run" for this; the gate 
 earlier failures it left out.
 
 **Waiving a run.** For a failure that was not the implementer's and that the version does not
-catch, `lead` runs `tools/story.sh waive <issue> <run> <kind> "<evidence>"`. There are two kinds:
+catch, the maintainer has `desk-lead` run `tools/story.sh waive <issue> <run> <kind> "<evidence>"`. There are two kinds:
 `infrastructure` (the machine, or a flaky test the change did not touch) and `test-defect` (the
 acceptance test was wrong). A failure of the implementation cannot be waived. The waiver is a
 file next to the gate log and a comment on the issue, and `status` lists it. A story can have
@@ -201,9 +216,10 @@ run are accepted, other commits are not.
 The story text leaves out a table, or a whole section, of the brief that has no rows for the
 story, and says so in a line at that place.
 
-**Stop rule:** one retry at most. After the second failed attempt, the tag decides:
+**Stop rule:** one retry at most. After the second failed attempt, `architect` tags every
+failure and the tag decides:
 a `context-gap` sends the story back to the analysis, where the brief is fixed or the story is
-split; a `judgment-gap` escalates it to the `senior` seat. There are no follow-up briefs.
+split; a `judgment-gap` escalates it to pool `high`. There are no follow-up briefs.
 
 ### 8. Done, for the issue
 
@@ -215,7 +231,7 @@ split; a `judgment-gap` escalates it to the `senior` seat. There are no follow-u
 ## Chores and bugs
 
 Some work is not a story: a flaky test, a fix to `tools/story.sh`, a small bug. It has an issue
-but no brief and no acceptance tests, so it takes a shorter path, always on the `senior` seat.
+but no brief and no acceptance tests, so it takes a shorter path, always in pool `high`.
 
 An issue may take this path when all of these hold:
 
@@ -226,11 +242,11 @@ An issue may take this path when all of these hold:
 
 | Step | Who | What happens |
 |---|---|---|
-| Start | `lead` | `tools/story.sh start <issue>`: a worktree and a branch (`chore/…` or `fix/…`), the issue text copied in. Hands it to `build-senior` |
-| Run | `senior` | Does what the issue asks and nothing more. A bug fix adds a test that fails without the fix. One commit |
-| Gate | `qa` | `tools/story.sh done <issue>`: the same process checks, the build with zero warnings, then every existing test (`dotnet test`) in place of acceptance tests |
+| Start | `router` | `tools/story.sh start <issue>`: a worktree and a branch (`chore/…` or `fix/…`), the issue text copied in. Hands it to pool `high` |
+| Run | `impl`, in pool `high` | Does what the issue asks and nothing more. A bug fix adds a test that fails without the fix. One commit |
+| Gate | `gate` | `tools/story.sh done <issue>`: the same process checks, the build with zero warnings, then every existing test (`dotnet test`) in place of acceptance tests |
 | Diff read | `reviewer` | As for a story, with the issue text as the story text. A bug fix without a test for it is a backlog item to raise, named in the verdict |
-| Pull request | `lead`, then the maintainer | `tools/story.sh pr <issue>`; the maintainer merges; `cleanup` |
+| Pull request | `router`, then the maintainer | `tools/story.sh pr <issue>`; the maintainer merges; `cleanup` |
 
 The four blocking kinds, the one retry and `start <issue> --retry` apply as for a story.
 `tools/story.sh next` lists ready chores and bugs under the ready stories.
@@ -271,9 +287,9 @@ builds or commits in the main checkout, and no seat creates a worktree by hand.
 
 | Action | Who |
 |---|---|
-| Create a sub-issue, set labels | `lead` |
-| Push a story branch | `lead`, through `tools/story.sh pr` |
-| Open a pull request | `lead` |
+| Create a sub-issue, set labels | `router` |
+| Push a story branch | `router`, through `tools/story.sh pr` |
+| Open a pull request | `router` |
 | Merge | Maintainer only |
 
 ## Commands
@@ -294,6 +310,8 @@ bash tools/story.sh done <issue>
 bash tools/story.sh waive <issue> <run> infrastructure|test-defect "<evidence>"
 bash tools/story.sh pr <issue> [--maintainer-reviewed]
 bash tools/story.sh cleanup <issue>
+bash tools/story.sh hand <low|high|architect|reviewer|gate|router|maintainer> [--role <role>] \
+     [--item <qitem>] --summary "<one line>" (--body "<text>" | --body-file <path>)
 ```
 
 `AIAKOS_NO_WRITE=1` makes a command print its label changes instead of applying them.
@@ -306,5 +324,6 @@ Useful OpenRig commands:
 rig ps --nodes --rig aiakos-delivery   # seats and what they are doing
 rig parked                             # seats that stopped while they owe work
 rig queue list                         # work items and their owners
+tail -n 20 artifacts/hand.log          # deliveries, and whether the seat got a clean conversation
 rig tui                                # the board; "terminal rig:aiakos-delivery" opens herdr
 ```
