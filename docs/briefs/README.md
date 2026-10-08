@@ -57,6 +57,7 @@ Acceptance tests are not here: they stay local, so that an implementer cannot re
 | [15-2 #15 slice 2 — local API contracts, authentication and rig revisions](15-2/brief.md) | #15 | `impl` | approved | [8](15-2/stories.md) | | |
 | [15-3 #15 slice 3 — client commands](15-3/brief.md) | #15 | `impl` | approved | [12](15-3/stories.md) | | |
 | [15-4 #15 slice 4 — released instance configuration and host lifecycle](15-4/brief.md) | #15 | `impl` | approved | [23](15-4/stories.md) | | |
+| [11-4 #11 slice 4 — stop, process tree and liveness](11-4/brief.md) | #11 | `impl` | draft | [6](11-4/stories.md) | | |
 
 Slices 10-1, 14-1 and 14-2 were implemented as one piece each, before stories existed. 14-1 and
 14-2 went through the review loop, whose follow-up briefs are kept next to them. 14-2 did not
@@ -67,7 +68,7 @@ the new gate.
 
 | Issue | Slices |
 |---|---|
-| #11 tmux session host | 11-4 stop and watcher, 11-5 adoption |
+| #11 tmux session host | 11-5 adoption |
 | #12 Claude Code adapter | 12-1 orchestrator half, 12-3 normalizer, 12-4 node driver, 12-5 end to end |
 | #15 CLI and released instance | 15-5 release |
 | #16 aiakos-dev rig, M1 acceptance | 16-3 acceptance run |
