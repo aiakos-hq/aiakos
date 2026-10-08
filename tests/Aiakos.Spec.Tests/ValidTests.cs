@@ -9,7 +9,128 @@ public sealed class ProcessEnvironmentGroup { }
 [Collection("Process environment")]
 public sealed class ValidTests
 {
+    private static readonly string[] RuntimePropertyNames =
+        ["sessionid", "token", "env", "environment", "environmentvariables", "hooks", "hook", "statusline"];
+
     private static string MinimalRoot => Path.Combine(AppContext.BaseDirectory, "Fixtures", "valid", "minimal");
+
+    [Theory]
+    [InlineData("edges", "M2")]
+    [InlineData("imports", "M2")]
+    [InlineData("profiles", "M2")]
+    [InlineData("channels", "M4")]
+    [InlineData("shared-readonly", "M6")]
+    public void RejectsReservedFieldOrCheckout(string name, string milestone)
+    {
+        var root = CopyMinimalRig();
+        try
+        {
+            var path = Path.Combine(root, "rig.yaml");
+            var yaml = File.ReadAllText(path);
+            File.WriteAllText(path, name == "shared-readonly"
+                ? yaml.Replace("checkout: shared", "checkout: shared-readonly", StringComparison.Ordinal)
+                : yaml + name + ": []\n");
+
+            var result = RigLoader.Load(root, null);
+
+            Assert.Null(result.Rig);
+            var diagnostic = Assert.Single(result.Diagnostics);
+            Assert.Equal("AIK2005", diagnostic.Code);
+            Assert.Equal(Severity.Error, diagnostic.Severity);
+            Assert.Contains($"'{name}'", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Contains($"planned for {milestone}", diagnostic.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SerializedSeatParametersExcludeRuntimeStateAndSecretValues()
+    {
+        var root = CopyFixture(Path.Combine(AppContext.BaseDirectory, "Fixtures", "valid", "full"));
+        var secretValue = "secret-source-" + Guid.NewGuid().ToString("N");
+        const string environmentName = "AIAKOS_AC10_ENV_SENTINEL";
+        var environmentValue = "environment-value-" + Guid.NewGuid().ToString("N");
+        var previous = Environment.GetEnvironmentVariable(environmentName);
+        try
+        {
+            Environment.SetEnvironmentVariable(environmentName, environmentValue);
+            var secretPath = Path.Combine(root, "secret-source.txt");
+            File.WriteAllText(secretPath, secretValue);
+            var envPath = Path.Combine(root, "rig.env.yaml");
+            var portablePath = OperatingSystem.IsWindows()
+                ? "/" + Path.GetRelativePath(Path.GetPathRoot(secretPath)!, secretPath).Replace('\\', '/')
+                : secretPath;
+            File.WriteAllText(envPath, File.ReadAllText(envPath).Replace(
+                "~/.config/aiakos/secrets/anthropic_api_key", portablePath, StringComparison.Ordinal));
+
+            var result = RigLoader.Load(root, null);
+
+            Assert.Empty(result.Diagnostics);
+            Assert.NotNull(result.Rig);
+            Assert.Equal(2, result.Rig.SeatParameters.Count);
+            Assert.Equal(portablePath, Assert.Single(result.Rig.SeatParameters[1].Secrets).File);
+            var json = JsonSerializer.Serialize(result.Rig.SeatParameters);
+            using var document = JsonDocument.Parse(json);
+            AssertNoRuntimeProperties(document.RootElement);
+            foreach (var value in new[] { secretValue, environmentName, environmentValue })
+                Assert.DoesNotContain(value, json, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(environmentName, previous);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static void AssertNoRuntimeProperties(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                var name = property.Name.Replace("_", "", StringComparison.Ordinal).ToLowerInvariant();
+                Assert.DoesNotContain(name, RuntimePropertyNames);
+                AssertNoRuntimeProperties(property.Value);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var value in element.EnumerateArray()) AssertNoRuntimeProperties(value);
+        }
+    }
+
+    [Fact]
+    public void LoadingLfAndCrlfRigFilesProducesTheSameHashes()
+    {
+        var root = CopyFixture(Path.Combine(AppContext.BaseDirectory, "Fixtures", "valid", "full"));
+        try
+        {
+            File.AppendAllText(Path.Combine(root, "rig.yaml"), "culture_file: culture.md\n");
+            File.WriteAllText(Path.Combine(root, "culture.md"), "Team culture\nSecond line\n");
+            File.AppendAllText(Path.Combine(root, "agents", "impl", "agent.yaml"), "guidance: [guide.md]\n");
+            File.WriteAllText(Path.Combine(root, "agents", "impl", "guide.md"), "Agent guidance\nSecond line\n");
+            var lf = RigLoader.Load(root, null);
+            Assert.Empty(lf.Diagnostics);
+            Assert.NotNull(lf.Rig);
+
+            foreach (var path in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
+                File.WriteAllText(path, File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal)
+                    .Replace("\n", "\r\n", StringComparison.Ordinal));
+
+            var crlf = RigLoader.Load(root, null);
+            Assert.Empty(crlf.Diagnostics);
+            Assert.NotNull(crlf.Rig);
+            Assert.Equal(lf.Rig.SpecHash, crlf.Rig.SpecHash);
+            Assert.Equal(lf.Rig.BindingHash, crlf.Rig.BindingHash);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 
     [Fact]
     public void LoadsMinimalRigWithoutDiagnostics()
