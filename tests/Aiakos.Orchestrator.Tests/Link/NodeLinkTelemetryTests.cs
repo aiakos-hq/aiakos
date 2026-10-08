@@ -11,28 +11,36 @@ public sealed class NodeLinkTelemetryTests
     public void ReceiveActivitiesUseRemoteParentsAndInvalidParentsStartRoots()
     {
         var observed = new ConcurrentBag<(string? TraceId, string? ParentSpanId, ActivityKind Kind, string Name)>();
-        using var listener = Listen(NodeLinkTelemetry.ActivitySource, observed);
+        var marker = new object();
+        using var listener = Listen(NodeLinkTelemetry.ActivitySource, observed, marker);
         using var ambient = new Activity("unrelated-connect").SetIdFormat(ActivityIdFormat.W3C).Start();
         var firstParent = Context("11111111111111111111111111111111", "1111111111111111");
         var secondParent = Context("22222222222222222222222222222222", "2222222222222222");
 
+        // Simulate another test using the shared source while this listener is active.
+        using (NodeLinkTelemetry.StartReceiveActivity(null)) { }
+
         using (NodeLinkTelemetry.StartReceiveActivity(ToTrace(firstParent)))
         {
+            Activity.Current!.SetCustomProperty(nameof(NodeLinkTelemetryTests), marker);
             Assert.Equal(firstParent.TraceId, Activity.Current!.TraceId);
             Assert.Equal(firstParent.SpanId, Activity.Current.ParentSpanId);
         }
         using (NodeLinkTelemetry.StartReceiveActivity(ToTrace(secondParent)))
         {
+            Activity.Current!.SetCustomProperty(nameof(NodeLinkTelemetryTests), marker);
             Assert.Equal(secondParent.TraceId, Activity.Current!.TraceId);
             Assert.Equal(secondParent.SpanId, Activity.Current.ParentSpanId);
         }
         using (NodeLinkTelemetry.StartReceiveActivity(new TraceContext { Traceparent = "invalid" }))
         {
+            Activity.Current!.SetCustomProperty(nameof(NodeLinkTelemetryTests), marker);
             Assert.NotEqual(ambient.TraceId, Activity.Current!.TraceId);
             Assert.Equal(default, Activity.Current.ParentSpanId);
         }
         using (NodeLinkTelemetry.StartReceiveActivity(null))
         {
+            Activity.Current!.SetCustomProperty(nameof(NodeLinkTelemetryTests), marker);
             Assert.NotEqual(ambient.TraceId, Activity.Current!.TraceId);
             Assert.Equal(default, Activity.Current.ParentSpanId);
         }
@@ -68,13 +76,17 @@ public sealed class NodeLinkTelemetryTests
     }
 
     private static ActivityListener Listen(ActivitySource source,
-        ConcurrentBag<(string? TraceId, string? ParentSpanId, ActivityKind Kind, string Name)> observed)
+        ConcurrentBag<(string? TraceId, string? ParentSpanId, ActivityKind Kind, string Name)> observed, object marker)
     {
         var listener = new ActivityListener
         {
             ShouldListenTo = candidate => ReferenceEquals(candidate, source),
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity => observed.Add((activity.TraceId.ToString(), activity.ParentSpanId.ToString(), activity.Kind, activity.OperationName)),
+            ActivityStopped = activity =>
+            {
+                if (ReferenceEquals(activity.GetCustomProperty(nameof(NodeLinkTelemetryTests)), marker))
+                    observed.Add((activity.TraceId.ToString(), activity.ParentSpanId.ToString(), activity.Kind, activity.OperationName));
+            },
         };
         ActivitySource.AddActivityListener(listener);
         return listener;
