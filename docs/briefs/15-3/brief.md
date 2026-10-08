@@ -2,7 +2,7 @@
 id: 15-3
 title: "#15 slice 3 — client commands"
 issue: 15
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Cli/, tests/Aiakos.Cli.Tests/, src/Aiakos.Core/, tests/Aiakos.Core.Tests/, Aiakos.slnx]
 date: 2026-10-08
