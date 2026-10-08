@@ -2,7 +2,7 @@
 id: 16-2
 title: "#16 slice 2 — release pin and rig compatibility"
 issue: 16
-status: draft
+status: approved
 route: impl
 paths: [.config/dotnet-tools.json, .github/workflows/rig-compat.yml, rigs/aiakos-dev/README.md, tests/Aiakos.Spec.Tests/]
 date: 2026-10-08
