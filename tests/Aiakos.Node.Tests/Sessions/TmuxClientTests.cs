@@ -208,6 +208,34 @@ public sealed class TmuxClientTests
         Directory.Delete(home, recursive: true);
     }
 
+    [Fact]
+    public async Task RunCapturePaneOptsIntoTailRetentionAndNormalRunKeepsDefault()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "Tmux initialization is Linux-only.");
+        var home = Path.Combine(Path.GetTempPath(), $"aiakos-tmux-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(home);
+        var runner = new FakeProcessRunner();
+        runner.Enqueue(Result(ProcessOutcome.Exited, 0, stdout: "tmux 3.4\n"));
+        runner.Enqueue(Result(ProcessOutcome.Exited, 1, stderr: "no server running"));
+        runner.Enqueue(Result(ProcessOutcome.Exited, 0));
+        runner.Enqueue(Result(ProcessOutcome.Exited, 0));
+        using var provider = new ServiceCollection().AddMetrics().BuildServiceProvider();
+        var client = new TmuxClient(new TmuxHostOptions { Instance = "test", Home = home,
+            TmuxPath = "/usr/bin/tmux" }, runner, new Dictionary<string, string>(),
+            NullLogger<TmuxClient>.Instance, provider.GetRequiredService<IMeterFactory>());
+        await client.InitializeAsync(TestContext.Current.CancellationToken);
+
+        await client.RunCaptureAsync(["capture-pane", "-p", "-t", "%1"], TestContext.Current.CancellationToken);
+        await client.RunAsync(["display-message", "-p"], null, TestContext.Current.CancellationToken);
+
+        Assert.True(runner.Requests[^2].RetainStdoutTail);
+        Assert.False(runner.Requests[^1].RetainStdoutTail);
+        var error = await Assert.ThrowsAsync<ArgumentException>(() =>
+            client.RunCaptureAsync(["display-message"], TestContext.Current.CancellationToken));
+        Assert.Equal("A capture-pane command is required.", error.Message);
+        Directory.Delete(home, recursive: true);
+    }
+
     private static ProcessResult Result(ProcessOutcome outcome, int? exitCode = null, string? stderr = null,
         string? stdout = null) => new(outcome, exitCode, Encoding.UTF8.GetBytes(stdout ?? string.Empty),
         Encoding.UTF8.GetBytes(stderr ?? string.Empty), false, false);

@@ -5,7 +5,8 @@ using System.Diagnostics;
 namespace Aiakos.Node.Sessions;
 
 public sealed record ProcessRequest(string FileName, IReadOnlyList<string> Arguments,
-    IReadOnlyDictionary<string, string> Environment, ReadOnlyMemory<byte>? Stdin, TimeSpan Timeout);
+    IReadOnlyDictionary<string, string> Environment, ReadOnlyMemory<byte>? Stdin, TimeSpan Timeout,
+    bool RetainStdoutTail = false);
 
 public enum ProcessOutcome { Exited, TimedOut, StartFailed }
 
@@ -70,7 +71,7 @@ public sealed class ProcessRunner : IProcessRunner, IDisposable
             using var timeout = new CancellationTokenSource(request.Timeout, _timeProvider);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
             var stdinTask = WriteStdinAsync(process.StandardInput.BaseStream, request.Stdin, linked.Token);
-            var stdoutTask = DrainAsync(process.StandardOutput.BaseStream, linked.Token);
+            var stdoutTask = DrainAsync(process.StandardOutput.BaseStream, linked.Token, request.RetainStdoutTail);
             var stderrTask = DrainAsync(process.StandardError.BaseStream, linked.Token);
             var exitTask = process.WaitForExitAsync(linked.Token);
 
@@ -185,11 +186,15 @@ public sealed class ProcessRunner : IProcessRunner, IDisposable
         }
     }
 
-    private static async Task<DrainResult> DrainAsync(Stream stream, CancellationToken ct)
+    private static async Task<DrainResult> DrainAsync(Stream stream, CancellationToken ct, bool retainTail = false)
     {
-        using var retained = new MemoryStream(MaxOutputBytes);
+        using var retained = retainTail ? null : new MemoryStream(MaxOutputBytes);
+        var tail = retainTail ? new byte[MaxOutputBytes] : Array.Empty<byte>();
+        var tailStart = 0;
+        var tailLength = 0;
         var chunk = new byte[PipeChunkBytes];
         var truncated = false;
+        long bytesRead = 0;
         while (true)
         {
             int read;
@@ -208,12 +213,45 @@ public sealed class ProcessRunner : IProcessRunner, IDisposable
             }
 
             if (read == 0) break;
-            var keep = Math.Min(read, MaxOutputBytes - (int)retained.Length);
-            if (keep > 0) retained.Write(chunk, 0, keep);
-            if (keep < read) truncated = true;
+            if (!retainTail)
+            {
+                var keep = Math.Min(read, MaxOutputBytes - (int)retained!.Length);
+                if (keep > 0) retained.Write(chunk, 0, keep);
+                if (keep < read) truncated = true;
+                continue;
+            }
+
+            bytesRead += read;
+            if (read >= MaxOutputBytes)
+            {
+                chunk.AsSpan(read - MaxOutputBytes, MaxOutputBytes).CopyTo(tail);
+                tailStart = 0;
+                tailLength = MaxOutputBytes;
+                if (bytesRead > MaxOutputBytes) truncated = true;
+                continue;
+            }
+
+            var overflow = Math.Max(0, tailLength + read - MaxOutputBytes);
+            tailStart = (tailStart + overflow) % MaxOutputBytes;
+            tailLength -= overflow;
+            var tailEnd = (tailStart + tailLength) % MaxOutputBytes;
+            var firstPart = Math.Min(read, MaxOutputBytes - tailEnd);
+            chunk.AsSpan(0, firstPart).CopyTo(tail.AsSpan(tailEnd));
+            if (firstPart < read)
+                chunk.AsSpan(firstPart, read - firstPart).CopyTo(tail);
+            tailLength += read;
+            if (bytesRead > MaxOutputBytes) truncated = true;
         }
 
-        return new DrainResult(retained.ToArray(), truncated);
+        if (!retainTail)
+            return new DrainResult(retained!.ToArray(), truncated);
+
+        var output = new byte[tailLength];
+        var tailFirstPart = Math.Min(tailLength, MaxOutputBytes - tailStart);
+        tail.AsSpan(tailStart, tailFirstPart).CopyTo(output);
+        if (tailFirstPart < tailLength)
+            tail.AsSpan(0, tailLength - tailFirstPart).CopyTo(output.AsSpan(tailFirstPart));
+        return new DrainResult(output, truncated);
     }
 
     private static async Task StopAndJoinAsync(Process process, params Task[] operations)

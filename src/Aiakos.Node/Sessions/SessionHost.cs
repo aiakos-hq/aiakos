@@ -50,7 +50,8 @@ public abstract class DeliveryContext
 public sealed record Confirmation(ConfirmationOutcome Outcome, string? TurnId);
 public enum DeliveryStage { None, BufferLoaded, LeadTyped, BodyPasted, Submitted }
 public sealed record DeliveryReport(string DeliveryId, DeliveryStage Stage, Confirmation Confirmation,
-    int Resubmits, int BodyBytes, bool LineEndingsNormalized, SessionHostError? Error);
+    int Resubmits, int BodyBytes, bool LineEndingsNormalized, SessionHostError? Error,
+    string? ResubmitReason = null);
 public enum NamedKey { Enter, Escape, Tab, Up, Down, Left, Right, CtrlC, CtrlD }
 public sealed record CaptureRequest(int HistoryLines = 0, int MaxBytes = 1 << 20);
 public sealed record PaneSnapshot(string Text, bool Truncated, int Lines, DateTimeOffset CapturedAt,

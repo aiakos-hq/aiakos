@@ -38,7 +38,8 @@ public sealed class FakeProcessRunner : IProcessRunner
             ReadOnlyMemory<byte>? stdin = null;
             if (request.Stdin.HasValue)
                 stdin = new ReadOnlyMemory<byte>(request.Stdin.Value.ToArray());
-            _requests.Add(new ProcessRequest(request.FileName, arguments, environment, stdin, request.Timeout));
+            _requests.Add(new ProcessRequest(request.FileName, arguments, environment, stdin, request.Timeout,
+                request.RetainStdoutTail));
             return Task.FromResult(_results.Dequeue());
         }
     }

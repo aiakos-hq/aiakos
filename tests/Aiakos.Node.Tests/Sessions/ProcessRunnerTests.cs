@@ -27,6 +27,11 @@ public sealed class ProcessRunnerTests
         Assert.Equal("first", Assert.Single(recorded.Arguments));
         Assert.Equal("before", recorded.Environment["MODE"]);
         Assert.Equal(new byte[] { 1, 2, 3 }, recorded.Stdin!.Value.ToArray());
+        Assert.False(recorded.RetainStdoutTail);
+
+        runner.Enqueue(expected);
+        await runner.RunAsync(request with { RetainStdoutTail = true }, TestContext.Current.CancellationToken);
+        Assert.True(runner.Requests[^1].RetainStdoutTail);
     }
 
     [Fact]
@@ -86,6 +91,42 @@ public sealed class ProcessRunnerTests
     }
 
     [Fact]
+    public async Task ProcessRunnerCanRetainTheTailAfterDrainingMoreThanTwoMiB()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "The Python process fixture is Linux-specific.");
+        Assert.SkipUnless(File.Exists("/usr/bin/python3"), "The Python process fixture is unavailable.");
+        using var runner = new ProcessRunner();
+        const string script = "import os; os.write(1, b'A' * (2 * 1048576) + b'END')";
+
+        var first = await runner.RunAsync(Request("/usr/bin/python3", ["-c", script], null),
+            TestContext.Current.CancellationToken);
+        var tail = await runner.RunAsync(Request("/usr/bin/python3", ["-c", script], null, retainStdoutTail: true),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1048576, first.Stdout.Length);
+        Assert.Equal((byte)'A', first.Stdout[^1]);
+        Assert.True(first.StdoutTruncated);
+        Assert.Equal(1048576, tail.Stdout.Length);
+        Assert.EndsWith("END", System.Text.Encoding.ASCII.GetString(tail.Stdout));
+        Assert.True(tail.StdoutTruncated);
+    }
+
+    [Fact]
+    public async Task ProcessRunnerTailRetentionPreservesExactMultibyteBytes()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "The Python process fixture is Linux-specific.");
+        Assert.SkipUnless(File.Exists("/usr/bin/python3"), "The Python process fixture is unavailable.");
+        using var runner = new ProcessRunner();
+        const string script = "import os; os.write(1, b'A' * (1048576 + 100) + '😀'.encode())";
+
+        var tail = await runner.RunAsync(Request("/usr/bin/python3", ["-c", script], null, retainStdoutTail: true),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal([.. Enumerable.Repeat((byte)'A', 1048572), 0xf0, 0x9f, 0x98, 0x80], tail.Stdout);
+        Assert.True(tail.StdoutTruncated);
+    }
+
+    [Fact]
     public async Task ProcessRunnerClosesNullStdinAndReportsUnstartableExecutableWithoutDetails()
     {
         Assert.SkipUnless(OperatingSystem.IsLinux(), "The harmless process fixtures use standard Linux utilities.");
@@ -116,9 +157,9 @@ public sealed class ProcessRunnerTests
         var marker = Path.Combine(Path.GetTempPath(), $"aiakos-process-timeout-{Guid.NewGuid():N}");
         try
         {
-            var script = $"import os,time\nos.write(1,b'ready')\nopen('{marker}','w').close()\ntime.sleep(30)\n";
+            var script = $"import os,time\nos.write(1,b'A'*(2*1048576)+b'END')\nopen('{marker}','w').close()\ntime.sleep(30)\n";
             var invocation = runner.RunAsync(Request("/usr/bin/python3", ["-c", script], new byte[16777216],
-                timeout: TimeSpan.FromSeconds(10)), TestContext.Current.CancellationToken);
+                timeout: TimeSpan.FromSeconds(10), retainStdoutTail: true), TestContext.Current.CancellationToken);
             await WaitForFileAsync(marker, TestContext.Current.CancellationToken);
             await Task.Delay(TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
 
@@ -128,7 +169,7 @@ public sealed class ProcessRunnerTests
 
             Assert.Equal(ProcessOutcome.TimedOut, timedOut.Outcome);
             Assert.Null(timedOut.ExitCode);
-            Assert.Equal("ready", System.Text.Encoding.UTF8.GetString(timedOut.Stdout));
+            Assert.EndsWith("END", System.Text.Encoding.ASCII.GetString(timedOut.Stdout));
             Assert.Equal(ProcessOutcome.Exited, next.Outcome);
         }
         finally
@@ -262,9 +303,9 @@ public sealed class ProcessRunnerTests
 
     private static ProcessRequest Request(string fileName, IReadOnlyList<string> arguments,
         ReadOnlyMemory<byte>? stdin, TimeSpan? timeout = null,
-        IReadOnlyDictionary<string, string>? environment = null) =>
+        IReadOnlyDictionary<string, string>? environment = null, bool retainStdoutTail = false) =>
         new(fileName, arguments, environment ?? new Dictionary<string, string>(), stdin,
-            timeout ?? TimeSpan.FromSeconds(5));
+            timeout ?? TimeSpan.FromSeconds(5), retainStdoutTail);
 
     private sealed class ManualTimeProvider : TimeProvider
     {
