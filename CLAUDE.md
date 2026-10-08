@@ -115,9 +115,14 @@ Milestones `M0`–`M8` follow the roadmap in `docs/plan.md` §10.
 
 ## Commands
 
-Prerequisites: .NET SDK 10.0.1xx+ (see `global.json`); Docker Desktop running; WSL2 distro
+Prerequisites: .NET SDK 10.0.112 exactly (pinned with roll-forward disabled in `global.json`,
+which CI also uses); Docker Desktop running; WSL2 distro
 `Ubuntu` with mirrored networking (see above). The node agent in WSL needs no .NET, but the
 delivery rig builds and tests in the WSL checkout, so WSL has the same .NET SDK and `gh`.
+
+Before a gate run, a seat runs `dotnet --version` from the story worktree and checks that it
+prints `10.0.112`, matching CI's "Report SDK version" step. A newer SDK alone does not satisfy
+the pin: install 10.0.112 alongside it. Update the pin and the WSL SDK together when upgrading.
 
 - Build (warnings are errors): `dotnet build`
 - Test (Docker required for the database tests): `dotnet test`
