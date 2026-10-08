@@ -86,6 +86,9 @@ public static class InstanceLayout
         if (!string.Equals(configuration.Wsl.Home, expectedHome, StringComparison.Ordinal))
             return false;
 
+        if (Ports(configuration.PortBase).Any(port => port is < 1 or > 65535))
+            return false;
+
         var database = configuration.Database;
         if (database.Mode == "container")
         {
