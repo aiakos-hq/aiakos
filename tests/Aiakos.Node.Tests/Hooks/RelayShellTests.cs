@@ -1,72 +1,20 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Diagnostics;
-using Aiakos.Contracts.Node.V1;
-using Aiakos.Node.Hooks;
-using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Aiakos.Node.Tests.Hooks;
 
-public sealed class HookIngestTests
+public sealed class RelayShellTests
 {
-    [Fact]
-    public void SequenceTrackerReportsOneExpiredLaunchGap()
-    {
-        var time = new ManualTimeProvider();
-        var tracker = new HookSequenceTracker(time);
-        var launch = new HookLaunch("S", "I", "L", "seat");
-        tracker.Receive(launch, 1);
-        Assert.Empty(tracker.TakeExpiredGaps());
-        time.Advance(TimeSpan.FromSeconds(3));
-        Assert.Same(launch, Assert.Single(tracker.TakeExpiredGaps()));
-        Assert.Empty(tracker.TakeExpiredGaps());
-    }
-
-    [Fact]
-    public async Task DeliversAuthenticatedRawBytesAndSourceSequence()
-    {
-        var registry = new HookLaunchRegistry(TimeProvider.System);
-        var launch = new HookLaunch("S1", "I1", "L1", "impl@aiakos-dev");
-        registry.Register("ingest-fixture", launch);
-        var consumer = new RecordingConsumer();
-        await using var ingest = new HookIngest(0, registry, consumer, TimeProvider.System, NullLoggerFactory.Instance);
-        await ingest.StartAsync(TestContext.Current.CancellationToken);
-        using var client = new HttpClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, ingest.BaseUri + "/hook/PreToolUse")
-        {
-            Content = new ByteArrayContent([0, 255, 1, 10, 0])
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("ingest-fixture");
-        request.Headers.Add("X-Aiakos-Source-Seq", "42");
-
-        var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-        var payload = Assert.Single(consumer.Payloads);
-        Assert.Same(launch, payload.Launch);
-        Assert.Equal("hook", payload.Kind);
-        Assert.Equal("PreToolUse", payload.Name);
-        Assert.Equal(42UL, payload.SourceSeq);
-        Assert.Equal(new byte[] { 0, 255, 1, 10, 0 }, payload.Body);
-        Assert.DoesNotContain("255", payload.ToString(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void RegistryUsesOrdinalTokensAndEndRevokesLaunch()
-    {
-        var registry = new HookLaunchRegistry(TimeProvider.System);
-        var launch = new HookLaunch("S", "I", "L", "seat");
-        registry.Register("Token", launch);
-        Assert.True(registry.TryResolve("Token", out var found));
-        Assert.Same(launch, found);
-        Assert.False(registry.TryResolve("token", out _));
-        registry.End("L");
-        Assert.False(registry.TryResolve("Token", out _));
-    }
-
     [Theory]
     [InlineData("valid")]
+    [InlineData("08")]
+    [InlineData("0009")]
+    [InlineData("017")]
+    [InlineData("0000")]
+    [InlineData("999999999999999999")]
+    [InlineData("99999999999999999999999999")]
+    [InlineData("9223372036854775807")]
     [InlineData("lock-io-failure")]
     [InlineData("counter-io-failure")]
     public async Task RelayPostsExactBytesAndHandlesSequenceIoWhenLinuxToolsAreAvailable(string scenario)
@@ -86,6 +34,7 @@ public sealed class HookIngestTests
             seqFile = System.IO.Path.Combine(seqFile, "counter");
         }
         else if (scenario == "counter-io-failure") Directory.CreateDirectory(seqFile);
+        else if (scenario != "valid") await File.WriteAllTextAsync(seqFile, scenario, TestContext.Current.CancellationToken);
         await File.WriteAllTextAsync(tokenFile, "Authorization: ingest-fixture\n", TestContext.Current.CancellationToken);
         var scriptPath = FindRelay();
         using var reservation = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
@@ -130,7 +79,7 @@ public sealed class HookIngestTests
         Assert.Contains("Authorization: ingest-fixture", received.Headers, StringComparison.Ordinal);
         var sequenceLine = received.Headers.Split("\r\n", StringSplitOptions.RemoveEmptyEntries)
             .Single(line => line.StartsWith("X-Aiakos-Source-Seq:", StringComparison.OrdinalIgnoreCase));
-        if (scenario != "valid")
+        if (scenario is "lock-io-failure" or "counter-io-failure")
         {
             Assert.Equal("0", sequenceLine.Split(':')[1].Trim());
             return;
@@ -138,18 +87,14 @@ public sealed class HookIngestTests
         var persisted = (await File.ReadAllTextAsync(seqFile, TestContext.Current.CancellationToken)).Trim();
         Assert.Equal(sequenceLine.Split(':')[1].Trim(), persisted);
         Assert.True(ulong.TryParse(persisted, out var sequence) && sequence > 0);
-        Assert.True(File.Exists(seqFile + ".lock"));
-    }
-
-    private sealed class RecordingConsumer : IHookIngestConsumer
-    {
-        public List<IngestedPayload> Payloads { get; } = [];
-        public ValueTask ReceiveAsync(IngestedPayload payload, CancellationToken ct)
+        var expected = scenario switch
         {
-            Payloads.Add(payload);
-            return ValueTask.CompletedTask;
-        }
-        public ValueTask GapAsync(HookLaunch launch, ObservationGap gap, CancellationToken ct) => ValueTask.CompletedTask;
+            "08" => "9", "0009" => "10", "017" => "18", "0000" => "1",
+            "999999999999999999" => "1000000000000000000", _ => null
+        };
+        if (expected is not null) Assert.Equal(expected, persisted);
+        else Assert.True(sequence > 1_000_000_000_000_000UL);
+        Assert.True(File.Exists(seqFile + ".lock"));
     }
 
     private static string FindRelay()
@@ -170,10 +115,4 @@ public sealed class HookIngestTests
         return process.ExitCode == 0;
     }
 
-    private sealed class ManualTimeProvider : TimeProvider
-    {
-        private DateTimeOffset _now = DateTimeOffset.UnixEpoch;
-        public override DateTimeOffset GetUtcNow() => _now;
-        public void Advance(TimeSpan duration) => _now += duration;
-    }
 }

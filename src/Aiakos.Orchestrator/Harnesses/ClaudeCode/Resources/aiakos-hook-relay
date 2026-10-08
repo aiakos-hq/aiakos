@@ -26,6 +26,10 @@ if [ "$post" -eq 1 ]; then
             if flock -w 0.95 9 2>/dev/null; then
                 old=
                 if [ -r "$seqfile" ]; then IFS= read -r old <"$seqfile" || :; fi
+                case "$old" in "") old=invalid ;; esac
+                while [ "${old#0}" != "$old" ]; do old=${old#0}; done
+                [ -n "$old" ] || old=0
+                [ "${#old}" -le 18 ] || old=invalid
                 case "$old" in
                     ""|*[!0-9]*)
                         case "$now" in ""|*[!0-9]*) now= ;; esac
@@ -36,6 +40,9 @@ if [ "$post" -eq 1 ]; then
                 case "$value" in
                     ""|*[!0-9]*) ;;
                     *)
+                        while [ "${value#0}" != "$value" ]; do value=${value#0}; done
+                        [ -n "$value" ] || value=0
+                        [ "${#value}" -le 18 ] || value=0
                         value=$((value + 1))
                         if printf '%s\n' "$value" >"$seqfile"; then seq=$value; fi
                         ;;
