@@ -244,7 +244,7 @@ public sealed class PostgresSeatActorWriterTests(PostgresContainerFixture postgr
             Event = new SeatEvent { Seq = 1, ProcessExited = new() { ExitCode = 0 } } };
         var surrogate = input with { Event = new SeatEvent { Seq = 1, Harness = new() { NativeName = "\ud800" } } };
         var nulState = input with { Step = input.Step with { State = input.Step.State with { PendingInputRequest = "a\0b" } } };
-        foreach (var rejected in new[] { finding, rotation, result, surrogate, nulState })
+        foreach (var rejected in new[] { result, surrogate, nulState })
             await Assert.ThrowsAsync<SeatStoreRejectedException>(() => writer.CommitAsync(before, [rejected], Ct));
         await Assert.ThrowsAsync<SeatStoreRejectedException>(() => writer.RecordActorStoppedAsync(before.Key, At, Ct));
         Assert.Equal(new SeatStoreReceipt(7, Session), await writer.CommitAsync(before, [], Ct));
@@ -253,6 +253,272 @@ public sealed class PostgresSeatActorWriterTests(PostgresContainerFixture postgr
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => writer.CommitAsync(before, [], canceled.Token));
         Assert.Equal(7L, await ScalarAsync(db, "SELECT version FROM aiakos.seat_state"));
         Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_event"));
+    }
+
+    [Fact]
+    public async Task InvalidFindingKindsRejectBeforeDatabaseWrites()
+    {
+        await using var db = await SeedAsync();
+        var before = Snapshot();
+        var writer = new PostgresSeatActorWriter(db);
+        foreach (var (kind, open) in new[]
+        {
+            ("observation-gap\0", true),
+            ("observation-gap\0", false),
+            ("\ud800", true),
+            ("\ud800", false)
+        })
+        {
+            var exception = await Assert.ThrowsAsync<SeatStoreRejectedException>(() =>
+                writer.CommitAsync(before, [FindingInput(before.State, kind, open, At.AddSeconds(1))], Ct));
+            Assert.Equal("SEAT_COMMIT_REJECTED", exception.Message);
+            Assert.Null(exception.InnerException);
+        }
+        Assert.Equal(7L, await ScalarAsync(db, "SELECT version FROM aiakos.seat_state"));
+        Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_finding"));
+    }
+
+    [Fact]
+    public async Task FindingsMergeResolveReopenAndClearActorStoppedOnNextCommit()
+    {
+        await using var db = await SeedAsync();
+        var before = Snapshot();
+        var writer = new PostgresSeatActorWriter(db);
+        var inputs = new[]
+        {
+            FindingInput(before.State, SeatVocabulary.FindingObservationGap, true, At.AddSeconds(1)),
+            FindingInput(before.State, SeatVocabulary.FindingObservationGap, true, At.AddSeconds(2)),
+            FindingInput(before.State, SeatVocabulary.FindingObservationGap, false, At.AddSeconds(3)),
+            FindingInput(before.State, SeatVocabulary.FindingObservationGap, false, At.AddSeconds(4)),
+            FindingInput(before.State, SeatVocabulary.FindingNodeNotConnected, false, At.AddSeconds(5)),
+            FindingInput(before.State, SeatVocabulary.FindingObservationGap, true, At.AddSeconds(6)),
+            FindingInput(before.State, SeatVocabulary.FindingActorStopped, true, At.AddSeconds(7))
+        };
+
+        var receipt = await writer.CommitAsync(before, inputs, Ct);
+
+        Assert.Equal(new SeatStoreReceipt(8, Session), receipt);
+        await using (var command = db.CreateCommand("""
+            SELECT kind,severity,status,summary,evidence,launch_id,occurrences,first_seen_at,last_seen_at,resolved_at,resolved_reason,seat_id,node_name
+            FROM aiakos.seat_finding ORDER BY kind,first_seen_at
+            """))
+        await using (var rows = await command.ExecuteReaderAsync(Ct))
+        {
+            Assert.True(await rows.ReadAsync(Ct));
+            Assert.Equal(SeatVocabulary.FindingActorStopped, rows.GetString(0));
+            Assert.Equal("error", rows.GetString(1));
+            Assert.Equal("open", rows.GetString(2));
+            Assert.Equal("Seat finding: actor-stopped.", rows.GetString(3));
+            Assert.True(rows.IsDBNull(4));
+            Assert.Equal(Launch, rows.GetGuid(5));
+            Assert.Equal(1, rows.GetInt32(6));
+            Assert.Equal(At.AddSeconds(7), rows.GetFieldValue<DateTimeOffset>(7));
+            Assert.Equal(At.AddSeconds(7), rows.GetFieldValue<DateTimeOffset>(8));
+            Assert.True(rows.IsDBNull(9));
+            Assert.True(rows.IsDBNull(10));
+            Assert.Equal(Seat, rows.GetGuid(11));
+            Assert.True(rows.IsDBNull(12));
+
+            Assert.True(await rows.ReadAsync(Ct));
+            Assert.Equal(SeatVocabulary.FindingObservationGap, rows.GetString(0));
+            Assert.Equal("warning", rows.GetString(1));
+            Assert.Equal("resolved", rows.GetString(2));
+            Assert.Equal("Seat finding: observation-gap.", rows.GetString(3));
+            Assert.True(rows.IsDBNull(4));
+            Assert.Equal(Launch, rows.GetGuid(5));
+            Assert.Equal(2, rows.GetInt32(6));
+            Assert.Equal(At.AddSeconds(1), rows.GetFieldValue<DateTimeOffset>(7));
+            Assert.Equal(At.AddSeconds(2), rows.GetFieldValue<DateTimeOffset>(8));
+            Assert.Equal(At.AddSeconds(3), rows.GetFieldValue<DateTimeOffset>(9));
+            Assert.Equal("state-changed", rows.GetString(10));
+            Assert.Equal(Seat, rows.GetGuid(11));
+            Assert.True(rows.IsDBNull(12));
+
+            Assert.True(await rows.ReadAsync(Ct));
+            Assert.Equal(SeatVocabulary.FindingObservationGap, rows.GetString(0));
+            Assert.Equal("warning", rows.GetString(1));
+            Assert.Equal("open", rows.GetString(2));
+            Assert.Equal("Seat finding: observation-gap.", rows.GetString(3));
+            Assert.True(rows.IsDBNull(4));
+            Assert.Equal(Launch, rows.GetGuid(5));
+            Assert.Equal(1, rows.GetInt32(6));
+            Assert.Equal(At.AddSeconds(6), rows.GetFieldValue<DateTimeOffset>(7));
+            Assert.Equal(At.AddSeconds(6), rows.GetFieldValue<DateTimeOffset>(8));
+            Assert.True(rows.IsDBNull(9));
+            Assert.True(rows.IsDBNull(10));
+            Assert.Equal(Seat, rows.GetGuid(11));
+            Assert.True(rows.IsDBNull(12));
+            Assert.False(await rows.ReadAsync(Ct));
+        }
+
+        var nextBefore = before with { Version = receipt.Version };
+        var work = Applied(1, before.State with { NextSeq = 2 }, new SeatEvent { Seq = 1 });
+        var nextReceipt = await writer.CommitAsync(nextBefore, [work], Ct);
+        Assert.Equal(new SeatStoreReceipt(9, Session), nextReceipt);
+        await using var verify = db.CreateCommand("SELECT status,resolved_reason,resolved_at FROM aiakos.seat_finding WHERE tenant_id=@tenant AND seat_id=@seat AND kind=@kind");
+        verify.Parameters.AddWithValue("tenant", Tenant);
+        verify.Parameters.AddWithValue("seat", Seat);
+        verify.Parameters.AddWithValue("kind", SeatVocabulary.FindingActorStopped);
+        await using var stoppedRows = await verify.ExecuteReaderAsync(Ct);
+        Assert.True(await stoppedRows.ReadAsync(Ct));
+        Assert.Equal("resolved", stoppedRows.GetString(0));
+        Assert.Equal("state-changed", stoppedRows.GetString(1));
+        Assert.Equal(At.AddSeconds(1), stoppedRows.GetFieldValue<DateTimeOffset>(2));
+        Assert.False(await stoppedRows.ReadAsync(Ct));
+        Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_finding WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND seat_id IS NULL"));
+        Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_finding WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND kind='node-not-connected'"));
+    }
+
+    [Fact]
+    public async Task RotationPersistsNewSessionAndUpdatesConversationAndLostHistory()
+    {
+        await using var db = await SeedAsync();
+        await using (var seed = db.CreateCommand("""
+            UPDATE aiakos.seat_session SET conversation_at=@conversation,lost_at=@lost,created_at=@created
+            WHERE tenant_id=@tenant AND session_id=@session
+            """))
+        {
+            seed.Parameters.AddWithValue("conversation", At.AddMinutes(-2));
+            seed.Parameters.AddWithValue("lost", At.AddMinutes(-1));
+            seed.Parameters.AddWithValue("created", At.AddMinutes(-3));
+            seed.Parameters.AddWithValue("tenant", Tenant);
+            seed.Parameters.AddWithValue("session", Session);
+            await seed.ExecuteNonQueryAsync(Ct);
+        }
+        var before = Snapshot();
+        var writer = new PostgresSeatActorWriter(db);
+        const string newNativeId = "native-rotated";
+        var rotation = RotationInput(before, 1, newNativeId, before.State.NativeSessionId!, At.AddSeconds(1));
+
+        var receipt = await writer.CommitAsync(before, [rotation], Ct);
+
+        Assert.Equal(8, receipt.Version);
+        Assert.NotNull(receipt.CurrentSessionId);
+        Assert.NotEqual(Session, receipt.CurrentSessionId);
+        await using (var command = db.CreateCommand("""
+            SELECT session_id,seat_id,harness,native_session_id,decision,previous_session_id,conversation_at,lost_at,created_at
+            FROM aiakos.seat_session WHERE tenant_id=@tenant AND native_session_id=@native
+            """))
+        {
+            command.Parameters.AddWithValue("tenant", Tenant);
+            command.Parameters.AddWithValue("native", newNativeId);
+            await using var rows = await command.ExecuteReaderAsync(Ct);
+            Assert.True(await rows.ReadAsync(Ct));
+            Assert.Equal(receipt.CurrentSessionId, rows.GetGuid(0));
+            Assert.Equal(Seat, rows.GetGuid(1));
+            Assert.Equal("test", rows.GetString(2));
+            Assert.Equal(newNativeId, rows.GetString(3));
+            Assert.Equal("harness-cleared", rows.GetString(4));
+            Assert.Equal(Session, rows.GetGuid(5));
+            Assert.True(rows.IsDBNull(6));
+            Assert.True(rows.IsDBNull(7));
+            Assert.Equal(At.AddSeconds(1), rows.GetFieldValue<DateTimeOffset>(8));
+            Assert.False(await rows.ReadAsync(Ct));
+        }
+        Assert.Equal(receipt.CurrentSessionId,
+            Guid.Parse((string)(await ScalarAsync(db, "SELECT current_session_id::text FROM aiakos.seat_state"))!));
+        Assert.Equal(Launch,
+            Guid.Parse((string)(await ScalarAsync(db, "SELECT current_launch_id::text FROM aiakos.seat_state"))!));
+        Assert.Equal(Session,
+            Guid.Parse((string)(await ScalarAsync(db, "SELECT session_id::text FROM aiakos.seat_launch WHERE tenant_id='11111111-1111-4111-8111-111111111111'"))!));
+        await using (var oldHistory = db.CreateCommand("SELECT conversation_at,lost_at FROM aiakos.seat_session WHERE tenant_id=@tenant AND session_id=@session"))
+        {
+            oldHistory.Parameters.AddWithValue("tenant", Tenant);
+            oldHistory.Parameters.AddWithValue("session", Session);
+            await using var oldRows = await oldHistory.ExecuteReaderAsync(Ct);
+            Assert.True(await oldRows.ReadAsync(Ct));
+            Assert.Equal(At.AddMinutes(-2), oldRows.GetFieldValue<DateTimeOffset>(0));
+            Assert.Equal(At.AddMinutes(-1), oldRows.GetFieldValue<DateTimeOffset>(1));
+        }
+
+        var current = before with
+        {
+            Version = receipt.Version,
+            CurrentSessionId = receipt.CurrentSessionId,
+            State = rotation.Step.State
+        };
+        var replay = rotation with { Step = rotation.Step with { Disposition = EventDisposition.Duplicate } };
+        Assert.Equal(receipt, await writer.CommitAsync(current, [replay], Ct));
+        Assert.Equal(2L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_session WHERE tenant_id='11111111-1111-4111-8111-111111111111'"));
+
+        var reusedId = Guid.Parse("88888888-8888-4888-8888-888888888888");
+        await using (var seedReuse = db.CreateCommand("""
+            INSERT INTO aiakos.seat_session
+                (tenant_id,session_id,seat_id,harness,native_session_id,decision,previous_session_id,conversation_at,lost_at,created_at)
+            VALUES (@tenant,@id,@seat,'test','native-reused','fresh-explicit',@previous,NULL,NULL,@created)
+            """))
+        {
+            seedReuse.Parameters.AddWithValue("tenant", Tenant);
+            seedReuse.Parameters.AddWithValue("id", reusedId);
+            seedReuse.Parameters.AddWithValue("seat", Seat);
+            seedReuse.Parameters.AddWithValue("previous", Session);
+            seedReuse.Parameters.AddWithValue("created", At.AddMinutes(-5));
+            await seedReuse.ExecuteNonQueryAsync(Ct);
+        }
+        var reuse = RotationInput(current, 2, "native-reused", newNativeId, At.AddSeconds(2));
+        var reuseReceipt = await writer.CommitAsync(current, [reuse], Ct);
+        Assert.Equal(new SeatStoreReceipt(9, reusedId), reuseReceipt);
+        await using (var reused = db.CreateCommand("SELECT decision,previous_session_id,conversation_at,lost_at,created_at FROM aiakos.seat_session WHERE tenant_id=@tenant AND session_id=@session"))
+        {
+            reused.Parameters.AddWithValue("tenant", Tenant);
+            reused.Parameters.AddWithValue("session", reusedId);
+            await using var reusedRows = await reused.ExecuteReaderAsync(Ct);
+            Assert.True(await reusedRows.ReadAsync(Ct));
+            Assert.Equal("fresh-explicit", reusedRows.GetString(0));
+            Assert.Equal(Session, reusedRows.GetGuid(1));
+            Assert.True(reusedRows.IsDBNull(2));
+            Assert.True(reusedRows.IsDBNull(3));
+            Assert.Equal(At.AddMinutes(-5), reusedRows.GetFieldValue<DateTimeOffset>(4));
+        }
+
+        var reusedCurrent = current with { Version = reuseReceipt.Version, CurrentSessionId = reusedId, State = reuse.Step.State };
+        var resumable = InputState(reusedCurrent.State with { Resumability = ResumabilityValue.Resumable,
+            ResumabilityReason = null }, At.AddSeconds(3));
+        var lost = InputState(reusedCurrent.State with { Resumability = ResumabilityValue.Lost,
+            ResumabilityReason = "resume-lost" }, At.AddSeconds(4));
+        var historyReceipt = await writer.CommitAsync(reusedCurrent, [resumable, lost], Ct);
+        Assert.Equal(new SeatStoreReceipt(10, reusedId), historyReceipt);
+        await using var history = db.CreateCommand("SELECT conversation_at,lost_at FROM aiakos.seat_session WHERE tenant_id=@tenant AND session_id=@session");
+        history.Parameters.AddWithValue("tenant", Tenant);
+        history.Parameters.AddWithValue("session", reusedId);
+        await using var historyRows = await history.ExecuteReaderAsync(Ct);
+        Assert.True(await historyRows.ReadAsync(Ct));
+        Assert.Equal(At.AddSeconds(3), historyRows.GetFieldValue<DateTimeOffset>(0));
+        Assert.Equal(At.AddSeconds(4), historyRows.GetFieldValue<DateTimeOffset>(1));
+    }
+
+    [Fact]
+    public async Task ForeignOwnerRotationRollsBackEarlierEvidenceAndFindings()
+    {
+        await using var db = await SeedAsync();
+        var foreignSeat = Guid.Parse("99999999-9999-4999-8999-999999999999");
+        await using (var seed = db.CreateCommand("""
+            INSERT INTO aiakos.seat(tenant_id,seat_id,rig_id,member,address,kind,harness,node_name,spec_hash,binding_hash)
+            VALUES (@tenant,@seat,@rig,'foreign','foreign@writer-rig','agent','test','node','s','b');
+            INSERT INTO aiakos.seat_session(tenant_id,session_id,seat_id,harness,native_session_id,decision)
+            VALUES (@tenant,@session,@seat,'test','native-foreign','new-session')
+            """))
+        {
+            seed.Parameters.AddWithValue("tenant", Tenant);
+            seed.Parameters.AddWithValue("seat", foreignSeat);
+            seed.Parameters.AddWithValue("rig", Guid.Parse("66666666-6666-4666-8666-666666666666"));
+            seed.Parameters.AddWithValue("session", Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
+            await seed.ExecuteNonQueryAsync(Ct);
+        }
+        var before = Snapshot();
+        var first = Applied(1, before.State with { NextSeq = 2, Resumability = ResumabilityValue.Lost,
+            ResumabilityReason = "resume-lost" }, new SeatEvent { Seq = 1 });
+        first = first with { Step = first.Step with { Findings = [new(SeatVocabulary.FindingObservationGap, true)] } };
+        var rotation = RotationInput(before, 2, "native-foreign", before.State.NativeSessionId!, At.AddSeconds(2));
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new PostgresSeatActorWriter(db).CommitAsync(before, [first, rotation], Ct));
+        Assert.Equal("SEAT_SESSION_CONFLICT", exception.Message);
+        Assert.Null(exception.InnerException);
+        Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_event"));
+        Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_finding WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND kind='observation-gap'"));
+        Assert.Equal(7L, await ScalarAsync(db, "SELECT version FROM aiakos.seat_state"));
+        Assert.Equal(Session.ToString(), await ScalarAsync(db, "SELECT current_session_id::text FROM aiakos.seat_state"));
+        Assert.Equal(DBNull.Value, await ScalarAsync(db, "SELECT lost_at FROM aiakos.seat_session WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND session_id='55555555-5555-4555-8555-555555555555'"));
     }
 
     [Fact]
@@ -420,6 +686,34 @@ public sealed class PostgresSeatActorWriterTests(PostgresContainerFixture postgr
         return new(new EventReceived(Epoch, seq, checked((long)value.SourceSeq),
             string.IsNullOrEmpty(value.LaunchId) ? null : Guid.Parse(value.LaunchId), new UnknownBody()),
             new(state, null, EventDisposition.Applied, transitions, [], []), At.AddSeconds(seq), value, null);
+    }
+
+    private static SeatAppliedInput FindingInput(SeatState state, string kind, bool open, DateTimeOffset at) =>
+        new(new NodeLinkLost(), new(state, null, null, [], [new(kind, open)], []), at, null, null);
+
+    private static SeatAppliedInput InputState(SeatState state, DateTimeOffset at) =>
+        new(new NodeLinkLost(), new(state, null, null, [], [], []), at, null, null);
+
+    private static SeatAppliedInput RotationInput(SeatActorSnapshot before, long seq, string nativeId,
+        string previousNativeId, DateTimeOffset at)
+    {
+        var value = new SeatEvent
+        {
+            Seq = (ulong)seq,
+            LaunchId = Launch.ToString(),
+            Harness = new() { Kind = HarnessEventKind.SessionStarted, NativeSessionId = nativeId }
+        };
+        var state = before.State with
+        {
+            NativeSessionId = nativeId,
+            Resumability = ResumabilityValue.FreshOnly,
+            ResumabilityReason = "harness-cleared",
+            NextSeq = seq + 1
+        };
+        return new(new EventReceived(Epoch, seq, 0, Launch, new HarnessBody(HarnessEventKind.SessionStarted,
+                nativeId, new Dictionary<string, string>(StringComparer.Ordinal))),
+            new(state, null, EventDisposition.Late, [], [], [new AdoptRotatedSession(nativeId, previousNativeId)]),
+            at, value, null);
     }
 
     private async Task<NpgsqlDataSource> SeedAsync()

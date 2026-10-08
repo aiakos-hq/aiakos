@@ -76,6 +76,7 @@ public sealed class ValidTests
             Assert.NotNull(warning.Rig.Canonical);
             Assert.Contains(warning.Diagnostics, diagnostic => diagnostic.Code == "AIK4012" &&
                 diagnostic.Severity == Severity.Warning);
+            Assert.All(warning.Rig.SeatParameters, parameters => Assert.NotNull(parameters.Projection));
         }
         finally
         {

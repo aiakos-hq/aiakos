@@ -27,6 +27,21 @@ public sealed class ClaudeCodeSettingsTests
         Assert.DoesNotContain("apiKeyHelper", Encoding.UTF8.GetString(actual), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("subscription")]
+    [InlineData("api-key")]
+    public void SettingsUseOnlyLfLineBreaksForEachAuthMode(string auth)
+    {
+        var seat = Seat(auth: auth, secrets: [new ResolvedSeatSecret("anthropic_api_key", "/keys/anthropic.key", "file")]);
+
+        var bytes = new ClaudeCodeSettings().Build(seat);
+
+        Assert.Contains((byte)'\n', bytes);
+        Assert.DoesNotContain((byte)'\r', bytes);
+        Assert.Equal((byte)'\n', bytes[^1]);
+        Assert.NotEqual((byte)'\n', bytes[^2]);
+    }
+
     [Fact]
     public void PreservesPermissionOrderDuplicatesAndUnicodeWithoutMutation()
     {
