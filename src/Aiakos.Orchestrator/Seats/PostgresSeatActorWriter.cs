@@ -38,6 +38,7 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
             var actorStoppedCleared = false;
             foreach (var input in accepted)
             {
+                var opaqueEvent = input.Event is { } eventValue && IsOpaque(eventValue);
                 if (!actorStoppedCleared)
                 {
                     actorStoppedCleared = true;
@@ -48,11 +49,10 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
                 if (input.Event is { } value)
                 {
                     eventId = Guid.CreateVersion7();
-                    var opaque = IsOpaque(value);
-                    await WriteEventAsync(connection, transaction, before.Key, input, eventId.Value, opaque, ct)
+                    await WriteEventAsync(connection, transaction, before.Key, input, eventId.Value, opaqueEvent, ct)
                         .ConfigureAwait(false);
                     wrote = true;
-                    if (!opaque && value.Harness?.Usage is { } telemetry &&
+                    if (!opaqueEvent && value.Harness?.Usage is { } telemetry &&
                         input.Input is EventReceived received && received.LaunchId is { } launchId &&
                         launchId == input.Step.State.Launch?.LaunchId)
                     {
@@ -66,9 +66,10 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
                         .ConfigureAwait(false);
                     wrote = true;
                 }
-                foreach (var finding in input.Step.Findings)
-                    wrote |= await WriteFindingAsync(connection, transaction, before.Key, input, finding, ct)
-                        .ConfigureAwait(false);
+                if (!opaqueEvent)
+                    foreach (var finding in input.Step.Findings)
+                        wrote |= await WriteFindingAsync(connection, transaction, before.Key, input, finding, ct)
+                            .ConfigureAwait(false);
                 foreach (var effect in input.Step.Effects)
                 {
                     if (effect is AdoptRotatedSession rotated)
@@ -84,6 +85,9 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
                         wrote = true;
                     }
                 }
+                if (!opaqueEvent && input.Event is { } resultEvent)
+                    wrote |= await WriteResultMetadataAsync(connection, transaction, before, input, resultEvent, ct)
+                        .ConfigureAwait(false);
                 wrote |= input.Step.State != previousState;
                 if (previousState.Resumability != input.Step.State.Resumability)
                 {
@@ -148,6 +152,196 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
         foreach (var finding in input.Step.Findings)
             ValidateStoredText(finding.Kind);
     }
+
+    private static async Task<bool> WriteResultMetadataAsync(NpgsqlConnection connection,
+        NpgsqlTransaction transaction, SeatActorSnapshot before, SeatAppliedInput input, SeatEvent value,
+        CancellationToken ct)
+    {
+        if (value.CommandResult is { } result)
+        {
+            if (input.Input is not EventReceived received || !Guid.TryParse(result.CommandId, out var commandId) ||
+                !before.Commands.TryGetValue(commandId, out var stored))
+                return false;
+
+            var outcome = ResultOutcome(stored, result);
+            var turnId = stored.Kind == SeatCommandKind.Deliver && result.Status == CommandStatus.Completed &&
+                         result.ResultCase == CommandResult.ResultOneofCase.Delivery &&
+                         result.Delivery.TurnId.Length != 0
+                ? result.Delivery.TurnId
+                : null;
+            var updated = await UpdateCommandResultAsync(connection, transaction, before.Key, stored, result,
+                outcome, turnId, input.At, ct).ConfigureAwait(false);
+            if (!updated) return false;
+
+            if (stored.Kind == SeatCommandKind.Deliver && DeliveryStepFor(stored, result) is { } deliveryStep)
+                foreach (var finding in deliveryStep.Findings)
+                    await WriteFindingAsync(connection, transaction, before.Key, input, finding, ct)
+                        .ConfigureAwait(false);
+
+            if (stored.Kind == SeatCommandKind.Start && result.ResultCase == CommandResult.ResultOneofCase.Launch &&
+                stored.LaunchId is { } startLaunchId && received.LaunchId == startLaunchId)
+            {
+                await UpdateLaunchResultAsync(connection, transaction, before.Key, startLaunchId, result.Launch,
+                    input.At, ct).ConfigureAwait(false);
+            }
+            else if (stored.Kind == SeatCommandKind.Stop && result.Status == CommandStatus.Completed &&
+                     result.ResultCase == CommandResult.ResultOneofCase.Stop &&
+                     stored.LaunchId is { } stopLaunchId && received.LaunchId == stopLaunchId &&
+                     input.Step.State.Launch?.LaunchId == stopLaunchId)
+            {
+                await EndLaunchFromStopAsync(connection, transaction, before.Key, stopLaunchId,
+                    SeatVocabulary.ToStored(result.Stop.Outcome), input.At, ct).ConfigureAwait(false);
+            }
+            return true;
+        }
+
+        if (value.ProcessExited is { } exited && input.Input is EventReceived processEvent &&
+            processEvent.LaunchId is { } launchId && before.State.Launch?.LaunchId == launchId)
+        {
+            await EndLaunchAsync(connection, transaction, before.Key, launchId, "exited",
+                exited.HasExitCode ? exited.ExitCode : null, exited.HasSignal ? exited.Signal : null,
+                input.At, ct).ConfigureAwait(false);
+            return true;
+        }
+        return false;
+    }
+
+    private static async Task<bool> UpdateCommandResultAsync(NpgsqlConnection connection,
+        NpgsqlTransaction transaction, SeatKey key, SeatStoredCommand stored, CommandResult result,
+        string? outcome, string? turnId, DateTimeOffset at, CancellationToken ct)
+    {
+        var commandText = CommandKindText(stored.Kind);
+        var json = JsonFormatter.Default.Format(result);
+        await using var command = new NpgsqlCommand("""
+            UPDATE aiakos.seat_command
+            SET status=@status,error_reason=@error,result=@result,outcome=@outcome,turn_id=@turn,
+                completed_at=@at
+            WHERE tenant_id=@tenant AND seat_id=@seat AND command_id=@id AND kind=@kind
+            """, connection, transaction);
+        command.Parameters.AddWithValue("status", NpgsqlDbType.Text, SeatVocabulary.ToStored(result.Status));
+        command.Parameters.AddWithValue("error", NpgsqlDbType.Text, (object?)result.Error?.Reason ?? DBNull.Value);
+        command.Parameters.AddWithValue("result", NpgsqlDbType.Jsonb, json);
+        command.Parameters.AddWithValue("outcome", NpgsqlDbType.Text, (object?)outcome ?? DBNull.Value);
+        command.Parameters.AddWithValue("turn", NpgsqlDbType.Text, (object?)turnId ?? DBNull.Value);
+        command.Parameters.AddWithValue("at", NpgsqlDbType.TimestampTz, at);
+        command.Parameters.AddWithValue("tenant", NpgsqlDbType.Uuid, key.TenantId);
+        command.Parameters.AddWithValue("seat", NpgsqlDbType.Uuid, key.SeatId);
+        command.Parameters.AddWithValue("id", NpgsqlDbType.Uuid, stored.CommandId);
+        command.Parameters.AddWithValue("kind", NpgsqlDbType.Text, commandText);
+        return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 0;
+    }
+
+    private static async Task UpdateLaunchResultAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        SeatKey key, Guid launchId, LaunchResult result, DateTimeOffset at, CancellationToken ct)
+    {
+        await using var command = new NpgsqlCommand("""
+            UPDATE aiakos.seat_launch
+            SET outcome=@outcome,outcome_reason=@reason,observed_session_id=@observed,exit_code=@exit,
+                outcome_at=@at,evidence=@evidence
+            WHERE tenant_id=@tenant AND seat_id=@seat AND launch_id=@launch
+            """, connection, transaction);
+        command.Parameters.AddWithValue("outcome", NpgsqlDbType.Text, SeatVocabulary.ToStored(result.Outcome));
+        command.Parameters.AddWithValue("reason", NpgsqlDbType.Text, result.Reason);
+        command.Parameters.AddWithValue("observed", NpgsqlDbType.Text,
+            result.ObservedSessionId.Length == 0 ? DBNull.Value : result.ObservedSessionId);
+        command.Parameters.AddWithValue("exit", NpgsqlDbType.Integer,
+            result.HasExitCode ? result.ExitCode : DBNull.Value);
+        command.Parameters.AddWithValue("at", NpgsqlDbType.TimestampTz, at);
+        command.Parameters.AddWithValue("evidence", NpgsqlDbType.Text,
+            result.Evidence is null ? DBNull.Value : result.Evidence.Text);
+        command.Parameters.AddWithValue("tenant", NpgsqlDbType.Uuid, key.TenantId);
+        command.Parameters.AddWithValue("seat", NpgsqlDbType.Uuid, key.SeatId);
+        command.Parameters.AddWithValue("launch", NpgsqlDbType.Uuid, launchId);
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private static async Task EndLaunchAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        SeatKey key, Guid launchId, string reason, int? exitCode, int? signal, DateTimeOffset at,
+        CancellationToken ct)
+    {
+        await using var command = new NpgsqlCommand("""
+            UPDATE aiakos.seat_launch
+            SET ended_at=@at,end_reason=@reason,exit_code=@exit,exit_signal=@signal
+            WHERE tenant_id=@tenant AND seat_id=@seat AND launch_id=@launch
+            """, connection, transaction);
+        command.Parameters.AddWithValue("at", NpgsqlDbType.TimestampTz, at);
+        command.Parameters.AddWithValue("reason", NpgsqlDbType.Text, reason);
+        command.Parameters.AddWithValue("exit", NpgsqlDbType.Integer, (object?)exitCode ?? DBNull.Value);
+        command.Parameters.AddWithValue("signal", NpgsqlDbType.Integer, (object?)signal ?? DBNull.Value);
+        command.Parameters.AddWithValue("tenant", NpgsqlDbType.Uuid, key.TenantId);
+        command.Parameters.AddWithValue("seat", NpgsqlDbType.Uuid, key.SeatId);
+        command.Parameters.AddWithValue("launch", NpgsqlDbType.Uuid, launchId);
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private static async Task EndLaunchFromStopAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        SeatKey key, Guid launchId, string reason, DateTimeOffset at, CancellationToken ct)
+    {
+        await using var command = new NpgsqlCommand("""
+            UPDATE aiakos.seat_launch SET ended_at=@at,end_reason=@reason
+            WHERE tenant_id=@tenant AND seat_id=@seat AND launch_id=@launch
+            """, connection, transaction);
+        command.Parameters.AddWithValue("at", NpgsqlDbType.TimestampTz, at);
+        command.Parameters.AddWithValue("reason", NpgsqlDbType.Text, reason);
+        command.Parameters.AddWithValue("tenant", NpgsqlDbType.Uuid, key.TenantId);
+        command.Parameters.AddWithValue("seat", NpgsqlDbType.Uuid, key.SeatId);
+        command.Parameters.AddWithValue("launch", NpgsqlDbType.Uuid, launchId);
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private static string? ResultOutcome(SeatStoredCommand stored, CommandResult result)
+    {
+        if (stored.Kind == SeatCommandKind.Deliver && DeliveryStepFor(stored, result) is { } delivery)
+            return delivery.State switch
+            {
+                DeliveryState.Confirmed => "confirmed",
+                DeliveryState.SubmittedUnconfirmed => "submitted-unconfirmed",
+                DeliveryState.NotDelivered => "not-delivered",
+                DeliveryState.Failed => "failed",
+                DeliveryState.Unknown => "unknown",
+                _ => null
+            };
+        if (stored.Kind == SeatCommandKind.Stop && result.ResultCase == CommandResult.ResultOneofCase.Stop)
+            return SeatVocabulary.ToStored(result.Stop.Outcome);
+        if (stored.Kind == SeatCommandKind.Start && result.ResultCase == CommandResult.ResultOneofCase.Launch)
+            return SeatVocabulary.ToStored(result.Launch.Outcome);
+        return null;
+    }
+
+    private static DeliveryStep? DeliveryStepFor(SeatStoredCommand stored, CommandResult result)
+    {
+        if (stored.Kind != SeatCommandKind.Deliver) return null;
+        var state = stored.Outcome switch
+        {
+            "confirmed" => DeliveryState.Confirmed,
+            "submitted-unconfirmed" => DeliveryState.SubmittedUnconfirmed,
+            "not-delivered" => DeliveryState.NotDelivered,
+            "failed" => DeliveryState.Failed,
+            "unknown" => DeliveryState.Unknown,
+            _ => stored.Status switch
+            {
+                "pending" => DeliveryState.Pending,
+                "sent" => DeliveryState.Sent,
+                "failed" or "rejected" or "timed-out" => DeliveryState.Failed,
+                _ => DeliveryState.Unknown
+            }
+        };
+        if (result.Status == CommandStatus.Completed && result.ResultCase == CommandResult.ResultOneofCase.Delivery)
+            return DeliveryStateMachine.Apply(state, new DeliveryResultArrived(result.Delivery.Outcome));
+        if (result.Status != CommandStatus.Completed)
+            return DeliveryStateMachine.Apply(state, new DeliveryNotCompleted(result.Status));
+        return null;
+    }
+
+    private static string CommandKindText(SeatCommandKind kind) => kind switch
+    {
+        SeatCommandKind.Start => "start",
+        SeatCommandKind.Deliver => "deliver",
+        SeatCommandKind.Keys => "keys",
+        SeatCommandKind.Capture => "capture",
+        SeatCommandKind.Stop => "stop",
+        _ => "unknown"
+    };
 
     private static async Task WriteEventAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
         SeatKey key, SeatAppliedInput input, Guid eventId, bool opaque, CancellationToken ct)
