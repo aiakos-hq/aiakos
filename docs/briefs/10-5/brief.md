@@ -197,6 +197,8 @@ R2. Receive synchronously admits and creates CommandAck before scheduling driver
     SeatId=canonical command seat, LaunchId="", Lifecycle=Unknown, NativeSessionId="",
     FirstBufferedSeq=0, LastSeq=0. Never replace existing inventory with this minimal record.
     A rejected supported start on an unknown seat uses this minimal record, not ready inventory.
+    Noncompleted errors use ErrorReasons.Create with message "Command rejected." unless
+    another rule explicitly fixes the message; never copy exception details.
 
 R3. Per seat StartSeat/DeliverInput/SendKeys execute FIFO; seats run independently. CapturePane
     and StopSeat bypass FIFO. A pending launch cannot block capture. Stop atomically marks seat
@@ -204,7 +206,17 @@ R3. Per seat StartSeat/DeliverInput/SendKeys execute FIFO; seats run independent
     Unknown reason STOPPED; queued DeliverInput/SendKeys complete Rejected/SEAT_STOPPING.
     An active delivery is canceled and completes Failed/SEAT_STOPPING with NotDelivered; never
     claim no input was sent merely because of cancellation. Queued starts also reject
-    SEAT_STOPPING; stopping ends when stop completes. A racing late driver result is ignored.
+    SEAT_STOPPING. Same-pending-launch waiters are not queued starts: R4 owns their result.
+    While stopping, newly received otherwise-valid StartSeat/DeliverInput/SendKeys return
+    Rejected/SEAT_STOPPING without driver calls. A second otherwise-valid StopSeat under a new
+    command ID joins the pending stop and copies its terminal status/Error/Stop body into its
+    own result without a second driver call. Each waiter retains its own receipt deadline;
+    timeout wins only its own terminal gate. Capture still bypasses FIFO while stopping.
+    Stopping ends when the original stop completes. A racing late driver result is ignored.
+    FIFO fixtures use SendKeys behind held SendKeys on a registered seat, and StartSeat behind
+    held SendKeys on a registered stopped seat. These remain admissible under R4/R9; do not
+    use a different-launch start behind a pending start or two unfinished deliveries as FIFO
+    fixtures. RegisterSeat supplies seats for S3 StartSeat cases; S4 adds start registration.
     Every new command uses Timeout measured from receipt, including queue time; absent, invalid
     or nonpositive Duration gives Rejected/INVALID_LAUNCH with fixed message "Invalid command
     timeout."; driver never invoked. At timeout emit TimedOut, Error{Code=DeadlineExceeded,
@@ -216,16 +228,20 @@ R3. Per seat StartSeat/DeliverInput/SendKeys execute FIFO; seats run independent
 
 R4. Launch/stop dispatch uses this order for every new command: R3 timeout validity check,
     first CommandValidator.Validate(command, installed capabilities) error (safe fixed message),
-    then kind-specific seat preconditions. Dedupe R2 precedes all three. Invalid timeout wins
+    then kind-specific seat preconditions, all evaluated atomically at receipt before FIFO
+    admission. Do not defer or repeat these checks at the FIFO head. Stopping checks in R3
+    precede other seat preconditions. Dedupe R2 precedes all three. Invalid timeout wins
     even when validator also fails. Shared dispatch forwards exact clones with the correct seat.
     Success is Completed with matching typed driver result; driver throws, null result or
     invalid/unspecified outcome gives Failed/SESSION_HOST_ERROR, "Command execution failed.".
-    Missing driver gives Rejected/UNSUPPORTED. Other noncompleted errors use ErrorReasons.Create
-    with "Command rejected." unless explicitly fixed elsewhere. Never copy exception details.
+    Missing driver gives Rejected/UNSUPPORTED. R2 owns shared noncompleted Error construction.
     Start selects Harness. Different LaunchId on occupied (including Failed/Unknown) or pending
     seat returns Rejected/SEAT_ALREADY_RUNNING, no Launch body, no driver call. Same pending
     launch under another command ID waits for original and clones its complete terminal status,
-    Error and Launch body into its own result; never launches twice. Same occupied Ready launch
+    Error and Launch body into its own result; never launches twice. When StopSeat cancels the
+    original, its same-launch waiters copy Completed with no Error and Launch Unknown/STOPPED
+    rather than queued-start Rejected/SEAT_STOPPING, unless their own deadline already won.
+    Same occupied Ready launch
     returns Completed with Launch{Outcome=Ready, Reason="", ObservedSessionId="", ExitCode absent,
     Evidence absent}, no Error and no driver call. Same occupied non-Ready launch with retained
     terminal start metadata copies that status/Error/Launch exactly (including TimedOut); retain
@@ -285,7 +301,10 @@ R6. NodeCommandSender uses only authenticated NodeLinkRegistry sessions. Use the
     not alter acceptance meaning. A correlated CommandResult releases a slot only after event
     application returned its successful postcommit ack; failed/null/pending event application
     never releases it. After outer command timeout slot is released; do not fabricate an event
-    or SQL outcome. Registry removal/supersession closes old writer and acceptance waits safely.
+    or SQL outcome. Registry removal/supersession closes the old writer but preserves unfinished
+    trackers and pending acceptance waits until a matching ack on a later authenticated session
+    or the original deadline; removal alone does not return false. R7 adds resend and its
+    explicit changed-instance input removal; S7 need not resend to prove a pending wait.
 
 R7. Preserve unfinished cloned commands in sender across reconnect within the orchestrator
     process. At new authenticated Welcome, resend StartSeat/CapturePane/StopSeat with same ID
@@ -325,13 +344,13 @@ R10. A separate real actor test
 |---|---|---|
 | `E1` | protocol/driver collection/registration | exact R1 signatures; duplicate driver => Invalid command drivers.; malformed seat => Invalid command seat.; exact new/existing RegisterSeat R1 inventory fields; preserved native/sequence fields on existing registration; no drivers advertises nothing |
 | `E2` | pending/completed/acked/expired duplicate, altered payload | first Duplicate=false; all known Duplicate=true; one execution/one seq; buffered replay same bytes/seq/trace; no new acked event; retention expires only at >=10min after cumulative ack/replay; correct InflightCount; exact minimal R2 inventory and result envelope fields |
-| `E3` | held start, capture, stop, FIFO, fake deadline | capture runs while start held; per-seat FIFO and independent seats; launch Unknown/STOPPED; queued delivery/keys Rejected/SEAT_STOPPING; timeout TimedOut/COMMAND_TIMEOUT; no late second result; Invalid command timeout. without driver |
-| `E4` | start/stop; invalid timeout plus validator error; same Ready/pending/finished/recovered launch; different Failed/Unknown launch; failed start on stopped seat | exact R4 status/Error/Launch fields; invalid timeout wins; no double launch; occupied different ID SEAT_ALREADY_RUNNING; recovered same ID SEAT_NOT_READY/Unknown; requested launch on failed/timed-out stopped-seat start result and inventory; exception text absent |
+| `E3` | held start, capture, stop, FIFO, fake deadline | capture runs while start held; FIFO SendKeys behind SendKeys and start behind SendKeys on registered stopped seat; independent seats; launch Unknown/STOPPED; queued delivery/keys Rejected/SEAT_STOPPING; new start/delivery/keys while stopping Rejected/SEAT_STOPPING; second stop copies first terminal status/Error/Stop with one driver call; timeout TimedOut/COMMAND_TIMEOUT; no late second result; Invalid command timeout. without driver |
+| `E4` | start/stop; invalid timeout plus validator error; same Ready/pending/finished/recovered launch; same pending launch waiter when original stopped; different Failed/Unknown launch; failed start on stopped seat | exact R4 status/Error/Launch fields; stopped original and same-launch waiter Completed Launch Unknown/STOPPED without Error; invalid timeout wins; no double launch; occupied different ID SEAT_ALREADY_RUNNING; recovered same ID SEAT_NOT_READY/Unknown; requested launch on failed/timed-out stopped-seat start result and inventory; exception text absent |
 | `E5` | production opt-in with fake supplied driver, blocked Welcome/writer/reconnect | ack admission does not await driver work; no pre-Welcome/overlapping writes; heartbeat actual unfinished count; executor survives reconnect; stale stream readers canceled/awaited; event/ack original trace; legacy source unchanged; malformed command IDs => FailedPrecondition/Invalid command envelope. |
-| `E6` | authenticated/missing/foreign/full target, delayed ack/commit | only current target writes; true only after matching CommandAck; false for unsupported/full/invalid; one reserved duplicate slot; successful postcommit final result alone releases capacity early; stale/unknown ack does nothing; two authenticated NodeIds with same tenant/name neither supersede nor route; removing one restores routing; one deadline removes tracker/releases slot and returns false for unacked |
+| `E6` | authenticated/missing/foreign/full target, delayed ack/commit | only current target writes; true only after matching CommandAck; false for unsupported/full/invalid; one reserved duplicate slot; successful postcommit final result alone releases capacity early; stale/unknown ack does nothing; two authenticated NodeIds with same tenant/name neither supersede nor route; removing one restores routing; removal/supersession before ack keeps acceptance pending until later matching ack or original deadline; one deadline removes tracker/releases slot and returns false for unacked |
 | `E7` | same/changed instance reconnect and supersession | same instance resends all unfinished kinds once; changed resends Start/Capture/Stop only; IDs/launch/body/trace unchanged, Attempt incremented; old deadline preserved; no completed resend/old-session removal; no cold-start replay |
 | `E8` | adapter and loopback | matching trusted tenant/name/instance/seat only; ambiguous lookup disconnected; same singleton ports; no early capacity release |
-| `E9` | input/keys/capture and driver errors | exact R9 mappings; readiness/busy/lead/key restrictions; scalar-safe capture limit; exception text absent |
+| `E9` | input/keys/capture and driver errors; delivery received while start pending | exact R9 mappings; pending-start delivery immediately Rejected/SEAT_NOT_READY and never queued; readiness/busy/lead/key restrictions; scalar-safe capture limit; exception text absent |
 | `E10` | real actor replay | command persisted before send; one durable result/update on replay; readiness-before-Ready no sources-disagree |
 
 ## Tests

@@ -12,7 +12,7 @@ depends: S1
 owns: R2
 outputs: E2
 tests: T2
-notes: R2 owns command lifetime/dedupe and safe cached evidence. Use an internal execution callback in tests until S3/S4 adds the scheduler/driver path. Never publish a default successful driver. Result sequence/trace comes from the existing buffer; Welcome replay notification is wired by S6.
+notes: R2 owns command lifetime/dedupe and safe cached evidence. Start registration arrives with S4; S2 StartSeat fixtures use RegisterSeat first. Use CapturePane on an unknown seat to prove minimal inventory. Use an internal execution callback in tests until S3/S4 adds the scheduler/driver path. Never publish a default successful driver. Result sequence/trace comes from the existing buffer; Welcome replay notification is wired by S6.
 
 ## S3: Per-seat scheduling and cancellation
 goal: Execute FIFO work per seat with bypass capture/stop, relative deadlines and bounded shutdown.
@@ -20,7 +20,7 @@ depends: S2
 owns: R3
 outputs: E3
 tests: T3
-notes: Builds on R2 single-terminal lifetime and admission. Scripted internal execution callback exercises scheduling before S4 wires drivers. Stop and timeout race must share the same terminal gate; independent queue/driver mechanics are not reimplemented.
+notes: Builds on R2 single-terminal lifetime and admission. Start registration arrives with S4; register S3 StartSeat fixture seats with RegisterSeat. FIFO fixtures use SendKeys behind SendKeys and start behind SendKeys on a registered stopped seat, not two different-launch starts or two unfinished deliveries. Use CapturePane for unknown-seat minimal inventory. Scripted internal execution callback exercises scheduling before S4 wires drivers. Stop and timeout race must share the same terminal gate; independent queue/driver mechanics are not reimplemented.
 
 ## S4: Launch and stop execution
 goal: Map launch/stop with exact occupancy and replay rules; publish shared validation and safe driver failure mapping.
@@ -28,7 +28,7 @@ depends: S3
 owns: R4
 outputs: E4
 tests: T4
-notes: Requires R1 protocol, R2 lifetime and R3 scheduler. Driver-owned readiness/confirmation deadlines are distinct from R3 outer deadline. Real driver is not a prerequisite; do not build12-4 or11-3/11-4. Failed/unknown launch remains occupied until explicit stop.
+notes: Requires R1 protocol, R2 lifetime and R3 scheduler. R4 same-pending-launch waiters copy the original STOPPED result and are exempt from R3 queued-start rejection. R4 evaluates seat preconditions at receipt before FIFO admission. Driver-owned readiness/confirmation deadlines are distinct from R3 outer deadline. Real driver is not a prerequisite; do not build12-4 or11-3/11-4. Failed/unknown launch remains occupied until explicit stop.
 
 ## S5: Input and capture execution
 goal: Dispatch delivery, keys and capture with exact readiness, busy and capture-size rules.
@@ -36,7 +36,7 @@ depends: S4
 owns: R9
 outputs: E9
 tests: T9
-notes: R4 supplies validation and safe driver mapping; R2 supplies envelopes and R3 scheduling. This story owns no launch/stop state transition.
+notes: R4 supplies validation and safe driver mapping; R2 supplies envelopes and R3 scheduling. R4 receipt-time checks reject a delivery while start is pending rather than queueing it until Ready. This story owns no launch/stop state transition.
 
 ## S6: Node command source and stream writer
 goal: Compose immediate command acknowledgements and event replay with the existing reconnecting single-writer node stream.
@@ -52,7 +52,7 @@ depends: -
 owns: C2, C3, R6
 outputs: E6
 tests: T6
-notes: EXTERNAL PREREQUISITE:10-4 optional postcommit event application/ack transport merged. Fake node and delayed event application suffice; no node S6/actor prerequisite. All responses use existing writer gate. C3 adds ambiguity-safe tenant/name lookup while preserving NodeId ownership; R6 adds outbound writer. Preserve old constructors; change tests only for C2/C3.
+notes: EXTERNAL PREREQUISITE:10-4 optional postcommit event application/ack transport merged. Fake node and delayed event application suffice; no node S6/actor prerequisite. All responses use existing writer gate. R6 keeps pending acceptance across removal/supersession until a later matching ack or the original deadline; R7 adds actual resend. C3 adds ambiguity-safe tenant/name lookup while preserving NodeId ownership; R6 adds outbound writer. Preserve old constructors; change tests only for C2/C3.
 
 ## S8: Safe command resend after reconnect
 goal: Resend unfinished commands under original deadlines while refusing input resend across changed node epochs.
