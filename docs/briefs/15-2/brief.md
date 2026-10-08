@@ -76,7 +76,7 @@ C2. Add migration `0003_rig_revision.sql` with `aiakos.rig_revision(tenant_id, r
     source_commit, source_dirty, created_by, created_at)`, foreign key `(tenant_id,rig_id)` to
     `aiakos.rig`, unique `(tenant_id,rig_id,revision)` and `(tenant_id,rig_id,spec_hash,binding_hash)`,
     then add nullable `current_revision_id` and its foreign key to `aiakos.rig`; all in one
-    transaction, with no existing migration edited. `resolved` stores complete canonical file contents.
+    transaction, with no existing migration edited. `resolved` stores canonical descriptors; binary contents are stored separately as specified below.
 
 ## Rules
 
@@ -86,21 +86,19 @@ R2. Authentication maps the configured API token to `CallerContext(DefaultTenant
 R3. Address resolution accepts full `member@rig`; a short member is accepted only when unique in
     the tenant. Unknown rig/seat is 404 `NOT_FOUND`; ambiguous short member is 400 `AMBIGUOUS_SEAT`.
 R4. Read endpoints return `SeatStatusRow`, `SeatDetail`, `SeatLaunchRow`, `SeatCommandRow` and
-    node rows from existing readers, preserving DB order and omitting secret/token hashes.
-R5. `PUT /v1/rigs/{rig}` parses and canonicalizes its `Resolved` JSON with the existing
-    `ResolvedRig` canonicalizer and recomputes both hashes; submitted hashes are never trusted.
-    Mismatch returns 400 `HASH_MISMATCH` with no writes. A new pair appends a revision and updates
+    node rows from the optional IApiNodeReader below, preserving reader order and omitting secret/token hashes.
+R5. The repository accepts the validated registration from R11. A new pair appends a revision and updates
     `aiakos.rig.current_revision_id` in one transaction. Upsert every desired seat's address, kind,
     parameters and hashes; retire a removed seat only when its session is absent or exited. A running
     removal aborts the transaction with `SEAT_REMOVED_WHILE_RUNNING`, leaving all tables unchanged.
 R6. Problem mapping is exact: validation 400, unknown address 404, actor/domain rejection 409,
-    authentication 401; `retryable` is true only for transient command/host outcomes.
+    authentication 401; `retryable` follows the exact closed-contract flags below.
 R7. `GET /v1/seats`, `/v1/seats/{address}`, `/v1/launches/{id}`, `/v1/commands/{id}`, and
-    `/v1/nodes` are read-only and work across CLI/server patch versions; changing commands require
-    same major.minor and otherwise return 409 `VERSION_INCOMPATIBLE` with both versions.
+    `/v1/nodes` are read-only and work across CLI/server patch versions; the gated routes listed below require
+    same major.minor and otherwise return 409 `VERSION_INCOMPATIBLE` with the fixed detail below.
 R8. The gated bridge maps `up`, `down`, `send`, and `capture` request DTOs to the merged 13-4
     dispatcher with CallerContext, maps replies and fixed reasons, and never acknowledges a
-    command before the dispatcher completes. Until 13-4 merges, no production bridge is present.
+    command before the dispatcher completes. S6 waits for 13-4 S16; without a registered dispatcher it returns the exact HOST_UNAVAILABLE response below.
 R9. API activity uses `ActivitySource("Aiakos.Api")`, one `api.<command>` activity per route, and
     continues incoming `traceparent`. Names are `version`, `seats.list`, `seat.detail`, `launch.get`,
     `command.get`, `nodes.list`, `rig.put`, `seat.up`, `seat.down`, `seat.send`, and `seat.capture`.
@@ -116,10 +114,10 @@ R9. API activity uses `ActivitySource("Aiakos.Api")`, one `api.<command>` activi
 | `E3` | read endpoint fixture | ordered status/detail/launch/command/node JSON with no token hashes or secret paths |
 | `E4` | revision registration matrix | new pair revision1, duplicate pair same revision, changed pair revision2, mismatch `HASH_MISMATCH`, running removal `SEAT_REMOVED_WHILE_RUNNING` and zero writes |
 | `E5` | problem/version matrix | exact status/reason/detail/retryable mapping and major.minor gate |
-| `E6` | 13-4 port fake bridge | context and immutable command mapping; accepted/rejected/capture replies; no bridge before dependency |
+| `E6` | 13-4 port fake bridge | context and immutable command mapping; accepted/rejected/capture replies; missing-dispatcher response |
 | `E7` | trace/cancellation matrix | one root continuation, no sensitive values, cancellation before lookup/write |
 
-E4 uses these exact documents: revision 1 request `{"resolved":"{...}","tool_version":"2.0","source_path":"rig.yaml","source_commit":"abc","source_dirty":false,"spec_hash":"<recomputed>","binding_hash":"<recomputed>"}` returns HTTP 200 `{"revision_id":"<uuid>","revision":1,"spec_changed":true,"binding_changed":true,"seats":[]}`; repeating the same pair returns the same revision and both changed flags false; a changed pair returns revision 2. A submitted hash mismatch returns HTTP 400 `{"reason":"HASH_MISMATCH","detail":"Resolved rig hashes do not match.","retryable":false}`. Removing a running seat returns HTTP 409 `{"reason":"SEAT_REMOVED_WHILE_RUNNING","detail":"A running seat cannot be removed.","retryable":false}` and leaves all rows unchanged.
+E4 repository fixtures and E9 HTTP fixtures use these exact documents: revision 1 request `{"resolved":"{...}","tool_version":"2.0","source_path":"rig.yaml","source_commit":"abc","source_dirty":false,"spec_hash":"<recomputed>","binding_hash":"<recomputed>","files_by_sha256":{}}` returns HTTP 200 `{"revision_id":"<uuid>","revision":1,"spec_changed":true,"binding_changed":true,"seats":[]}`; repeating the same pair returns the same revision and both changed flags false; a changed pair returns revision 2. A submitted hash mismatch returns HTTP 400 `{"reason":"HASH_MISMATCH","detail":"Resolved rig hashes do not match.","retryable":false}`. Removing a running seat returns HTTP 409 `{"reason":"SEAT_REMOVED_WHILE_RUNNING","detail":"A running seat cannot be removed.","retryable":false}` and leaves all rows unchanged.
 
 ## Tests
 
@@ -127,13 +125,13 @@ T1. Contract golden tests cover source-generated snake_case JSON, nullability, p
     and immutable DTO snapshots.
 T2. Auth/address tests use fake token store and tenant fixtures; test full/short/ambiguous/unknown
     addresses, constant-time comparison behavior, and no sensitive output.
-T3. Read tests use existing SeatQueries fakes and assert ordering and omission of hashes/secrets.
+T3. Read tests use existing SeatQueries fakes and the optional IApiNodeReader and assert ordering and omission of hashes/secrets.
 T4. Real Postgres migration/repository tests assert revision uniqueness, append-only numbering,
-    hash mismatch, retirement guard and transaction rollback.
+    binary file persistence, retirement guard and transaction rollback; T9 owns hash mismatch.
 T5. API integration tests assert loopback bind, status/reason mapping and version gate.
 T6. After 13-4 merges, fake-port bridge tests assert every command/reply and cancellation; no
     production dispatcher double is allowed.
-T7. Activity tests assert trace continuation and bounded export without body/token attributes.
+T7. Activity tests assert trace continuation and absence of body/token attributes.
 
 ## Done and out of scope
 
@@ -153,7 +151,7 @@ Revision,bool SpecChanged,bool BindingChanged,IReadOnlyList<SeatRegistrationResp
 `CaptureRequest(int HistoryLines)`, `AcceptedResponse(Guid LaunchId,Guid CommandId)`,
 `CommandAcceptedResponse(Guid CommandId)`,
 `AlreadyUpResponse(Guid LaunchId)`, `NoOpResponse`, `CaptureResponse(string Text,bool Truncated,
-bool PaneDead)`, `CaptureTimeoutResponse`, and response records mirroring existing `SeatStatusRow`,
+bool PaneDead)`, `CaptureTimeoutResponse(string Reason,string Detail,bool Retryable)`, and response records mirroring existing `SeatStatusRow`,
 `SeatDetail`, `SeatLaunchRow`, `SeatCommandRow` and node fields in their declared order.
 The JSON context emits `api,version`, `problem` fields, and response properties in declaration
 order using snake_case. `CallerContext` is created exactly once by 13-4; 15-2 consumes it and
@@ -173,15 +171,15 @@ SeatStatusResponse[]; `GET /v1/seats/{address}`→SeatDetailResponse; `GET /v1/l
 LaunchResponse; `GET /v1/commands/{id}`→CommandResponse; `GET /v1/nodes`→`NodeResponse(string Node,bool Connected,DateTimeOffset? Since,string? NodeInstanceId,string? Version,IReadOnlyList<string> Capabilities,string? LastError)[]`;
 `PUT /v1/rigs/{rig}`→RegisterRigResponse (200); `POST /v1/seats/{address}/up`→202 AcceptedResponse or
 200 AlreadyUpResponse; `/down`→202 CommandAcceptedResponse or 200 NoOpResponse; `/send`→202
-CommandAcceptedResponse; `/capture`→200 CaptureResponse or 504 CaptureTimeoutResponse. Bodies are the request records above. Changing routes
+CommandAcceptedResponse; `/capture`→200 CaptureResponse or 504 CaptureTimeoutResponse. Bodies are the request records above. The explicitly gated routes below
 require `X-Aiakos-Client-Version` and matching major.minor.
 
 Problem mapping is exact: `UNAUTHORIZED` 401 empty detail non-retryable; `INVALID_REQUEST` 400 `Request body is invalid.` non-retryable; `NOT_FOUND` 404
 `Seat or rig was not found.`; `AMBIGUOUS_SEAT` 400 `Seat address is ambiguous.`; `HASH_MISMATCH`
 400 `Resolved rig hashes do not match.`; `SEAT_REMOVED_WHILE_RUNNING` 409 `A running seat cannot
 be removed.`; `VERSION_INCOMPATIBLE` 409 `CLI and instance versions are incompatible.`;
-`SEAT_REJECTED` 409 `The seat rejected the command.`; `HOST_UNAVAILABLE` 503 `The instance host is unavailable.`
-retryable. No other reason is emitted.
+actor rejection reason unchanged, 409 `The seat rejected the command.`; `HOST_UNAVAILABLE` 503 `The instance host is unavailable.`
+retryable. No other API-generated reason is emitted; actor rejection reasons pass through as specified below.
 
 Server tracing uses `ActivitySource("Aiakos.Api")`, one `api.<command>` activity for each route,
 propagates `traceparent`, and tags only `api.command`, `http.route`, and `caller.user`.
@@ -189,7 +187,7 @@ It never exports body/token attributes; this slice does not add OTLP export.
 
 ## Third-pass contract details
 
-`RegisterRigRequest` carries `IReadOnlyDictionary<string,byte[]> FilesBySha256`, with lowercase SHA-256 hex keys and raw UTF-8 bytes. Each file is at most 1 MiB and the total is at most 16 MiB. Every canonical path/hash/size entry must have exactly one matching map entry; verify byte length and SHA-256 before any write. Reject violations with fixed `FILE_CONTENT_INVALID` and detail `Rig file contents do not match the canonical form.`; never include file bytes in errors.
+`RegisterRigRequest` carries `IReadOnlyDictionary<string,byte[]> FilesBySha256`, with lowercase SHA-256 hex keys and raw bytes. Each file is at most 1 MiB and the total is at most 16 MiB. Every canonical path/hash/size entry must have exactly one matching map entry; verify byte length and SHA-256 before any write. Reject violations with fixed `FILE_CONTENT_INVALID` and detail `Rig file contents do not match the canonical form.`; never include file bytes in errors.
 
 `Aiakos.Spec.RigHashVerifier.Verify(string resolvedJson, string specHash, string bindingHash)` returns `RigHashVerification(bool Valid,string SpecHash,string BindingHash)`. It parses and validates the request's canonical JSON and recomputes both hashes through the existing `RigCanonicalizer`/`CanonicalJson`; no orchestrator hash implementation is permitted. `RigRegistration` is `(string Rig,string Resolved,string ToolVersion,string SourcePath,string? SourceCommit,bool SourceDirty,string SpecHash,string BindingHash,IReadOnlyDictionary<string,byte[]> FilesBySha256)`; `RigRevisionReceipt` is `(Guid RevisionId,int Revision,bool SpecChanged,bool BindingChanged,IReadOnlyList<SeatRegistrationResponse> Seats)`.
 
@@ -207,3 +205,80 @@ Registration file values are arbitrary binary bytes (not UTF-8); keys are lowerc
 The registration transaction upserts existing `aiakos.seat` columns `(tenant_id,seat_id,rig_id,member,address,kind,harness,node_name,spec_hash,binding_hash,parameters,updated_at)`. Inserts set all of these plus `retired_at NULL` and timestamps; updates change rig identity, address, kind, harness, node_name, hashes, parameters and `updated_at`. Registration never changes `desired`, `desired_at`, or `desired_by`; retirement sets `retired_at` only under the absent/exited guard and never deletes rows.
 
 Malformed JSON in `RigHashVerifier.Verify` throws `FormatException` with exact message `Resolved JSON is invalid.`; it does not return a result or write. E8 asserts this exception, while a well-formed hash mismatch returns `Valid=false` with both recomputed hashes.
+
+## Round-7 closed contracts
+
+R4. Node rows come from `Aiakos.Orchestrator.Api.IApiNodeReader` with member
+`Task<IReadOnlyList<NodeResponse>> ListAsync(Guid tenantId,CancellationToken ct)`.
+The route preserves provider order. With no registered provider, GET /v1/nodes returns
+HTTP 200 `[]`; it does not invent connected nodes or require a database node table.
+E3 includes the unregistered-provider fixture with exact response `[]`; T3 pins it.
+
+R7. The version gate applies exactly to PUT /v1/rigs/{rig} and POST
+/v1/seats/{address}/up, /down and /send. GET routes and POST /capture are ungated.
+Missing, empty, multiple or unparsable X-Aiakos-Client-Version returns HTTP 400
+`{"reason":"INVALID_REQUEST","detail":"Request body is invalid.","retryable":false}`
+before lookup or write. Parse a System.Version with at least major and minor; compare
+only major.minor. A differing pair returns HTTP 409
+`{"reason":"VERSION_INCOMPATIBLE","detail":"CLI and instance versions are incompatible.","retryable":false}`.
+E5 includes one fixture each for missing header, malformed header and unequal major.minor
+with these exact bodies; equal major.minor with differing patch proceeds. Capture without
+this header proceeds. T5 tests these policy decisions independently of producing routes.
+
+R8. S2 waits for merged 13-4 S1 (Core protocol); S6 waits for merged 13-4 S16
+(command service registration). Resolve the dispatcher optionally; an absent dispatcher
+and a faulted dispatch task both return HOST_UNAVAILABLE below. Caller cancellation is
+propagated as cancellation, not translated to a fault response. Never log exception details.
+For any SeatCommandRejected, preserve its Reason byte-for-byte in the problem reason,
+HTTP 409, detail `The seat rejected the command.`. Retryable is true exactly for
+NODE_NOT_CONNECTED, SEAT_ACTOR_UNAVAILABLE, SEAT_COMMAND_SERVICE_UNAVAILABLE,
+COMMAND_DISPATCH_FAILED, CAPTURE_FAILED, DELIVERY_IN_FLIGHT, SEAT_WORKING,
+SEAT_NEEDS_INPUT, SEAT_STATE_UNKNOWN and SEAT_ACTIVITY_UNKNOWN; all other reasons,
+including RESUME_LOST, are non-retryable. This flag describes transient state only and
+never authorizes automatic resend. Unknown future rejection reasons pass through with false.
+
+The following table is exhaustive; L and C are dispatcher-returned UUID strings, text is
+JSON-escaped capture.Text, and capture flags come directly from PaneCapture.
+
+| Command | Reply | Status | Exact JSON body |
+|---|---|---|---|
+| up | SeatCommandAccepted(L,C), L non-null | 202 | `{"launch_id":"L","command_id":"C"}` |
+| up | SeatAlreadyUp(L) | 200 | `{"launch_id":"L"}` |
+| down/send | SeatCommandAccepted(any,C) | 202 | `{"command_id":"C"}` |
+| down | SeatAlreadyDown | 200 | `{}` |
+| capture | SeatCaptureCompleted(capture) | 200 | `{"text":"text","truncated":false,"pane_dead":false}` (flags/text from capture) |
+| capture | SeatCommandTimedOut("CAPTURE_TIMEOUT") | 504 | `{"reason":"CAPTURE_TIMEOUT","detail":"Seat capture timed out.","retryable":true}` |
+| any | SeatCommandRejected("NODE_NOT_CONNECTED") | 409 | `{"reason":"NODE_NOT_CONNECTED","detail":"The seat rejected the command.","retryable":true}` |
+| any | SeatCommandRejected("RESUME_LOST") | 409 | `{"reason":"RESUME_LOST","detail":"The seat rejected the command.","retryable":false}` |
+| any | other SeatCommandRejected(reason) | 409 | `{"reason":"<reason>","detail":"The seat rejected the command.","retryable":<flag above>}` |
+| any | missing dispatcher, faulted task, null/unknown object, wrong-command reply, up accepted with null LaunchId, or other timeout reason | 503 | `{"reason":"HOST_UNAVAILABLE","detail":"The instance host is unavailable.","retryable":true}` |
+
+All error rows use application/problem+json, including CaptureTimeoutResponse. E6 comprises
+every row of this table; T6 pins each row with fake ports, including faults and absent DI.
+No dispatch reply is acknowledged until its task completes.
+
+C2. Add in the same migration `aiakos.rig_revision_file(tenant_id uuid NOT NULL,
+revision_id uuid NOT NULL, sha256 text NOT NULL, contents bytea NOT NULL,
+PRIMARY KEY(tenant_id,revision_id,sha256), FOREIGN KEY(tenant_id,revision_id)
+REFERENCES aiakos.rig_revision(tenant_id,revision_id))`. Add UNIQUE(tenant_id,revision_id)
+to rig_revision for this FK. Persist each verified map entry exactly once with its raw bytes
+in the revision transaction; duplicate hash-pair registration reuses the existing revision
+and files. Canonical descriptors remain in resolved jsonb; file bytes never enter that JSON.
+
+R5. Repository ownership covers numbering, pair uniqueness, byte persistence, current revision
+pointer, existing rig metadata update, seat upsert and guarded retirement in one transaction.
+R11. The HTTP registration route owns request parsing, the R7 version gate, RigHashVerifier,
+and file-map verification before calling AppendAsync. Reject malformed canonical JSON as
+INVALID_REQUEST; reject hash mismatch as HASH_MISMATCH and invalid/missing/extra contents
+as FILE_CONTENT_INVALID before any repository call. R11 consumes R5's repository contract.
+E4 is the repository matrix: new pair revision1, duplicate same ID/number with false flags,
+changed pair revision2 and running removal rollback. Include binary file bytes round-trip
+and zero revision/file/seat/rig changes on rollback. T4 pins this with real Postgres.
+
+E9. The HTTP matrix: the E4 request above includes files_by_sha256 (base64 JSON byte-array
+values, lowercase SHA-256 keys); valid requests map the receipt to that exact 200 body.
+HASH_MISMATCH and SEAT_REMOVED_WHILE_RUNNING use the exact E4 bodies. FILE_CONTENT_INVALID
+returns HTTP 400 `{"reason":"FILE_CONTENT_INVALID","detail":"Rig file contents do not match the canonical form.","retryable":false}`.
+Malformed resolved JSON returns HTTP 400 `{"reason":"INVALID_REQUEST","detail":"Request body is invalid.","retryable":false}`.
+
+T9. Pins E9 and version rejection before AppendAsync with fake repository probes.
