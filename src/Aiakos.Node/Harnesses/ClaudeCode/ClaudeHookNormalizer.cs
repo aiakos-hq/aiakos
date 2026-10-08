@@ -93,10 +93,17 @@ public static class ClaudeHookNormalizer
                 case "Notification":
                     Add(attributes, "notification_type", String(root, "notification_type"));
                     break;
+                case "statusLine":
+                    kind = HarnessEventKind.Telemetry;
+                    Add(attributes, "claude.version", String(root, "version"));
+                    Add(attributes, "session_name", String(root, "session_name"));
+                    AddBoolean(attributes, "exceeds_200k_tokens", root, "exceeds_200k_tokens");
+                    AddRateLimit(attributes, root, "five_hour");
+                    AddRateLimit(attributes, root, "seven_day");
+                    break;
             }
         }
 
-        document?.Dispose();
         var resultEvent = new HarnessEvent
         {
             Harness = "claude-code",
@@ -108,6 +115,9 @@ public static class ClaudeHookNormalizer
             Origin = EventOrigin.Live
         };
         foreach ((string key, string value) in attributes) resultEvent.Attributes.Add(key, value);
+        if (valid && nativeName == "statusLine")
+            resultEvent.Usage = ParseUsage(root);
+        document?.Dispose();
         HarnessEventLimits.Apply(resultEvent);
         return new ClaudeNormalizationResult(resultEvent, state);
     }
@@ -190,5 +200,79 @@ public static class ClaudeHookNormalizer
     {
         if (root.TryGetProperty(property, out JsonElement value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False)
             values[name] = value.GetBoolean().ToString().ToLower(CultureInfo.InvariantCulture);
+    }
+
+    private static void AddRateLimit(Dictionary<string, string> attributes, JsonElement root, string period)
+    {
+        if (!root.TryGetProperty("rate_limits", out JsonElement limits) || limits.ValueKind != JsonValueKind.Object ||
+            !limits.TryGetProperty(period, out JsonElement window) || window.ValueKind != JsonValueKind.Object)
+            return;
+        string prefix = $"rate_limit.{period}.";
+        AddNumber(attributes, prefix + "used_percent", window, "used_percentage");
+        AddNumber(attributes, prefix + "resets_at", window, "resets_at");
+    }
+
+    private static Usage? ParseUsage(JsonElement root)
+    {
+        var usage = new Usage();
+        bool hasValue = false;
+        if (root.TryGetProperty("context_window", out JsonElement context) && context.ValueKind == JsonValueKind.Object)
+        {
+            if (TryUInt32Integer(context, "used_percentage", out uint usedPercent))
+            {
+                usage.ContextUsedPercent = usedPercent;
+                hasValue = true;
+            }
+            if (TryUInt64Integer(context, "context_window_size", out ulong windowTokens))
+            {
+                usage.ContextWindowTokens = windowTokens;
+                hasValue = true;
+            }
+            if (context.TryGetProperty("current_usage", out JsonElement current) && current.ValueKind == JsonValueKind.Object &&
+                TryUInt64Integer(current, "input_tokens", out ulong input) &&
+                TryUInt64Integer(current, "cache_creation_input_tokens", out ulong creation) &&
+                TryUInt64Integer(current, "cache_read_input_tokens", out ulong read) &&
+                input <= ulong.MaxValue - creation && input + creation <= ulong.MaxValue - read)
+            {
+                usage.ContextUsedTokens = input + creation + read;
+                hasValue = true;
+            }
+        }
+        if (root.TryGetProperty("cost", out JsonElement cost) && cost.ValueKind == JsonValueKind.Object &&
+            cost.TryGetProperty("total_cost_usd", out JsonElement total) && total.ValueKind == JsonValueKind.Number &&
+            total.TryGetDouble(out double costValue) && double.IsFinite(costValue) && costValue >= 0)
+        {
+            usage.CostUsd = costValue;
+            hasValue = true;
+        }
+        string? modelId = null;
+        if (root.TryGetProperty("model", out JsonElement model) && model.ValueKind == JsonValueKind.Object)
+            modelId = String(model, "id");
+        if (modelId is not null)
+        {
+            usage.ModelId = modelId;
+            if (modelId.Length > 0) hasValue = true;
+        }
+        return hasValue ? usage : null;
+    }
+
+    private static bool TryUInt32Integer(JsonElement element, string property, out uint result)
+    {
+        result = 0;
+        return element.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.Number &&
+            IsIntegerToken(value) && value.TryGetUInt32(out result);
+    }
+
+    private static bool TryUInt64Integer(JsonElement element, string property, out ulong result)
+    {
+        result = 0;
+        return element.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.Number &&
+            IsIntegerToken(value) && value.TryGetUInt64(out result);
+    }
+
+    private static bool IsIntegerToken(JsonElement value)
+    {
+        string token = value.GetRawText();
+        return !token.Contains('.') && !token.Contains('e') && !token.Contains('E');
     }
 }

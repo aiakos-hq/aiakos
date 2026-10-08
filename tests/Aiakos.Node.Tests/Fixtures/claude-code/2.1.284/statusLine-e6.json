@@ -1,0 +1,1 @@
+{"session_id":"session-a","context_window":{"used_percentage":0,"context_window_size":16.0,"current_usage":{"input_tokens":8,"cache_creation_input_tokens":202,"cache_read_input_tokens":32366,"output_tokens":32}},"cost":{"total_cost_usd":-0.1},"model":{"id":""}}
