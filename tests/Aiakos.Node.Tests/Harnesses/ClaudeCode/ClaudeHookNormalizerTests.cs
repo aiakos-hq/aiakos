@@ -88,6 +88,52 @@ public sealed class ClaudeHookNormalizerTests
         Assert.Equal(new byte[] { (byte)'{', (byte)'}', (byte)'\n' }, ClaudeFixtureLoader.ReadBytes("loader.json"));
     }
 
+    [Theory]
+    [InlineData("screen-trust", "trust-dialog")]
+    [InlineData("screen-created-trusted", "trust-dialog")]
+    [InlineData("screen-resume", "resume-picker")]
+    [InlineData("screen-login", "login-required")]
+    [InlineData("screen-api-key", "api-key-dialog")]
+    [InlineData("screen-settings-error", "settings-error")]
+    [InlineData("screen-invalid-settings", "settings-error")]
+    [InlineData("screen-empty", "unrecognized")]
+    [InlineData("screen-generic", "unrecognized")]
+    [InlineData("screen-ansi-priority", "trust-dialog")]
+    [InlineData("screen-ansi-case", "login-required")]
+    [InlineData("screen-null-needle", "unrecognized")]
+    public void ClassifiesScreenTextFixtures(string name, string expected)
+    {
+        string capture = ClaudeFixtureLoader.ReadText(name + ".txt");
+        string label = ClaudeFixtureLoader.ReadText(name + ".expected.txt").TrimEnd('\n');
+        Assert.Equal(expected, label);
+        Assert.Equal(label, ClaudeScreenClassifier.Classify(capture));
+    }
+
+    [Theory]
+    [InlineData("exit-resume-not-found", "RESUME_SESSION_NOT_FOUND")]
+    [InlineData("exit-session-in-use", "SESSION_ID_IN_USE")]
+    [InlineData("exit-empty", "HARNESS_EXITED")]
+    [InlineData("exit-unrelated", "HARNESS_EXITED")]
+    [InlineData("exit-both-priority", "RESUME_SESSION_NOT_FOUND")]
+    [InlineData("exit-ansi-case", "SESSION_ID_IN_USE")]
+    public void ClassifiesExitReasonTextFixtures(string name, string expected)
+    {
+        string capture = ClaudeFixtureLoader.ReadText(name + ".txt");
+        string reason = ClaudeFixtureLoader.ReadText(name + ".expected.txt").TrimEnd('\n');
+        Assert.Equal(expected, reason);
+        Assert.Equal(reason, ClaudeScreenClassifier.ClassifyExitReason(capture));
+        Assert.Equal("unrecognized", ClaudeScreenClassifier.Classify(capture));
+    }
+
+    [Fact]
+    public void ClassifierApisRejectNullAndReturnOnlyStrings()
+    {
+        Assert.Throws<ArgumentNullException>(() => ClaudeScreenClassifier.Classify(null!));
+        Assert.Throws<ArgumentNullException>(() => ClaudeScreenClassifier.ClassifyExitReason(null!));
+        Assert.IsType<string>(ClaudeScreenClassifier.Classify(string.Empty));
+        Assert.IsType<string>(ClaudeScreenClassifier.ClassifyExitReason(string.Empty));
+    }
+
     private static void AssertEvent(string nativeName, string json, HarnessEventKind kind,
         ClaudeNormalizationState state, params (string Key, string Value)[] attributes)
         => AssertEventCore(nativeName, json, kind, state, attributes, expectedSessionId: null);
