@@ -1,0 +1,1 @@
+13-4-1	src/Aiakos.Orchestrator/Seats/SeatCommandProtocol.cs	#pragma warning disable CA1716	ISeatNodeConnectionSource.Get: C# only, no VB callers; maintainer, 2026-10-08 (#304)
