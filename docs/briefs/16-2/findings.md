@@ -1,6 +1,6 @@
 # Story review: slice 16-2
 
-Reviewed at commit b60d71d. Stories: 3. Check: ok.
+Reviewed at commit dc17752. Stories: 3. Check: ok.
 
 ## Findings
 
@@ -25,3 +25,9 @@ Reviewed at commit b60d71d. Stories: 3. Check: ok.
   prefixes, JSON-string workdir validation, diagnostics and exit-code assertions.
 - Runbook: E4/E5 now supply exact sentences, whitespace comparison rules, links and the
   ordered patch commands; the existing fix-release-pin-retry paragraph stays verbatim.
+
+## Architect, round 2
+
+The diff 76e24a2..dc17752 was read (brief.md and spec 0008 R12) and the three resolutions are accepted; no findings are open. The pull-request trigger has no path filter in R2, E2, T2, R4 and spec 0008 R12 alike. The dry-run lines quoted in E3 agree with the text form in brief 15-1 (line 221 and the example at lines 291-292). E4 and E5 list the exact sentences and the normalization the tests use.
+
+Not checked in round 2: that release 0.1.0 exists; the rest of "Not checked" above still stands. One remark that holds nothing: the E4 sentence `This PR changes no repository settings.` will stay in the README after the pull request is merged.
