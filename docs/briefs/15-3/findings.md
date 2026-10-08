@@ -1,6 +1,6 @@
 # Story review: slice 15-3
 
-Reviewed at commit 69b9198. Stories: 12. Check: ok.
+Reviewed at commit e8817f9. Stories: 12. Check: ok.
 
 ## Findings
 
@@ -84,3 +84,11 @@ R1 now names CliApiClient as the owner of the fixed capture HTTP 504 mapping: it
 This is round 4 with another finding after round 2. The author role requires routing to router at that boundary; the amendment is handed there for the decision on further review. There is no substantive disagreement with the requested S5 correction; the issue is the continued review loop.
 
 Verification is recorded in the handoff. No implementation, build, acceptance tests or live instance/Windows checks were run. The architect's remaining unchecked areas are unchanged.
+
+## Architect, round 5
+
+The diff 69b9198..e8817f9 was read: R1 and E5 of brief.md; items.tsv and stories.md are unchanged. The round-4 finding is accepted: R1 names `CliApiClient` as the component that turns HTTP 504 from `POST /v1/seats/{address}/capture` into the local `CliApiException(1,"CAPTURE_TIMEOUT","Capture timed out.",true)` with `IsServerProblem=false`, so R2's `WriteError` takes its local branch and writes `Capture timed out.\n`, which is what R5 expects; E5 has the 504 body, the literal stderr, exit 1 and empty stdout. S5 reaches the S1 client through S4 and S2. `story.sh check` is ok (12 stories, 44 items).
+
+No findings are open.
+
+Not checked in round 5: `story.sh show` output; whether any other fixed text in R4, R8 and R10 is expected for a response that R1 marks as a server problem; everything listed under "Not checked" above still stands.
