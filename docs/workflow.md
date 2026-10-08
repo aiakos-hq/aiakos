@@ -45,13 +45,12 @@ The seats are in two pods: `desk`, which the maintainer keeps open, and `team`.
 
 | Seat | Runtime | Role |
 |---|---|---|
-| `desk-lead` | Claude Code (Sonnet) | The maintainer's console: shows the board and what waits for the maintainer, passes on what the maintainer asks for. The team sends it only decisions that are the maintainer's |
-| `desk-router` | Claude Code (Haiku) | Receives every report and makes the next move: runs `tools/story.sh`, creates sub-issues, opens pull requests |
-| `team-architect` | Claude Code (Opus) | Checks the brief and the split; attacks them before they are approved. Judges an odd baseline and tags the failures of a second failed gate |
+| `desk-lead` | Claude Code (Sonnet) | Receives every report and makes the next move: runs `tools/story.sh`, creates sub-issues, opens pull requests. It is the seat the maintainer talks to, and it brings the maintainer only what needs a person |
+| `team-architect` | Claude Code (Opus) | Checks the brief and the split; attacks them before they are approved. Decides what a script cannot and the maintainer need not: an odd baseline, a wrong acceptance test, a waiver, a reading of the brief, the tags after a second failed gate |
 | `team-reviewer` | Claude Code (Opus) | Reads the diff once |
 | `team-gate` | Claude Code (Haiku) | Runs the baseline and the gate. Both are scripts |
-| `team-low1`, `team-low2` | Codex | Pool `low`: write a story's acceptance tests; implement one story each, in its own worktree. Two stories run at the same time only when neither depends on the other |
-| `team-high1`, `team-high2` | Codex, stronger model | Pool `high`: write the brief, the item list and the split; implement a story that was escalated, and every chore and bug (see "Chores and bugs") |
+| `team-low1`, `team-low2` | Codex | Pool `low`: implement one story each, in its own worktree. Two stories run at the same time only when neither depends on the other |
+| `team-high1`, `team-high2` | Codex, stronger model | Pool `high`: write the brief, the item list and the split; write a story's acceptance tests; implement a story that was escalated, and every chore and bug (see "Chores and bugs") |
 
 Which model sits behind a seat is one `model:` line in `rig.yaml`. A seat of a pool has no
 role of its own: every item names a role file in
@@ -65,8 +64,8 @@ queue; every item names the story and its sub-issue. To watch the team, open the
 **A seat keeps no conversation between items.** A long conversation is sent again with every
 request, so a seat that carried its finished work along spent most of its allowance on it.
 `hand` picks an idle seat of a pool and gives the destination an empty conversation before it
-delivers the item (a fresh launch of a pool seat, the architect or the reviewer); a busy seat
-is never touched. A start of the rig does the same for every seat. What a seat needs
+delivers the item (a fresh launch of a pool seat, the architect, the reviewer or the gate); a
+busy seat is never touched. The lead keeps its conversation, in a 200k window. A start of the rig does the same for every seat. What a seat needs
 later is therefore in the queue item, the repository or `artifacts/`, never only in what it
 remembers; a slice lives in its analysis worktree and a story in its story worktree, so any seat
 of the right pool continues it.
@@ -82,17 +81,24 @@ Credentials and the OpenRig state (`~/.openrig`) stay on the machine.
 | 2. Split | `author` | `tools/story.sh split <slice>`: sorts the items into stories, IDs only | `stories.md` |
 | 3. Check | Script | `tools/story.sh check <slice>`: traceability and size | Pass or a list of errors |
 | 4. Story review | `architect` | Reads the brief and the split once; looks for ties the script cannot see and for a story that is too large | `findings.md` |
-| 5. Approval | `router`, then the maintainer | Findings are resolved by commits. `router` runs `tools/story.sh analysis-pr <slice>`: it checks the split and the review, sets the status and the index row, and opens one pull request, marked "routine" or "read this one". The maintainer merges it | The analysis is on `main`, `approved` |
+| 5. Approval | `lead`, then the maintainer | Findings are resolved by commits. `lead` runs `tools/story.sh analysis-pr <slice>`: it checks the split and the review, sets the status and the index row, and opens one pull request, marked "routine" or "read this one". The maintainer merges it | The analysis is on `main`, `approved` |
 | 6. Acceptance | `tests`, then `gate` | `tests` writes the story's acceptance tests and `gate.sh`; `gate` runs `tools/story.sh baseline <slice> <n>`; when the result is not a plain failure for missing behaviour, `architect` reads why | `artifacts/trials/<story>/` (local), with `main-before.txt` |
-| 7. Ready | `router` | `tools/story.sh ready <slice> <n>`: checks the definition of ready and creates the sub-issue | A GitHub issue labelled `ready` |
+| 7. Ready | `lead` | `tools/story.sh ready <slice> <n>`: checks the definition of ready and creates the sub-issue | A GitHub issue labelled `ready` |
 | 8. Run | `impl`, in pool `low` (or `high` when escalated) | `tools/story.sh start <issue>`, then implements in the worktree | One commit on a local branch |
 | 9. Gate | `gate` | `tools/story.sh done <issue>`: paths, build, acceptance tests | `needs-review`, one retry, `partial` or `blocked` |
 | 10. Diff read | `reviewer` | Reads the diff once | Pass, or one of the four blocking kinds |
-| 11. Pull request | `router`, then the maintainer | `tools/story.sh pr <issue>`; the maintainer merges; `cleanup` | Done |
+| 11. Pull request | `lead`, then the maintainer | `tools/story.sh pr <issue>`; the maintainer merges; `cleanup` | Done |
 
-The maintainer acts at steps 5 and 11. `main` is protected, so no seat can merge. What waits
-for the maintainer arrives in `desk-lead`. The router finds a merge by itself at its next move
-(`tools/story.sh events`); when the rig is quiet, the maintainer says "continue" to `desk-lead`.
+The maintainer acts at steps 5 and 11. `main` is protected, so no seat can merge. The lead finds
+a merge by itself at its next move (`tools/story.sh events`); when the rig is quiet, the
+maintainer says "continue" to it.
+
+**What reaches the maintainer.** The lead decides order and routing. The architect decides
+whether an acceptance test is wrong and may be fixed, a waiver for a run that failed for the
+machine or for a wrong test, and how to read the brief where the spec settles it. The maintainer
+is asked only for: a merge, a `ready` label on a chore or a bug, a third waiver for one story,
+a story that should end `partial`, a change to a rule of a spec, an author and an architect who
+disagree after two rounds, and a seat or a machine that is stuck.
 
 Steps 1 to 5 happen in files on a branch. The back and forth between the analysis and its review
 is the commit history of that branch, and `findings.md` is where the architect writes.
@@ -190,7 +196,7 @@ attempt. The gate preserves the raw cause, ends with `GATE: infrastructure failu
 the issue label unchanged. Such logs do not count in the retry history; rerun the gate. When
 the output has a compiler or analyzer error code, it is an ordinary failure even if one of those
 texts also appears. After three infrastructure failures in a row the gate sets `blocked` and the
-story goes to `router`: the same crash every time is a broken machine or a change that crashes the
+story goes to `lead`: the same crash every time is a broken machine or a change that crashes the
 compiler, and rerunning does not fix either.
 Compiler errors, warnings treated as errors and acceptance test failures still count.
 
@@ -203,7 +209,7 @@ gate run it followed. Nobody has to authorise "one more run" for this; the gate 
 earlier failures it left out.
 
 **Waiving a run.** For a failure that was not the implementer's and that the version does not
-catch, the maintainer has `desk-lead` run `tools/story.sh waive <issue> <run> <kind> "<evidence>"`. There are two kinds:
+catch, `architect` decides and runs `tools/story.sh waive <issue> <run> <kind> "<evidence>"`. There are two kinds:
 `infrastructure` (the machine, or a flaky test the change did not touch) and `test-defect` (the
 acceptance test was wrong). A failure of the implementation cannot be waived. The waiver is a
 file next to the gate log and a comment on the issue, and `status` lists it. A story can have
@@ -244,11 +250,11 @@ An issue may take this path when all of these hold:
 
 | Step | Who | What happens |
 |---|---|---|
-| Start | `router` | `tools/story.sh start <issue>`: a worktree and a branch (`chore/…` or `fix/…`), the issue text copied in. Hands it to pool `high` |
+| Start | `lead` | `tools/story.sh start <issue>`: a worktree and a branch (`chore/…` or `fix/…`), the issue text copied in. Hands it to pool `high` |
 | Run | `impl`, in pool `high` | Does what the issue asks and nothing more. A bug fix adds a test that fails without the fix. One commit |
 | Gate | `gate` | `tools/story.sh done <issue>`: the same process checks, the build with zero warnings, then every existing test (`dotnet test`) in place of acceptance tests |
 | Diff read | `reviewer` | As for a story, with the issue text as the story text. A bug fix without a test for it is a backlog item to raise, named in the verdict |
-| Pull request | `router`, then the maintainer | `tools/story.sh pr <issue>`; the maintainer merges; `cleanup` |
+| Pull request | `lead`, then the maintainer | `tools/story.sh pr <issue>`; the maintainer merges; `cleanup` |
 
 The four blocking kinds, the one retry and `start <issue> --retry` apply as for a story.
 `tools/story.sh next` lists ready chores and bugs under the ready stories.
@@ -289,9 +295,9 @@ builds or commits in the main checkout, and no seat creates a worktree by hand.
 
 | Action | Who |
 |---|---|
-| Create a sub-issue, set labels | `router` |
-| Push a story branch | `router`, through `tools/story.sh pr` |
-| Open a pull request | `router` |
+| Create a sub-issue, set labels | `lead` |
+| Push a story branch | `lead`, through `tools/story.sh pr` |
+| Open a pull request | `lead` |
 | Merge | Maintainer only |
 
 ## Commands
@@ -313,7 +319,7 @@ bash tools/story.sh waive <issue> <run> infrastructure|test-defect "<evidence>"
 bash tools/story.sh pr <issue> [--maintainer-reviewed]
 bash tools/story.sh cleanup <issue>
 bash tools/story.sh events
-bash tools/story.sh hand <low|high|architect|reviewer|gate|router|maintainer> [--role <role>] \
+bash tools/story.sh hand <low|high|architect|reviewer|gate|lead> [--role <role>] \
      [--item <qitem>] --summary "<one line>" (--body "<text>" | --body-file <path>)
 ```
 

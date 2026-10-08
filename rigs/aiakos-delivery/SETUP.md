@@ -44,14 +44,13 @@ rig down aiakos-delivery                 # stop; queue items are kept for the ne
 Every seat starts with an empty conversation (`restore_policy: relaunch_fresh` in `rig.yaml`)
 and reads its queue.
 
-The rig has two pods. `desk` holds the two seats to keep open: `desk-lead`, which you talk to,
-and `desk-router`, which moves the work. `team` holds the seven seats that do it; look at them
-now and then. Give the team work by typing in the terminal of `desk-lead`. The only thing the team sends
-there is a decision that it owes you, so a message you are typing is rarely cut. Answer it
-there. Do not type into `desk-router`: the seats' reports arrive in it.
+The rig has two pods. `desk` holds `desk-lead`, the seat you talk to: it receives the team's
+reports, makes the next move and tells you what needs you. `team` holds the seven seats that do
+the work; look at them now and then. Give the team work by typing in the terminal of
+`desk-lead`. A report of a seat can arrive there while you type; it is not often.
 
-After you merge a pull request or label a chore or a bug `ready`, the router notices at its
-next move (`tools/story.sh events`). When the whole rig is quiet, tell `desk-lead` "continue".
+After you merge a pull request or label a chore or a bug `ready`, the lead notices at its next
+move (`tools/story.sh events`). When the whole rig is quiet, tell it "continue".
 
 **Start by name, not from the file.** `rig up rigs/aiakos-delivery/rig.yaml` on a stopped rig
 does not resume it: it creates a new rig with new seats and archives the old one. The new seats
@@ -92,13 +91,13 @@ the rig running, shows `-s danger-full-access -a never` on every Codex seat.
 
 ### 2. Claude seats: auto mode (in the repository, already there)
 
-Each Claude member in `rig.yaml` (`lead`, `router`, `architect`, `reviewer`, `gate`) has this line:
+Each Claude member in `rig.yaml` (`lead`, `architect`, `reviewer`, `gate`) has this line:
 
 ```yaml
         permission_policy: builtin:auto
 ```
 
-Nothing to do on a new machine. The first command above lists the five members with
+Nothing to do on a new machine. The first command above lists the four members with
 `launch_posture=auto`. With the rig running:
 
 ```bash
@@ -120,9 +119,13 @@ all of it finished work (issue #278). So a seat does not keep its conversation b
 - **Every start of the rig** begins with empty conversations.
 - **Every delivery** goes through `tools/story.sh hand`. When the destination is idle and has
   nothing in progress, it gets an empty conversation first: a fresh launch
-  (`rig seat launch --fresh --stop`) of a pool seat, `team-architect` or `team-reviewer`. It
-  takes 5 to 12 seconds. A busy seat is never touched; its item is queued.
-- **`desk-lead`, `desk-router` and `team-gate`** keep their conversation until the rig stops.
+  (`rig seat launch --fresh --stop`) of a pool seat, `team-architect`, `team-reviewer` or
+  `team-gate`. It takes 5 to 17 seconds. A busy seat is never touched; its item is queued.
+- **`desk-lead`** keeps its conversation, because you talk to it. It runs in a 200k window
+  in place of Claude Code's 1M, so Claude Code compacts it before it grows large:
+  `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` in `agents/shared/runtime/claude-settings.fragment.json`,
+  which applies to every Claude seat. On 8 October a seat that was never cleared ran at a
+  median of 265k tokens per request in the 1M window and acted on stale state.
 
 `artifacts/hand.log` in the main checkout has one line per delivery: when, from, to, the role
 and whether the conversation was cleared (`fresh`, or `no` with the reason). Read it to
@@ -135,17 +138,13 @@ AIAKOS_NO_WRITE=1 bash tools/story.sh hand low --role impl --summary "try" --bod
 
 The second command shows which seat would be picked and changes nothing.
 
-**A long single item** can still grow, and so can the three seats that are not cleared.
-OpenRig can compact a Claude seat at a threshold; it is off by default and its threshold is 80%
-of a 1M window. To turn it on at about 150k tokens:
+To check the window of a running Claude seat (`context_window_size` must be 200000):
 
 ```bash
-rig config set policies.claude_compaction.enabled true
-rig config set policies.claude_compaction.threshold_percent 15
+cat ~/.openrig/state/context-usage/desk-lead@aiakos-delivery.json
 ```
 
-This is a setting of the machine, not of the repository, and it has not been tried on this rig
-yet. Codex compacts by itself when its window (258k) is nearly full.
+Codex compacts by itself when its window (258k) is nearly full.
 
 ## After a change to rig.yaml
 

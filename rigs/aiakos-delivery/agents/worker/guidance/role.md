@@ -12,7 +12,7 @@ Read that file, then do the item as it says. These are the things a pool seat is
 | Role | The work | Pool |
 |---|---|---|
 | `author` | The analysis of a slice: the brief, its items and the split into stories; later, resolving the architect's findings or fixing a brief | `high` |
-| `tests` | The acceptance tests of one story, written before it is implemented | `low` |
+| `tests` | The acceptance tests of one story, written before it is implemented | `high` |
 | `impl` | One story in its own worktree, or its one retry | `low`; `high` when the story was escalated |
 | `impl` | A chore or a bug that has no brief | `high` |
 
@@ -26,4 +26,4 @@ author may not implement), so follow only the file your item names.
   `rig queue list --owned`. Go on with the item that is in progress or pending; if there is
   none, wait.
 - An item without that first line is a mistake of the sender. Do not guess the role: hand it to
-  `router` and say so.
+  `lead` and say so.

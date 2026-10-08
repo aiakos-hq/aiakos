@@ -7,13 +7,12 @@ You are one seat of the team that builds Aiakos. The rules of the work are in `C
 
 | Seat | What it does |
 |---|---|
-| `desk-lead` | The maintainer's console. It gets only what needs the maintainer |
-| `desk-router` | Receives every report and makes the next move |
-| `team-architect` | Checks the analysis of a slice; takes escalations |
+| `desk-lead` | Receives every report, makes the next move, and talks to the maintainer |
+| `team-architect` | Checks the analysis of a slice; decides wrong tests, waivers and readings of the brief |
 | `team-reviewer` | Reads the diff of a story once |
 | `team-gate` | Runs the baseline and the acceptance gate |
-| `team-low1`, `team-low2` | Pool `low`: acceptance tests and stories |
-| `team-high1`, `team-high2` | Pool `high`: briefs and splits, escalated stories, chores and bugs |
+| `team-low1`, `team-low2` | Pool `low`: stories |
+| `team-high1`, `team-high2` | Pool `high`: briefs and splits, acceptance tests, escalated stories, chores and bugs |
 
 A seat of a pool has no role of its own. Its item begins with a line that names a role file in
 `rigs/aiakos-delivery/roles/`; read that file before anything else.
@@ -30,9 +29,9 @@ A seat of a pool has no role of its own. Its item begins with a line that names 
     --summary "<one line>" --body-file <file>
   ```
 
-  `<target>` is `low`, `high`, `architect`, `reviewer`, `gate`, `router` or `maintainer`. For a
+  `<target>` is `low`, `high`, `architect`, `reviewer`, `gate` or `lead`. For a
   pool, add `--role` (`author`, `tests` or `impl`); the command picks the seat. Your role file
-  says which target comes next. When you do not know, the target is `router`.
+  says which target comes next. When you do not know, the target is `lead`.
 - The body states the slice or story, the issue, the worktree, the branch and the commit, what
   you ran and what you did not check, and the files to read. Write it to a file under
   `artifacts/` first.
@@ -42,8 +41,8 @@ A seat of a pool has no role of its own. Its item begins with a line that names 
 ## Your conversation does not last
 
 A long conversation is sent again with every request, so the rig does not keep one. Before an
-item is delivered to a pool seat, to `team-architect` or to `team-reviewer`, that seat gets a
-new, empty conversation. Every start of the rig does the same for every seat.
+item is delivered to a pool seat, to `team-architect`, `team-reviewer` or `team-gate`, that
+seat gets a new, empty conversation. Every start of the rig does the same for every seat.
 
 - When a conversation starts, run `rig whoami --json` and `rig queue list --owned`, and go on
   with the item that is in progress or pending. If there is none, wait.
@@ -61,7 +60,7 @@ new, empty conversation. Every start of the rig does the same for every seat.
    leaked secret value, an earlier test that turned red. You may claim one only for something
    you ran. Everything else is a backlog item and does not hold the story.
 3. **One retry.** When the gate fails a second time the story stops and goes to
-   `team-architect`, which tags the failures, and then to `desk-router`.
+   `team-architect`, which tags the failures, and then to `desk-lead`.
 4. **Tag every finding:** `context-gap` (the brief lacked it) or `judgment-gap` (the brief had
    it and the work got it wrong).
 5. **Nothing is checked by the seat that wrote it.** Codex seats write and implement; Claude
@@ -76,13 +75,12 @@ new, empty conversation. Every start of the rig does the same for every seat.
   (`tools/story.sh analysis`). Never create a worktree by hand. Never build, test or commit in the
   main checkout.
 - Do not read `artifacts/trials/` unless your role says so. It holds the acceptance tests.
-- `desk-router` creates issues and pull requests; `tools/story.sh pr` pushes the story branch.
+- `desk-lead` creates issues and pull requests; `tools/story.sh pr` pushes the story branch.
   Nobody merges: the maintainer does.
 - Never force-push, never rewrite history on a pushed branch, never commit a secret.
 
 ## When you are unsure
 
 `unknown` is a valid answer. Say what you did not check. A decision that is not yours goes to
-`router`. A decision that is the maintainer's goes to `maintainer`, with `--evidence` naming
-the file or pull request to look at; it is typed into `desk-lead`, where the maintainer may be
-writing, so send it only when the decision is really owed. Nothing else goes to `desk-lead`.
+`lead`. Whether a test, a gate run or a reading of the brief is right goes to `architect`,
+which decides it. Only `lead` talks to the maintainer.

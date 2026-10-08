@@ -31,7 +31,7 @@ Write for an implementer of Sonnet level who sees only its story. Leave nothing 
 
 The architect writes `findings.md`. Resolve each open finding with a commit to the brief, the
 items or the stories, tick it, and hand the slice back to `architect`. `findings.md` shows how
-many rounds there were: when a second round still has open findings, hand the slice to `router`
+many rounds there were: when a second round still has open findings, hand the slice to `lead`
 and name the disagreement.
 
 ## A brief that has to change
