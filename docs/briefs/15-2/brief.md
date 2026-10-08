@@ -56,7 +56,7 @@ dependencies already used by the solution. Do not change existing migrations.
 launch, command, node, rig registration and every endpoint in spec 0007's API table. A source-
 generated `JsonSerializerContext` emits snake_case v1 JSON. `CallerContext` is the sole identity
 source. `ISeatAddressResolver` resolves `<seat>@<rig>` under a tenant and distinguishes unknown
-rig/seat from ambiguous short addresses. `IRigRevisionRepository` appends and reads revisions.
+rig/seat from ambiguous short addresses. `IRigRevisionRepository` selects or appends a revision through AppendAsync; no revision read method is added in this slice.
 
 ## General rules
 
@@ -87,10 +87,11 @@ R3. Address resolution accepts full `member@rig`; a short member is accepted onl
     the tenant. Unknown rig/seat is 404 `NOT_FOUND`; ambiguous short member is 400 `AMBIGUOUS_SEAT`.
 R4. Read endpoints return `SeatStatusRow`, `SeatDetail`, `SeatLaunchRow`, `SeatCommandRow` and
     node rows from the optional IApiNodeReader below, preserving reader order and omitting secret/token hashes.
-R5. The repository accepts the validated registration from R11. A new pair appends a revision and updates
-    `aiakos.rig.current_revision_id` in one transaction. Upsert every desired seat's address, kind,
-    parameters and hashes; retire a removed seat only when its session is absent or exited. A running
-    removal aborts the transaction with `SEAT_REMOVED_WHILE_RUNNING`, leaving all tables unchanged.
+R5. AppendAsync consumes the validated registration from R11. In one tenant-scoped
+    transaction, create the rig when absent, select or append its hash-pair revision,
+    persist new revision files, set current metadata, upsert desired seats and retire removed
+    seats. Every successful call applies seats and current metadata, including a reused pair.
+    The exact column sources, flags, state guard and receipt are defined in R5 below.
 R6. Problem mapping is exact: validation 400, unknown address 404, actor/domain rejection 409,
     authentication 401; `retryable` follows the exact closed-contract flags below.
 R7. `GET /v1/seats`, `/v1/seats/{address}`, `/v1/launches/{id}`, `/v1/commands/{id}`, and
@@ -112,12 +113,14 @@ R9. API activity uses `ActivitySource("Aiakos.Api")`, one `api.<command>` activi
 | `E1` | version/auth matrix | exact v1 version JSON; missing/wrong bearer is 401 with empty detail |
 | `E2` | address matrix | full address resolves; unique short resolves; ambiguous is `AMBIGUOUS_SEAT`; unknown is `NOT_FOUND` |
 | `E3` | read endpoint fixture | ordered status/detail/launch/command/node JSON with no token hashes or secret paths |
-| `E4` | revision registration matrix | new pair revision1, duplicate pair same revision, changed pair revision2, mismatch `HASH_MISMATCH`, running removal `SEAT_REMOVED_WHILE_RUNNING` and zero writes |
+| `E4` | revision registration matrix | first rig/new pair revision1, duplicate same revision, A/B/A reuse and current-relative flags, binding-only flags, un-retire/drift/state guards, typed running-removal failure and zero writes |
 | `E5` | problem/version matrix | exact status/reason/detail/retryable mapping and major.minor gate |
 | `E6` | 13-4 port fake bridge | context and immutable command mapping; accepted/rejected/capture replies; missing-dispatcher response |
 | `E7` | trace/cancellation matrix | one root continuation, no sensitive values, cancellation before lookup/write |
 
-E4 repository fixtures and E9 HTTP fixtures use these exact documents: revision 1 request `{"resolved":"{...}","tool_version":"2.0","source_path":"rig.yaml","source_commit":"abc","source_dirty":false,"spec_hash":"<recomputed>","binding_hash":"<recomputed>","files_by_sha256":{}}` returns HTTP 200 `{"revision_id":"<uuid>","revision":1,"spec_changed":true,"binding_changed":true,"seats":[]}`; repeating the same pair returns the same revision and both changed flags false; a changed pair returns revision 2. A submitted hash mismatch returns HTTP 400 `{"reason":"HASH_MISMATCH","detail":"Resolved rig hashes do not match.","retryable":false}`. Removing a running seat returns HTTP 409 `{"reason":"SEAT_REMOVED_WHILE_RUNNING","detail":"A running seat cannot be removed.","retryable":false}` and leaves all rows unchanged.
+E4 contains repository receipts and the typed exception only; it has no HTTP input,
+status, hash verification or problem body. E9 owns registration request/response JSON
+and the HASH_MISMATCH and SEAT_REMOVED_WHILE_RUNNING HTTP bodies below.
 
 ## Tests
 
@@ -144,7 +147,8 @@ dispatcher implementation, secret generation, or release packaging belongs here.
 `Aiakos.Api.Contracts` records are immutable. They are `VersionResponse(string Api,string Version)`,
 `ProblemResponse(string Reason,string Detail,bool Retryable)`,
 `RegisterRigRequest(string Resolved,string ToolVersion,string SourcePath,string? SourceCommit,
-bool SourceDirty,string SpecHash,string BindingHash)`, `RegisterRigResponse(Guid RevisionId,int
+bool SourceDirty,string SpecHash,string BindingHash,IReadOnlyDictionary<string,byte[]> FilesBySha256,
+IReadOnlyList<Aiakos.Spec.ResolvedSeatParameters> SeatParameters)`, `RegisterRigResponse(Guid RevisionId,int
 Revision,bool SpecChanged,bool BindingChanged,IReadOnlyList<SeatRegistrationResponse> Seats)`,
 `SeatRegistrationResponse(string Address,string Kind,bool Retired,bool Drifted)`,
 `UpRequest(bool Fresh,string? Note)`, `SendRequest(string Body,bool Force)`,
@@ -189,7 +193,7 @@ It never exports body/token attributes; this slice does not add OTLP export.
 
 `RegisterRigRequest` carries `IReadOnlyDictionary<string,byte[]> FilesBySha256`, with lowercase SHA-256 hex keys and raw bytes. Each file is at most 1 MiB and the total is at most 16 MiB. Every canonical path/hash/size entry must have exactly one matching map entry; verify byte length and SHA-256 before any write. Reject violations with fixed `FILE_CONTENT_INVALID` and detail `Rig file contents do not match the canonical form.`; never include file bytes in errors.
 
-`Aiakos.Spec.RigHashVerifier.Verify(string resolvedJson, string specHash, string bindingHash)` returns `RigHashVerification(bool Valid,string SpecHash,string BindingHash)`. It parses and validates the request's canonical JSON and recomputes both hashes through the existing `RigCanonicalizer`/`CanonicalJson`; no orchestrator hash implementation is permitted. `RigRegistration` is `(string Rig,string Resolved,string ToolVersion,string SourcePath,string? SourceCommit,bool SourceDirty,string SpecHash,string BindingHash,IReadOnlyDictionary<string,byte[]> FilesBySha256)`; `RigRevisionReceipt` is `(Guid RevisionId,int Revision,bool SpecChanged,bool BindingChanged,IReadOnlyList<SeatRegistrationResponse> Seats)`.
+`Aiakos.Spec.RigHashVerifier.Verify(string resolvedJson, string specHash, string bindingHash)` returns `RigHashVerification(bool Valid,string SpecHash,string BindingHash)`. It parses and validates the request's canonical JSON and recomputes both hashes through the existing `RigCanonicalizer`/`CanonicalJson`; no orchestrator hash implementation is permitted. `RigRegistration` is `(string Rig,string Resolved,string ToolVersion,string SourcePath,string? SourceCommit,bool SourceDirty,string SpecHash,string BindingHash,IReadOnlyDictionary<string,byte[]> FilesBySha256,IReadOnlyList<Aiakos.Spec.ResolvedSeatParameters> SeatParameters)`; `RigRevisionReceipt` is `(Guid RevisionId,int Revision,bool SpecChanged,bool BindingChanged,IReadOnlyList<SeatRegistrationResponse> Seats)`.
 
 Item ownership additions: C3 and R10 belong to S1; E8 is the exact verifier result described above; T8 pins verifier hashes to the 14-4 loader goldens.
 
@@ -202,7 +206,46 @@ E8 uses the 14-4 minimal canonical JSON and its published `spec_hash` and `bindi
 
 Registration file values are arbitrary binary bytes (not UTF-8); keys are lowercase SHA-256 hex. `FILE_CONTENT_INVALID` is HTTP 400, non-retryable, with detail `Rig file contents do not match the canonical form.`. The revision migration uses explicit PostgreSQL types: tenant_id/rig_id/revision_id uuid, revision integer, hashes/tool_version/source_path/source_commit/created_by text, resolved jsonb, source_dirty boolean, created_at timestamptz.
 
-The registration transaction upserts existing `aiakos.seat` columns `(tenant_id,seat_id,rig_id,member,address,kind,harness,node_name,spec_hash,binding_hash,parameters,updated_at)`. Inserts set all of these plus `retired_at NULL` and timestamps; updates change rig identity, address, kind, harness, node_name, hashes, parameters and `updated_at`. Registration never changes `desired`, `desired_at`, or `desired_by`; retirement sets `retired_at` only under the absent/exited guard and never deletes rows.
+R5. Column sources and identity: registration.Rig is the route rig name and must equal
+`Resolved.shared.name` (R11 rejects a mismatch as INVALID_REQUEST). Match the rig by
+(tenant_id,name), retaining its rig_id, or insert a new Guid rig_id and columns tenant_id,
+name, spec_hash, binding_hash, tool_version, resolved, created_at and updated_at from
+registration and transaction time. A new rig's first revision is 1. Existing rig metadata
+(spec_hash, binding_hash, tool_version, resolved, updated_at, current_revision_id) is updated
+on every successful call; created_at and rig_id stay unchanged. Serialize registrations for
+one tenant/name, including concurrent first registration, before reading current metadata.
+For a new pair allocate MAX(revision)+1 under that serialization and insert revision metadata
+from registration with created_by=caller.User and created_at=transaction time. Reusing a pair
+never changes its revision metadata or files. Flags compare submitted hashes with the rig's
+current hashes before this call, independently; both are true when the rig is new.
+
+For each `Resolved.shared.seats[]`, member is `.id`, kind is `.kind`, address is
+`member + "@" + registration.Rig`; agent harness is `.agent.harness` and node_name is
+`Resolved.binding.placement[]`'s `.node` where `.seat` equals member. Human harness,
+node_name and parameters are NULL. Agent parameters are the corresponding SeatParameters
+record (Seat equals member), serialized with the contract's source-generated snake_case
+context to jsonb. Seat spec_hash and binding_hash are registration's whole-rig hashes,
+not newly computed per-seat hashes. Match (tenant_id,rig_id,member), retain seat_id and
+created_at, or generate a new Guid seat_id and set created_at to transaction time.
+Insert/update tenant_id, rig_id, member, address, kind, harness, node_name, spec_hash,
+binding_hash, parameters and updated_at as above; every desired seat gets retired_at=NULL,
+including a returning seat. Inserts leave desired='down' and desired_at/desired_by NULL;
+updates never change desired, desired_at or desired_by. No seat/state/session/launch row is deleted.
+
+For each existing seat omitted from the registration, read `aiakos.seat_state.session`
+in this transaction; a missing state row counts as absent. Only absent or exited permits
+retired_at=transaction time (retain an already retired timestamp). Starting, present and
+unknown reject with `Aiakos.Api.Contracts.SeatRemovedWhileRunningException`, a sealed
+Exception with parameterless constructor and exact Message `A running seat cannot be removed.`.
+AppendAsync throws it after rolling back all writes; the exception is the S5/S7 shared
+contract, not a receipt or HTTP response. Registration never creates or mutates seat_state.
+
+The receipt's Seats lists desired seats in canonical shared.seats order, followed by removed
+seats in ordinal member order. Retired is true exactly when retired_at is non-null. Drifted
+is true exactly when seat_state.session is starting or present, current_launch_id identifies
+its tenant/seat's seat_launch, and that launch's spec_hash or binding_hash differs from the
+new seat hashes. Otherwise Drifted is false, including missing state or launch. No launch is
+restarted or rewritten. Receipt RevisionId/Revision identify the selected stored pair.
 
 Malformed JSON in `RigHashVerifier.Verify` throws `FormatException` with exact message `Resolved JSON is invalid.`; it does not return a result or write. E8 asserts this exception, while a well-formed hash mismatch returns `Valid=false` with both recomputed hashes.
 
@@ -265,20 +308,55 @@ to rig_revision for this FK. Persist each verified map entry exactly once with i
 in the revision transaction; duplicate hash-pair registration reuses the existing revision
 and files. Canonical descriptors remain in resolved jsonb; file bytes never enter that JSON.
 
-R5. Repository ownership covers numbering, pair uniqueness, byte persistence, current revision
-pointer, existing rig metadata update, seat upsert and guarded retirement in one transaction.
 R11. The HTTP registration route owns request parsing, the R7 version gate, RigHashVerifier,
 and file-map verification before calling AppendAsync. Reject malformed canonical JSON as
 INVALID_REQUEST; reject hash mismatch as HASH_MISMATCH and invalid/missing/extra contents
-as FILE_CONTENT_INVALID before any repository call. R11 consumes R5's repository contract.
-E4 is the repository matrix: new pair revision1, duplicate same ID/number with false flags,
-changed pair revision2 and running removal rollback. Include binary file bytes round-trip
-and zero revision/file/seat/rig changes on rollback. T4 pins this with real Postgres.
+as FILE_CONTENT_INVALID before any repository call. Registration carries required
+`seat_parameters`, an array of the existing Aiakos.Spec.ResolvedSeatParameters serialized
+snake_case, including its SpecHash, BindingHash and Projection properties. Add these records
+and their nested types to the source-generated context. Require exactly one parameter record
+per canonical agent seat and none for human/unknown seats, no duplicates; Seat, Rig, Node,
+Harness, SpecHash and BindingHash must equal the canonical/registration sources named by R5.
+Reject missing/null array, unmatched identities/hashes, missing agent placement or mismatched
+route rig/shared.name as INVALID_REQUEST before AppendAsync. Remaining parameter values are
+loader-produced launch data, persisted unchanged; this route does not reconstruct a loader
+or load files from source_path. R11 catches only SeatRemovedWhileRunningException for the
+SEAT_REMOVED_WHILE_RUNNING mapping below; cancellation propagates unchanged.
 
-E9. The HTTP matrix: the E4 request above includes files_by_sha256 (base64 JSON byte-array
-values, lowercase SHA-256 keys); valid requests map the receipt to that exact 200 body.
-HASH_MISMATCH and SEAT_REMOVED_WHILE_RUNNING use the exact E4 bodies. FILE_CONTENT_INVALID
-returns HTTP 400 `{"reason":"FILE_CONTENT_INVALID","detail":"Rig file contents do not match the canonical form.","retryable":false}`.
-Malformed resolved JSON returns HTTP 400 `{"reason":"INVALID_REQUEST","detail":"Request body is invalid.","retryable":false}`.
+E4. Repository matrix (A=(s1,b1), B=(s2,b2), C=(s2,b3); hashes are distinct valid fixture
+strings; each fixture has canonical descriptors and matching loader parameter records):
+
+| Input | Exact repository result/state |
+|---|---|
+| no rig named fixture, register A | new rig and revision 1, receipt (idA,1,true,true,Seats); current=idA |
+| A current, register A | receipt (idA,1,false,false,Seats); no revision/file append; seats still applied |
+| A current, register B | receipt (idB,2,true,true,Seats); current=idB |
+| B current, register A | receipt (idA,1,true,true,Seats); only two revisions; current=idA; A seats reapplied |
+| B current, register C | receipt (idC,3,false,true,Seats); current=idC |
+| retired member returns | same seat_id/address; retired_at=NULL; receipt Retired=false |
+| present launch hashes A, desired B | Drifted=true; launch/state unchanged |
+| present launch hashes B, desired B | Drifted=false |
+| absent/exited/missing state, removed member | retired_at set; receipt Retired=true, Drifted=false; no state row created |
+| starting/present/unknown state, removed member | SeatRemovedWhileRunningException with Message `A running seat cannot be removed.`; zero rig/revision/file/seat/state writes |
+
+T4 pins every E4 row with real Postgres, including retained IDs, current metadata, independent
+flags, parameter jsonb equality, agent/human column sources, raw binary bytes round-trip,
+revision/file reuse and rollback. These are persistent regression tests committed by S5.
+
+E9. HTTP fixtures use the registration DTO above: resolved is canonical JSON as a JSON
+string, files_by_sha256 is a map of lowercase SHA-256 hex keys to base64 byte-array values,
+seat_parameters is the matching loader array (empty for no agent seats). A first empty-seat
+registration returns HTTP 200 `{"revision_id":"<uuid>","revision":1,"spec_changed":true,"binding_changed":true,"seats":[]}`;
+an immediate repeat returns the same id/revision and false flags; other flags and seats are
+copied exactly from the repository receipt. HASH_MISMATCH returns HTTP 400
+`{"reason":"HASH_MISMATCH","detail":"Resolved rig hashes do not match.","retryable":false}`.
+A repository SeatRemovedWhileRunningException returns HTTP 409
+`{"reason":"SEAT_REMOVED_WHILE_RUNNING","detail":"A running seat cannot be removed.","retryable":false}`.
+FILE_CONTENT_INVALID returns HTTP 400
+`{"reason":"FILE_CONTENT_INVALID","detail":"Rig file contents do not match the canonical form.","retryable":false}`.
+Malformed resolved JSON and every invalid parameter/identity case listed in R11 return HTTP
+400 `{"reason":"INVALID_REQUEST","detail":"Request body is invalid.","retryable":false}`
+without a repository call. T9 pins these with fake repository probes, including the named
+exception; T1 pins seat_parameters serialization and the shared exception type.
 
 T9. Pins E9 and version rejection before AppendAsync with fake repository probes.

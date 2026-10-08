@@ -13,7 +13,7 @@ depends: S1
 owns: C1, R1, R2
 outputs: E1
 tests: T1
-notes: External prerequisite: 13-4 S1 creates and merges Aiakos.Core.CallerContext before this story's authentication factory can compile. No actor or database write dependency. CallerContext is the exact shared type consumed by 13-4 and the later bridge.
+notes: External prerequisite: 13-4 S1 creates and merges Aiakos.Core.CallerContext before this story's authentication factory can compile. No actor or database write dependency. CallerContext is the exact shared type consumed by 13-4 and the later bridge. C1 includes the loader SeatParameters request field, its source-generated nested records and SeatRemovedWhileRunningException shared by S5/S7.
 
 ## S3: Address resolution and read endpoints
 goal: Authenticated callers can resolve full or unique short seat addresses and read existing seat, launch, command and node projections.
@@ -37,7 +37,7 @@ depends: S2, S4
 owns: C2, R5
 outputs: E4
 tests: T4
-notes: No HTTP handler or hash/file verification here; S7 owns those. Migration must be next available only and tenant-scoped.
+notes: No HTTP handler or hash/file verification here; S7 owns those. Migration must be next available only and tenant-scoped. R5/E4/T4 include column sources, loader parameter persistence, first rig insert, pair reuse/current-relative flags, drift/un-retire/state guards and the S2 exception contract.
 
 ## S6: 13-4 command bridge
 goal: After 13-4 merges, API up/down/send/capture requests dispatch through its exact transport-free port and map replies without identity leakage.
@@ -53,7 +53,7 @@ depends: S1, S5, S4
 owns: R11
 outputs: E9
 tests: T9
-notes: Owns PUT /v1/rigs/{rig}; uses the S5 repository with fake probes in route tests. No migration, numbering or seat persistence here. S8 instruments this route after it exists.
+notes: Owns PUT /v1/rigs/{rig}; uses the S5 repository with fake probes in route tests. R11 validates the loader parameter identities before AppendAsync and maps S2/S5 SeatRemovedWhileRunningException. No migration, numbering or seat persistence here. S8 instruments this route after it exists.
 
 ## S8: tracing and cancellation
 goal: API requests continue traceparent safely and stop before lookup/write on cancellation without sensitive attributes.
