@@ -30,7 +30,12 @@ public static class ClaudeHookNormalizer
             {
                 case "SessionStart":
                     string? source = String(root, "source");
-                    if (source is "startup" or "resume" or "fork")
+                    if (source == "compact")
+                    {
+                        kind = HarnessEventKind.Compacted;
+                        Add(attributes, "source", source);
+                    }
+                    else if (source is "startup" or "resume" or "fork")
                     {
                         kind = HarnessEventKind.SessionStarted;
                         Add(attributes, "source", source);
