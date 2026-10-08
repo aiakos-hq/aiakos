@@ -112,6 +112,16 @@ public sealed class TmuxClient
         return await InvokeCommandAsync(command, stdin, ct).ConfigureAwait(false);
     }
 
+    public async Task<ProcessResult> RunCaptureAsync(IReadOnlyList<string> command, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (command.Count == 0 || command[0] != "capture-pane")
+            throw new ArgumentException("A capture-pane command is required.");
+        ct.ThrowIfCancellationRequested();
+        EnsureAvailable();
+        return await InvokeCommandAsync(command, null, ct, retainStdoutTail: true).ConfigureAwait(false);
+    }
+
     public static bool IsNoServer(ProcessResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
@@ -271,7 +281,7 @@ public sealed class TmuxClient
     }
 
     private async Task<ProcessResult> InvokeCommandAsync(IReadOnlyList<string> command,
-        ReadOnlyMemory<byte>? stdin, CancellationToken ct)
+        ReadOnlyMemory<byte>? stdin, CancellationToken ct, bool retainStdoutTail = false)
     {
         if (command.Count == 0 || string.IsNullOrEmpty(command[0]))
             throw new ArgumentException("A tmux command is required.", nameof(command));
@@ -283,7 +293,8 @@ public sealed class TmuxClient
                                  (long)(TimeSpan.TicksPerSecond * 2d * (stdin?.Length ?? 0) / 1048576d))
             : _invocationTimeout;
         var arguments = BuildCommandArguments(_configPath, _socketName, command);
-        return await _runner.RunAsync(new ProcessRequest(_resolvedPath!, arguments, _clientEnvironment, stdin, timeout), ct)
+        return await _runner.RunAsync(new ProcessRequest(_resolvedPath!, arguments, _clientEnvironment, stdin, timeout,
+                retainStdoutTail), ct)
             .ConfigureAwait(false);
     }
 
@@ -357,7 +368,7 @@ public sealed class TmuxClient
         return names;
     }
 
-    private void EnsureAvailable()
+    internal void EnsureAvailable()
     {
         if (_info.Availability == SessionHostAvailability.Available)
             return;
