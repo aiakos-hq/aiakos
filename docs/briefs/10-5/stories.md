@@ -12,7 +12,7 @@ depends: S1
 owns: R2
 outputs: E2
 tests: T2
-notes: R2 owns command lifetime/dedupe and safe cached evidence. Start registration arrives with S4; S2 StartSeat fixtures use RegisterSeat first. Use CapturePane on an unknown seat to prove minimal inventory. Use an internal execution callback in tests until S3/S4 adds the scheduler/driver path. Never publish a default successful driver. Result sequence/trace comes from the existing buffer; Welcome replay notification is wired by S6.
+notes: R2 owns command lifetime/dedupe and safe cached evidence. Start registration arrives with S4; S2 StartSeat fixtures use a seat registered with RegisterSeat and then stopped by a successful StopSeat before the start; S2 does not assert the launch id or lifecycle of a start (E4 owns them). Use CapturePane on an unknown seat to prove minimal inventory. Every fixture command has a positive Timeout and passes CommandValidator.Validate against the scripted driver's capabilities (including harness capability, launch mode, command.send_keys and allowlisted keys), except the explicit invalid-timeout E3 case; the unknown-seat CapturePane case asserts inventory and envelope fields, not status, because S5 adds Rejected/SEAT_NOT_FOUND. Use an internal execution callback in tests until S3/S4 adds the scheduler/driver path. Never publish a default successful driver. Result sequence/trace comes from the existing buffer; Welcome replay notification is wired by S6.
 
 ## S3: Per-seat scheduling and cancellation
 goal: Execute FIFO work per seat with bypass capture/stop, relative deadlines and bounded shutdown.
@@ -20,7 +20,7 @@ depends: S2
 owns: R3
 outputs: E3
 tests: T3
-notes: Builds on R2 single-terminal lifetime and admission. Start registration arrives with S4; register S3 StartSeat fixture seats with RegisterSeat. FIFO fixtures use SendKeys behind SendKeys and start behind SendKeys on a registered stopped seat, not two different-launch starts or two unfinished deliveries. Use CapturePane for unknown-seat minimal inventory. Scripted internal execution callback exercises scheduling before S4 wires drivers. Stop and timeout race must share the same terminal gate; independent queue/driver mechanics are not reimplemented.
+notes: Builds on R2 single-terminal lifetime and admission. Start registration arrives with S4; S3 StartSeat fixtures use a seat registered with RegisterSeat and then stopped by a successful StopSeat before the start; S3 does not assert the launch id or lifecycle of a start (E4 owns them). FIFO fixtures use SendKeys behind SendKeys and start behind SendKeys on a registered stopped seat, not two different-launch starts or two unfinished deliveries. Use CapturePane for unknown-seat minimal inventory. Every fixture command has a positive Timeout and passes CommandValidator.Validate against the scripted driver's capabilities (including harness capability, launch mode, command.send_keys and allowlisted keys), except the explicit invalid-timeout E3 case; the unknown-seat CapturePane case asserts inventory and envelope fields, not status, because S5 adds Rejected/SEAT_NOT_FOUND. Scripted internal execution callback exercises scheduling before S4 wires drivers. Stop and timeout race must share the same terminal gate; independent queue/driver mechanics are not reimplemented.
 
 ## S4: Launch and stop execution
 goal: Map launch/stop with exact occupancy and replay rules; publish shared validation and safe driver failure mapping.

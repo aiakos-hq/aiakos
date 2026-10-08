@@ -216,7 +216,9 @@ R3. Per seat StartSeat/DeliverInput/SendKeys execute FIFO; seats run independent
     FIFO fixtures use SendKeys behind held SendKeys on a registered seat, and StartSeat behind
     held SendKeys on a registered stopped seat. These remain admissible under R4/R9; do not
     use a different-launch start behind a pending start or two unfinished deliveries as FIFO
-    fixtures. RegisterSeat supplies seats for S3 StartSeat cases; S4 adds start registration.
+    fixtures. Every S2/S3 StartSeat fixture uses a seat registered with RegisterSeat and then
+    stopped by a successful StopSeat before the start; S4 adds start registration. S2/S3
+    do not assert the launch id or lifecycle of a start; E4 owns those assertions.
     Every new command uses Timeout measured from receipt, including queue time; absent, invalid
     or nonpositive Duration gives Rejected/INVALID_LAUNCH with fixed message "Invalid command
     timeout."; driver never invoked. At timeout emit TimedOut, Error{Code=DeadlineExceeded,

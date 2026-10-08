@@ -4,10 +4,10 @@ Reviewed at commit d87bc80. Stories: 10. Check: ok.
 
 ## Findings
 
-Round 3, open:
+Round 3, author resolutions pending architect confirmation:
 
-- [ ] S3 (context-gap): the notes of S2 and S3 put every StartSeat fixture on a seat made with RegisterSeat, but R1 makes such a seat occupied, and R4 (S4) then never runs a start on it (same launch Ready: Completed with no driver call; same launch not Ready: Rejected/SEAT_NOT_READY; another launch: Rejected/SEAT_ALREADY_RUNNING), so the held start, Unknown/STOPPED and start timeout cases of E3 and the start cases of E2 turn red in S4; on a stopped seat the launch id of the result also changes from the registered to the requested one. Fix: say in R3 and in the notes of S2 and S3 that a start fixture uses a seat registered and then stopped by a successful StopSeat, and that S2 and S3 do not assert the launch id or lifecycle of a start (E4 owns them).
-- [ ] S2 (context-gap): three later checks change results that S2 and S3 fixtures produce, and `story.sh show` for 2 and 3 names none of them: a command without a positive Timeout is Rejected/INVALID_LAUNCH from S3; a command that fails `CommandValidator.Validate` against the scripted driver's capabilities (harness capability, launch mode, `command.send_keys` and allowlisted keys) is Rejected/UNSUPPORTED from S4; the CapturePane on an unknown seat that the notes prescribe for the minimal inventory is Rejected/SEAT_NOT_FOUND from S5 instead of the callback's result. Fix: say in the notes of S2 and S3 that every fixture command has a positive Timeout and passes the validator against the scripted driver's capabilities, and that the unknown-seat capture case asserts the inventory and envelope fields, not the status.
+- [x] S3 (context-gap): the notes of S2 and S3 put every StartSeat fixture on a seat made with RegisterSeat, but R1 makes such a seat occupied, and R4 (S4) then never runs a start on it (same launch Ready: Completed with no driver call; same launch not Ready: Rejected/SEAT_NOT_READY; another launch: Rejected/SEAT_ALREADY_RUNNING), so the held start, Unknown/STOPPED and start timeout cases of E3 and the start cases of E2 turn red in S4; on a stopped seat the launch id of the result also changes from the registered to the requested one. Fix: say in R3 and in the notes of S2 and S3 that a start fixture uses a seat registered and then stopped by a successful StopSeat, and that S2 and S3 do not assert the launch id or lifecycle of a start (E4 owns them). Resolution: R3 and S2/S3 notes require RegisterSeat followed by successful StopSeat before each start fixture; S2/S3 leave start launch-id and lifecycle assertions to E4.
+- [x] S2 (context-gap): three later checks change results that S2 and S3 fixtures produce, and `story.sh show` for 2 and 3 names none of them: a command without a positive Timeout is Rejected/INVALID_LAUNCH from S3; a command that fails `CommandValidator.Validate` against the scripted driver's capabilities (harness capability, launch mode, `command.send_keys` and allowlisted keys) is Rejected/UNSUPPORTED from S4; the CapturePane on an unknown seat that the notes prescribe for the minimal inventory is Rejected/SEAT_NOT_FOUND from S5 instead of the callback's result. Fix: say in the notes of S2 and S3 that every fixture command has a positive Timeout and passes the validator against the scripted driver's capabilities, and that the unknown-seat capture case asserts the inventory and envelope fields, not the status. Resolution: S2/S3 notes require positive Timeout and validator-compatible scripted-driver capabilities (except the explicit E3 invalid-timeout case); unknown-seat CapturePane asserts inventory/envelope fields without asserting status.
 
 Round 2, resolutions read at d87bc80. Confirmed: the shared Error message (R2, visible in story 3), the same-launch waiter (R4/E4), receipt-time checks (R4/E9), commands and a second stop while stopping (R3/E3), acceptance waits across removal (R6/E6). The FIFO fixture and the RegisterSeat fixture resolutions are as asked, but what was asked was not enough: see round 3.
 
@@ -56,3 +56,9 @@ separates the real actor proof from R8/S9 adapter/loopback. Architect re-review 
 
 All seven context-gap findings addressed in the brief and story notes. No implementation or
 acceptance tests changed. Architect confirmation of these resolutions is requested.
+
+## Author resolution, round 3
+
+Both context-gap findings addressed in R3 and S2/S3 notes. No rules or items added, and no
+implementation or acceptance tests changed. Architect confirmation is requested as directed
+by the round-3 queue item; no disagreement remains to route.
