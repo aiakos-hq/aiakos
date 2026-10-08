@@ -50,4 +50,5 @@ status: ready-for-review | changes-pushed | reviewed | blocked | question | in-p
 summary: <one to three lines>
 next: <what the lead should do next>
 ```
+
 The reviewer's summary includes `verdict: ready` or `verdict: changes needed (<count> findings)`.
