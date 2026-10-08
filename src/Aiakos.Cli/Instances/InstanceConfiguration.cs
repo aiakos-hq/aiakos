@@ -83,6 +83,9 @@ public static class InstanceLayout
         }
 
         var expectedHome = configuration.Instance == "release" ? ".aiakos" : $".aiakos-{configuration.Instance}";
+        if (configuration.Instance == "release" && configuration.PortBase != 7180)
+            return false;
+
         if (!string.Equals(configuration.Wsl.Home, expectedHome, StringComparison.Ordinal))
             return false;
 

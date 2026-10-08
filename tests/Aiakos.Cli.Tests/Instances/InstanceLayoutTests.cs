@@ -85,6 +85,20 @@ public sealed class InstanceLayoutTests
         }, []));
     }
 
+    [Theory]
+    [InlineData(7181)]
+    [InlineData(9000)]
+    public void ReleaseRequiresItsFixedPortBase(int portBase)
+    {
+        var configuration = BaseConfiguration() with { PortBase = portBase };
+
+        Assert.Equal("Invalid instance configuration.", InstanceLayout.Validate(configuration, []));
+        var exception = Assert.Throws<FormatException>(() =>
+            InstanceConfigurationJson.Deserialize(InstanceConfigurationJson.Serialize(configuration)));
+        Assert.Equal("Invalid instance configuration.", exception.Message);
+        Assert.Null(InstanceLayout.Validate(NamedConfiguration("demo", portBase), []));
+    }
+
     [Fact]
     public void ValidationDoesNotMutateConfigurationOrInitializedSnapshots()
     {
