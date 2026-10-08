@@ -141,6 +141,13 @@ C1. Node source Command callback changes from no-op to admission plus an outgoin
     only when command services are installed. EventAck also notifies executor retention. Hello
     keeps platform/protocol fields and gets installed driver capabilities; Heartbeat gets the
     executor InflightCount. Existing sources without INodeCommandSource keep their behavior.
+C3. Preserve registry ownership, replacement and removal keyed by authenticated NodeId. Add a
+    secondary lookup by authenticated tenant and ordinal node name over Welcome-complete sessions.
+    Exactly one match returns that session; zero or multiple matches return no target. Two distinct
+    NodeIds sharing tenant/name remain connected independently and neither supersedes the other;
+    sender returns false and adapter Get returns (false,null) while ambiguous. Removal restores
+    unique lookup. Same NodeId replacement retains existing supersession semantics.
+
 C2. Orchestrator response stream can send commands after Welcome, alongside existing EventAck
     and Goodbye, using the same writer gate. Existing ReceiveAsync/application and event commit
     paths retain their behavior; CommandAck is additionally routed to the sender's tracker.
@@ -151,15 +158,25 @@ R1. Publish driver/seat protocol. Harness and capabilities are ordinal strings, 
     registrations. Duplicate/empty harness registrations fail ArgumentException("Invalid command
     drivers."). An empty driver collection is legal and advertises no capabilities. RegisterSeat
     requires nonempty UUID seat/launch and installed harness; canonicalizes IDs lowercase D and
-    clones inventory into NodeEventBuffer. Existing recovered seat registration belongs to the
-    adoption producer. Never overwrite an active seat's launch on a different StartSeat until
-    the driver has returned Ready. Driver outcomes never establish SeatActor state.
+    clones inventory into NodeEventBuffer. For a new RegisterSeat inventory set SeatId and
+    LaunchId to canonical IDs, Lifecycle=Running when Ready else Unknown, NativeSessionId="",
+    FirstBufferedSeq=0 and LastSeq=0. There is no inventory harness field; keep harness only in
+    executor state. For existing inventory clone its snapshot, replace LaunchId and Lifecycle
+    as above, preserve NativeSessionId and sequence fields; buffer remains sequence authority.
+    RegisterSeat represents an occupied recovered seat even when Ready=false. Existing recovered
+    seat registration belongs to the adoption producer. Active means occupied or pending start;
+    a successful terminal stop clears occupancy. For an admitted supported start on a new or
+    stopped seat register requested LaunchId, Lifecycle=Launching before execution, preserving
+    existing native/sequence fields (new fields empty/zero). Failed/Unknown/TimedOut retains that
+    requested LaunchId and sets Lifecycle=Unknown; Ready sets Running and NativeSessionId to
+    the driver's ObservedSessionId. Terminal successful stop sets Exited, retains launch/native.
+    A rejected start never replaces an occupied launch. Driver outcomes never establish actor state.
 
 R2. Receive synchronously admits and creates CommandAck before scheduling driver work.
     It returns without awaiting execution; ReadResponsesAsync supplies receipt acks and exact
     retained result replays through a process-lived single-reader response queue. Valid UUID
     command/seat IDs are canonicalized; malformed IDs throw ArgumentException("Invalid command
-    envelope.") locally, translated by the stream to FailedPrecondition with that fixed text.
+    envelope.") locally. Stream translation belongs to R5.
     Deduplicate by command UUID across the node process, before validation/preconditions; even
     altered payload or seat with an existing ID never executes and returns Duplicate=true for
     the original ID. New entry returns Duplicate=false. Each Receive also queues its ack before
@@ -173,6 +190,13 @@ R2. Receive synchronously admits and creates CommandAck before scheduling driver
     entries never expire; expiry at >=10 minutes is lazy on admission/ack. Retain safe terminal
     result metadata after overflow without retaining discarded command secrets. InflightCount
     counts accepted unfinished entries, not duplicates/retained finished entries.
+    Each terminal result enters NodeEventBuffer once with canonical seat, inventory LaunchId,
+    provider ObservedAt, SourceSeq=0 and original receive activity. Seq/trace belong to buffer.
+    Ensure inventory exists before any result, including validation, stop and timeout results.
+    If no R1 start registration applies and seat is unknown, create minimal SeatInventory:
+    SeatId=canonical command seat, LaunchId="", Lifecycle=Unknown, NativeSessionId="",
+    FirstBufferedSeq=0, LastSeq=0. Never replace existing inventory with this minimal record.
+    A rejected supported start on an unknown seat uses this minimal record, not ready inventory.
 
 R3. Per seat StartSeat/DeliverInput/SendKeys execute FIFO; seats run independently. CapturePane
     and StopSeat bypass FIFO. A pending launch cannot block capture. Stop atomically marks seat
@@ -190,33 +214,45 @@ R3. Per seat StartSeat/DeliverInput/SendKeys execute FIFO; seats run independent
     Host disposal cancels and awaits workers with a five-second provider-based bound; a driver
     ignoring cancellation is detached with fault observation, no late event or secret logging.
 
-R4. First CommandValidator.Validate(command, installed capabilities) error wins, before seat
-    preconditions; retain its safe fixed message. For non-Start missing registered seat return
-    Rejected/SEAT_NOT_FOUND. Start selects its Harness; live registered different LaunchId
-    returns Rejected/SEAT_ALREADY_RUNNING; same active launch returns Completed Launch Ready
-    without a driver call. For a pending same launch under a different command ID wait for the
-    original launch and copy its outcome as this command's own result, never launch twice.
-    Ready=true after driver Ready; Failed/Unknown leave Ready=false, keep launch evidence and
-    never fresh-fallback. A failed/unknown launch still requires StopSeat before replacing a
-    potentially live harness; track it as occupied until Stop returns Stopped/Killed/NotRunning.
-    DeliverInput requires Ready or Rejected/SEAT_NOT_READY; an already admitted unfinished
-    delivery gives Rejected/SEAT_BUSY rather than queued second delivery. Lead containing CR/LF
-    returns Rejected/INPUT_NOT_ALLOWED. SendKeys uses the existing exact allowlist/capability.
-    Forward exact clones to driver, with the correct seat. Capture text over 1048576 UTF-8 bytes
-    is cut at a scalar boundary and Truncated=true; preserve supplied flags/timestamp/size.
-    Success means Completed with the driver's matching Launch/Delivery/Capture/Stop; SendKeys
-    success has no typed result. Stop terminal success marks not occupied/not ready, retains
-    inventory/home. Driver throws => Failed/SESSION_HOST_ERROR, fixed "Command execution
-    failed."; missing driver => Rejected/UNSUPPORTED. Null result or invalid/unspecified outcome
-    => Failed/SESSION_HOST_ERROR. Noncompleted errors use ErrorReasons.Create with message
-    "Command rejected." unless explicitly fixed above; never copy exception details.
-    Each terminal result enters NodeEventBuffer once with seat/known launch, provider ObservedAt,
-    SourceSeq=0 and original receive activity. Seq and original trace belong to buffer. Start
-    registers its seat before enqueuing its result, including rejected supported starts; no
-    harness-ready inventory is invented. A valid command for an unknown seat needs a minimal
-    seat inventory to buffer its SEAT_NOT_FOUND result (empty launch/native/harness).
+R4. Launch/stop dispatch uses this order for every new command: R3 timeout validity check,
+    first CommandValidator.Validate(command, installed capabilities) error (safe fixed message),
+    then kind-specific seat preconditions. Dedupe R2 precedes all three. Invalid timeout wins
+    even when validator also fails. Shared dispatch forwards exact clones with the correct seat.
+    Success is Completed with matching typed driver result; driver throws, null result or
+    invalid/unspecified outcome gives Failed/SESSION_HOST_ERROR, "Command execution failed.".
+    Missing driver gives Rejected/UNSUPPORTED. Other noncompleted errors use ErrorReasons.Create
+    with "Command rejected." unless explicitly fixed elsewhere. Never copy exception details.
+    Start selects Harness. Different LaunchId on occupied (including Failed/Unknown) or pending
+    seat returns Rejected/SEAT_ALREADY_RUNNING, no Launch body, no driver call. Same pending
+    launch under another command ID waits for original and clones its complete terminal status,
+    Error and Launch body into its own result; never launches twice. Same occupied Ready launch
+    returns Completed with Launch{Outcome=Ready, Reason="", ObservedSessionId="", ExitCode absent,
+    Evidence absent}, no Error and no driver call. Same occupied non-Ready launch with retained
+    terminal start metadata copies that status/Error/Launch exactly (including TimedOut); retain
+    this launch metadata until successful stop even after command-ID retention expires. Same
+    occupied non-Ready launch without terminal metadata (recovered registration after restart)
+    returns Rejected/SEAT_NOT_READY with Launch{Outcome=Unknown, Reason="SEAT_NOT_READY",
+    ObservedSessionId="", ExitCode absent, Evidence absent}; no driver call. This is the answer
+    to R7 StartSeat resend after changed instance; do not invent a second launch.
+    New LaunchId on stopped seat may start; its result event and inventory use requested LaunchId
+    even if driver returns Failed/Unknown or outer deadline produces TimedOut. Ready=true only
+    after driver Ready. Failed/Unknown/TimedOut keep occupied/not ready and launch evidence;
+    never fresh-fallback. Stop requires registered seat or Rejected/SEAT_NOT_FOUND. Successful
+    Stopped/Killed/NotRunning clears occupancy/readiness, retains inventory/home; unsuccessful
+    stop preserves occupancy. R2 owns result envelopes and R1 owns inventory values.
 
-R5. Add a composed CommandNodeLinkSource implementing existing INodeLinkSource/INodeEventSource
+R9. Input/capture dispatch uses R4 validation order and shared safe driver mapping. Non-Start
+    missing registered seat returns Rejected/SEAT_NOT_FOUND. DeliverInput requires Ready or
+    Rejected/SEAT_NOT_READY; already admitted unfinished delivery gives Rejected/SEAT_BUSY
+    rather than queued second delivery. Lead containing CR/LF returns Rejected/INPUT_NOT_ALLOWED.
+    SendKeys uses existing exact allowlist/capability. Forward exact clones with correct seat.
+    Capture text over 1048576 UTF-8 bytes is cut at a scalar boundary and Truncated=true;
+    preserve supplied flags/timestamp/size. Completed uses driver's Delivery/Capture body;
+    SendKeys success has no typed result. R4 shared failure mappings and R2 envelopes apply.
+
+R5. Translate executor malformed-envelope ArgumentException("Invalid command envelope.")
+    from ReceiveAsync to gRPC FailedPrecondition with that exact fixed text, not generic Unavailable.
+    Add a composed CommandNodeLinkSource implementing existing INodeLinkSource/INodeEventSource
     and new INodeCommandSource, wrapping EventNodeLinkSource and executor. Receive Command
     immediately calls executor.Receive; ReadCommandResponsesAsync delegates executor.ReadResponsesAsync; it never awaits execution. EventAck
     and Welcome replay notify executor and delegate to event source. Forward unrelated responses
@@ -234,8 +270,7 @@ R5. Add a composed CommandNodeLinkSource implementing existing INodeLinkSource/I
     AddNodeCommands(IServiceCollection) extension; register only when real drivers were supplied,
     preserve test-source override registration. No default driver/capability or startup of seats.
 
-R6. NodeCommandSender uses only authenticated NodeLinkRegistry sessions. Key sessions by tenant
-    and node name (do not trust client-provided IDs), and check expected NodeInstanceId. New
+R6. NodeCommandSender uses only authenticated NodeLinkRegistry sessions. Use the C3 tenant/name lookup (do not trust client-provided IDs), and check expected NodeInstanceId. New
     sender SendAsync clones command/trace, checks seat UUID, command UUID, positive timeout,
     available session and installed advertised capabilities using CommandValidator, and returns
     false without write for invalid target/command/unsupported/full/disconnected. No automatic
@@ -243,9 +278,10 @@ R6. NodeCommandSender uses only authenticated NodeLinkRegistry sessions. Key ses
     zero uses 64. Reserve slot atomically per authenticated node; duplicate active ID with same
     target reuses its acceptance task, never consumes another slot. An ID with a different seat
     or different serialized command returns false. Write only after Welcome; success returns
-    true only on matching CommandAck for that authenticated session. Ack timeout is command
-    Timeout from admission, returns false; sent-but-unacked command remains tracked until final
-    result/timeout/reconnect decision. Unknown/stale/foreign ack is ignored. Duplicate flag does
+    true only on matching CommandAck for that authenticated session. There is one deadline: command Timeout from sender admission for both ack wait and
+    tracker lifetime. Before it, sent-but-unacked work stays tracked for result/reconnect. At
+    expiry resolve uncompleted acceptance false, remove tracker and release its slot atomically;
+    an already true acceptance stays true. No second execution/ack deadline exists. Unknown/stale/foreign ack is ignored. Duplicate flag does
     not alter acceptance meaning. A correlated CommandResult releases a slot only after event
     application returned its successful postcommit ack; failed/null/pending event application
     never releases it. After outer command timeout slot is released; do not fabricate an event
@@ -275,7 +311,9 @@ R8. Implement LinkSeatCommandPort against published 13-4 protocol. Get uses key 
     application. No actor/store port is redefined. No direct actor call for resend or synthetic
     result; existing event path is sole result consumer. Add an isolated loopback proof with
     real sender/source/executor/buffer, fake driver and delayed postcommit application. Hold
-    commit to prove results cannot release inflight capacity early. A separate real actor test
+    commit to prove results cannot release inflight capacity early.
+
+R10. A separate real actor test
     uses 13-3/13-4 production stores and isolated Postgres, explicit real immutable test profile:
     persisted command before wire send, result replay creates one command update/event only,
     readiness event before Ready result produces no sources-disagree finding. Gate must wait
@@ -285,14 +323,16 @@ R8. Implement LinkSeatCommandPort against published 13-4 protocol. Get uses key 
 
 | ID | Input | Expected |
 |---|---|---|
-| `E1` | protocol/driver collection/registration | exact R1 signatures; duplicate driver => Invalid command drivers.; malformed seat => Invalid command seat.; no drivers advertises nothing |
-| `E2` | pending/completed/acked/expired duplicate, altered payload | first Duplicate=false; all known Duplicate=true; one execution/one seq; buffered replay same bytes/seq/trace; no new acked event; retention expires only at >=10min after cumulative ack/replay; correct InflightCount |
+| `E1` | protocol/driver collection/registration | exact R1 signatures; duplicate driver => Invalid command drivers.; malformed seat => Invalid command seat.; exact new/existing RegisterSeat R1 inventory fields; preserved native/sequence fields on existing registration; no drivers advertises nothing |
+| `E2` | pending/completed/acked/expired duplicate, altered payload | first Duplicate=false; all known Duplicate=true; one execution/one seq; buffered replay same bytes/seq/trace; no new acked event; retention expires only at >=10min after cumulative ack/replay; correct InflightCount; exact minimal R2 inventory and result envelope fields |
 | `E3` | held start, capture, stop, FIFO, fake deadline | capture runs while start held; per-seat FIFO and independent seats; launch Unknown/STOPPED; queued delivery/keys Rejected/SEAT_STOPPING; timeout TimedOut/COMMAND_TIMEOUT; no late second result; Invalid command timeout. without driver |
-| `E4` | all command kinds, precondition/driver errors | exact R4 result/body/reason mappings; one buffered result per command; no fresh fallback/double launch; readiness/busy/lead/key restrictions; scalar-safe capture limit; exception text absent |
-| `E5` | production opt-in with fake supplied driver, blocked Welcome/writer/reconnect | ack admission does not await driver work; no pre-Welcome/overlapping writes; heartbeat actual unfinished count; executor survives reconnect; stale stream readers canceled/awaited; event/ack original trace; legacy source unchanged |
-| `E6` | authenticated/missing/foreign/full target, delayed ack/commit | only current target writes; true only after matching CommandAck; false for unsupported/full/invalid; one reserved duplicate slot; successful postcommit final result alone releases capacity early; stale/unknown ack does nothing |
+| `E4` | start/stop; invalid timeout plus validator error; same Ready/pending/finished/recovered launch; different Failed/Unknown launch; failed start on stopped seat | exact R4 status/Error/Launch fields; invalid timeout wins; no double launch; occupied different ID SEAT_ALREADY_RUNNING; recovered same ID SEAT_NOT_READY/Unknown; requested launch on failed/timed-out stopped-seat start result and inventory; exception text absent |
+| `E5` | production opt-in with fake supplied driver, blocked Welcome/writer/reconnect | ack admission does not await driver work; no pre-Welcome/overlapping writes; heartbeat actual unfinished count; executor survives reconnect; stale stream readers canceled/awaited; event/ack original trace; legacy source unchanged; malformed command IDs => FailedPrecondition/Invalid command envelope. |
+| `E6` | authenticated/missing/foreign/full target, delayed ack/commit | only current target writes; true only after matching CommandAck; false for unsupported/full/invalid; one reserved duplicate slot; successful postcommit final result alone releases capacity early; stale/unknown ack does nothing; two authenticated NodeIds with same tenant/name neither supersede nor route; removing one restores routing; one deadline removes tracker/releases slot and returns false for unacked |
 | `E7` | same/changed instance reconnect and supersession | same instance resends all unfinished kinds once; changed resends Start/Capture/Stop only; IDs/launch/body/trace unchanged, Attempt incremented; old deadline preserved; no completed resend/old-session removal; no cold-start replay |
-| `E8` | adapter, loopback, real actor replay | matching trusted tenant/name/instance/seat only; same singleton ports; no early capacity release; command persisted before send; one durable result/update on replay; readiness-before-Ready no sources-disagree |
+| `E8` | adapter and loopback | matching trusted tenant/name/instance/seat only; ambiguous lookup disconnected; same singleton ports; no early capacity release |
+| `E9` | input/keys/capture and driver errors | exact R9 mappings; readiness/busy/lead/key restrictions; scalar-safe capture limit; exception text absent |
+| `E10` | real actor replay | command persisted before send; one durable result/update on replay; readiness-before-Ready no sources-disagree |
 
 ## Tests
 
@@ -308,14 +348,17 @@ T2. Commit E2 retention tests with controlled result completion and fake TimePro
     released from completed entries. Use existing buffer snapshots as oracle for original seq.
 T3. Commit E3 barrier-driven scheduling/deadline/stop tests, including cancellation-ignoring
     driver cleanup and result race; fake provider five-second disposal bound.
-T4. Commit E4 mapping/precondition tests for all five kinds, same launch different command ID,
-    failed/unknown occupied launch, secret-bearing driver faults and UTF-8 boundary capture.
+T4. Commit E4 launch/stop tests for every same/different occupied launch case, recovered non-Ready
+    resend, exact Ready body, timeout-before-validator, stopped-seat failed/unknown/timed-out new
+    launch inventory and event IDs, and safe driver faults.
 T5. Commit E5 source/composition/loopback tests; run earlier 10-3/10-4 stream tests unchanged.
 T6. Commit E6 isolated loopback registry/sender tests with token registry authentication,
     backpressure limit=1, blocked commit, ack ordering, duplicate concurrent sends and timeout.
 T7. Commit E7 controlled reconnect tests for every kind, changed instance, lost ack, supersession,
     command deadline, ambient trace changes and late old callbacks. No network sleep delays.
-T8. Commit E8 adapter/complete loopback proof and isolated Testcontainers real actor proof;
+T8. Commit E8 adapter/complete loopback proof with scripted driver and delayed application.
+T9. Commit E9 input/capture mapping, readiness/busy/lead/key and scalar-boundary capture tests.
+T10. Commit E10 isolated Testcontainers real actor proof;
     no SQL substitute in the actor proof. Synthetic normalized readiness observations only,
     no real Claude demo. If production prerequisite is absent, report it; do not implement it.
 
@@ -324,7 +367,7 @@ T8. Commit E8 adapter/complete loopback proof and isolated Testcontainers real a
 Story acceptance and earlier tests pass; Release build zero warnings/errors. Run relevant Node
 and Orchestrator tests; actor proof requires Docker/Postgres. One local commit
 `feat(link): <story title> (#10)` with silent choices and risk evidence in body; no push/PR.
-Risks: checks secret-safe command path (0002-RK2) but does not close remote TLS; E8 checks normal
+Risks: checks secret-safe command path (0002-RK2) but does not close remote TLS; E10 checks normal
 readiness/result ordering (0006-RK6). Event volume (0002-RK1) and actor restart re-forwarding
 (0006-RK9, 10-4) remain with their owning integration paths.
 
