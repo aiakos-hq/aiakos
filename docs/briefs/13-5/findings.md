@@ -1,6 +1,6 @@
 # Story review: slice 13-5
 
-Reviewed at commit 3701f1b. Stories: 5. Check: ok.
+Reviewed at commit e86819f. Stories: 6. Check: ok.
 
 ## Findings
 
@@ -8,10 +8,14 @@ Reviewed at commit 3701f1b. Stories: 5. Check: ok.
 - [x] S2 (judgment-gap): the story holds the two-system Postgres fixture (R3), the 25-event same-instance replay (R4) and the new-instance scenario with command services, capture-before-dispatch and the launch-mismatch alternate (R5), with three outputs and two prerequisite slices, which is more than one run; and `SAME` needs only 10-4 S6 but waits for 13-4 because `NEW` is in the same story. Fix: move R5/`NEW` to a story of its own that depends on S2 and carries the 13-4 prerequisite alone.
 - [x] S1, S3 (context-gap): R1 says the overlay commits "before ... evidence capture" and R7/`ORDER` expect "one history0 capture" for an Unknown live launch, but 13-4 R14 requests that capture only after a supervised reload's SeatActorReloaded notification, and no rule here says whether the new process-start boundary requests it too, so either S1's implementer decides or S3's test has no production owner. Fix: state in R1 whether a successful process-start overlay requests the R18 capture (and that a disconnected node inserts nothing), and name in R7/`ORDER` which event produces each expected capture.
 - [x] S1 (context-gap): R2 says a supervised child restart does not reapply the process-start overlay "while the node link is live", which leaves the result for a restart with the link lost to the implementer. Fix: drop the condition, or state the result for a lost link in R2 and `BOOT`.
+- [ ] S3 (judgment-gap): R5 and `NEW` expect Resumability Unknown/observation-gap after the I2 attach, but R4's seq 1..20 leave the seat Resumable and the merged 13-1 machine turns only FreshOnly into Unknown on an observation gap (`SeatStateMachine.ApplyObservationGap`, U6), so the permanent test fails against code this slice may not change. Fix: make R5 and `NEW` expect Resumability Resumable, unchanged, with no resumability transition.
+- [ ] S3 (judgment-gap): R5's alternate expects Unknown/orphan-or-running for an inventory whose LaunchId differs, but the merged machine gives Unknown/inventory-missing with the inventory-mismatch finding there (`ReconcileMissingInventory`, S16; orphan-or-running is only for a matching launch with an unspecified lifecycle), and it still emits RequestCapture for L, about which R5 says nothing. Fix: change the reason in R5 to inventory-missing and state in R5 and `NEW` how many captures for L the mismatch attach persists.
 
 ## Not checked
 
-- The exact states of R4 and R5 (Present/Working/Resumable after seq 1..20, CatchUpSeq 25, the overlay clearing at seq 25, NextSeq 1 and the observation-gap values for I2, `orphan-or-running` on a launch mismatch) were not replayed against `SeatStateMachine`; only `ApplyOverlay` was read (it leaves a known Absent/Exited session unchanged, as R2 says).
+- R4 and R5 were read against `SeatStateMachine.AttachNode`, `ApplyOverlay`, `ClearOverlay`, `ReconcileInventory`, `ReconcileMissingInventory` and `ApplyObservationGap` at e86819f, not run: the same-instance overlay holds with CatchUpSeq 25, and the I2 attach gives NextSeq 1, Overlay null, Present, Activity Unknown/observation-gap and one RequestCapture. The event path (states after seq 1..20, the overlay clearing at seq 25, Idle after TurnEnded) was not replayed.
+- Round 2 read only what changed since d63104c and what the two new findings depend on; the resolutions of the four round 1 findings were read and hold. 13-4 R13, R14 and R18 agree with R1 and R7: the capture follows `SeatActorReloaded`, which `SeatRegion.ChildLoaded` publishes only after the first load.
+- Whether spec 0006 R35 wants an evidence capture at process start (R1 now says none) was not checked.
 - The source audit behind S1 was read and holds at 5bb5ce3: `SeatActor.EnsureLoadedAsync` loads and sends `SeatChildLoaded` without applying `OrchestratorRestarted`; `SeatRegion` spawns the startup keys and tracks `InitialLoadComplete`.
 - Which existing tests C1 turns red was not looked up; nothing was built or run.
 - The 10-4 S6/S7 and 13-4 contracts the stories consume (`SeatNodeEventCommitter.GetReplayAsync`, `SeatCommandServices`, `PostgresSeatCommandStore`) are not in `src` at 5bb5ce3; only 13-4 R13, R14 and R18 were read, and no 13-4 story issue exists yet.
