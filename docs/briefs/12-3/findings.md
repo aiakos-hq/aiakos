@@ -1,6 +1,6 @@
 # Story review: slice 12-3
 
-Reviewed at commit 7d2f9795d791427e759481761aba2403301a9689. Stories: 5. Check: ok.
+Reviewed at commit e213e24edd45e29161835db48d2a2ea880546591. Stories: 5. Check: ok.
 
 ## Findings
 
@@ -26,3 +26,13 @@ make every undecodable JSON string/property name (including nested tool_input) a
 malformation before state mutation; R5/E6 reject fraction/exponent integer tokens, including
 16.0 and 1e2. Items retain their existing IDs and ownership; no additional rule is introduced
 outside those items. Architect re-review is pending.
+
+## Architect re-review: round 1
+
+Read the diff 7d2f979..e213e24 of brief.md, items.tsv and stories.md. Check: ok (5 stories,
+34 items). All four findings are resolved as asked and no new finding is open: G2, T1 and T2
+keep permanent fallback tests to Mystery; ClaudeFixtureLoader is named, owned by S1 and S5
+depends on S1; G2 and E1 make an undecodable string anywhere a malformed payload; R5 and E6
+define an integer as a token without fraction or exponent. Not checked in this round: the
+`JsonDocument` behaviour was not run again, and the token `-0` in an integer usage field is
+left to the simplest reading.
