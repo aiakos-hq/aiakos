@@ -1,0 +1,78 @@
+apiVersion: aiakos.dev/v1
+kind: Agent
+name: implementer
+description: Implements a GitHub issue against its spec, with tests, and opens a PR.
+defaults:
+  harness: claude-code
+  model: opus
+guidance:
+  - GUIDANCE.md
+skills:
+  - skills/implement-issue
+  - skills/address-review
+harnesses:
+  claude-code:
+    permission_mode: acceptEdits
+    permissions:
+      allow:
+        - "Bash(dotnet build:*)"
+        - "Bash(dotnet test:*)"
+        - "Bash(dotnet format:*)"
+        - "Bash(dotnet restore:*)"
+        - "Bash(dotnet pack:*)"
+        - "Bash(git status:*)"
+        - "Bash(git diff:*)"
+        - "Bash(git log:*)"
+        - "Bash(git show:*)"
+        - "Bash(git fetch:*)"
+        - "Bash(git switch:*)"
+        - "Bash(git add:*)"
+        - "Bash(git commit:*)"
+        - "Bash(git merge origin/main:*)"
+        - "Bash(git push:*)"
+        - "Bash(gh issue view:*)"
+        - "Bash(gh issue list:*)"
+        - "Bash(gh issue comment:*)"
+        - "Bash(gh pr create:*)"
+        - "Bash(gh pr view:*)"
+        - "Bash(gh pr diff:*)"
+        - "Bash(gh pr checks:*)"
+        - "Bash(gh pr comment:*)"
+        - "Bash(gh run view:*)"
+        - "Bash(gh run list:*)"
+      ask:
+        - "Bash(git reset:*)"
+        - "Bash(git clean:*)"
+        - "Bash(git checkout:*)"
+        - "Bash(git stash:*)"
+      deny:
+        - "Bash(tmux:*)"
+        - "Bash(aiakos:*)"
+        - "Bash(dotnet aiakos:*)"
+        - "Bash(dotnet tool:*)"
+        - "Bash(cmd.exe:*)"
+        - "Bash(powershell.exe:*)"
+        - "Bash(pwsh.exe:*)"
+        - "Bash(wsl.exe:*)"
+        - "Bash(kill:*)"
+        - "Bash(pkill:*)"
+        - "Bash(killall:*)"
+        - "Bash(git push --force:*)"
+        - "Bash(git push -f:*)"
+        - "Bash(git push --force-with-lease:*)"
+        - "Bash(git push origin main:*)"
+        - "Bash(git push origin HEAD:main:*)"
+        - "Bash(gh pr merge:*)"
+        - "Bash(gh api:*)"
+        - "Bash(gh auth:*)"
+        - "Bash(gh secret:*)"
+        - "Bash(gh release:*)"
+        - "Bash(gh workflow:*)"
+        - "Bash(gh repo:*)"
+        - "Read(//mnt/**)"
+        - "Edit(//mnt/**)"
+        - "Read(~/.aiakos*/**)"
+        - "Edit(~/.aiakos*/**)"
+        - "Read(~/aiakos/seats/*/*/aiakos/**)"
+        - "Edit(~/aiakos/seats/*/*/aiakos/**)"
+        - "Bash(gh pr review:*)"
