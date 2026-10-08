@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Linq;
 using Aiakos.Contracts.Node;
 using Aiakos.Contracts.Node.V1;
 using Google.Protobuf;
@@ -23,6 +24,7 @@ public static class ClaudeHookNormalizer
         var attributes = new Dictionary<string, string>(StringComparer.Ordinal);
         string sessionId = valid ? String(root, "session_id") ?? string.Empty : string.Empty;
         HarnessEventKind kind = HarnessEventKind.Other;
+        ClaudeNormalizationState nextState = state;
 
         if (valid)
         {
@@ -65,12 +67,25 @@ public static class ClaudeHookNormalizer
                     Add(attributes, "turn_id", String(root, "prompt_id"));
                     Add(attributes, "permission_mode", String(root, "permission_mode"));
                     Add(attributes, "delivery_id", string.IsNullOrEmpty(deliveryId) ? null : deliveryId);
+                    nextState = state.With(permissionEchoSeen: false);
                     break;
                 case "PreToolUse":
                     kind = HarnessEventKind.ToolStarted;
-                    Add(attributes, "tool_name", String(root, "tool_name"));
-                    Add(attributes, "tool_use_id", String(root, "tool_use_id"));
+                    string? toolName = String(root, "tool_name");
+                    string? toolId = String(root, "tool_use_id");
+                    Add(attributes, "tool_name", toolName);
+                    Add(attributes, "tool_use_id", toolId);
                     Add(attributes, "turn_id", String(root, "prompt_id"));
+                    nextState = state.With(permissionEchoSeen: false);
+                    if (!string.IsNullOrEmpty(toolId) && toolName is not null &&
+                        root.TryGetProperty("tool_input", out JsonElement toolInput) && toolInput.ValueKind != JsonValueKind.Null &&
+                        TryCanonicalize(toolInput, out string canonicalInput))
+                    {
+                        ClaudeOpenTool[] openTools = state.OpenTools
+                            .Where(tool => tool.Id != toolId)
+                            .Append(new ClaudeOpenTool(toolId, toolName, canonicalInput)).ToArray();
+                        nextState = nextState.With(openTools: openTools);
+                    }
                     break;
                 case "PostToolUse":
                 case "PostToolUseFailure":
@@ -79,6 +94,9 @@ public static class ClaudeHookNormalizer
                     Add(attributes, "tool_use_id", String(root, "tool_use_id"));
                     AddNumber(attributes, "duration_ms", root, "duration_ms");
                     if (nativeName == "PostToolUseFailure") attributes.Add("failed", "true");
+                    string? completedId = String(root, "tool_use_id");
+                    if (completedId is not null)
+                        nextState = state.With(openTools: state.OpenTools.Where(tool => tool.Id != completedId).ToArray());
                     break;
                 case "Stop":
                     kind = HarnessEventKind.TurnEnded;
@@ -91,7 +109,36 @@ public static class ClaudeHookNormalizer
                     Add(attributes, "error", String(root, "last_assistant_message"));
                     break;
                 case "Notification":
-                    Add(attributes, "notification_type", String(root, "notification_type"));
+                    string? notificationType = String(root, "notification_type");
+                    Add(attributes, "notification_type", notificationType);
+                    if (notificationType == "permission_prompt")
+                    {
+                        if (state.PermissionEchoSeen)
+                        {
+                            kind = HarnessEventKind.Other;
+                        }
+                        else
+                        {
+                            kind = HarnessEventKind.InputRequested;
+                            attributes["request_id"] = "*";
+                            nextState = state.With(permissionEchoSeen: true);
+                        }
+                    }
+                    break;
+                case "PermissionRequest":
+                    kind = HarnessEventKind.InputRequested;
+                    string? permissionToolName = String(root, "tool_name");
+                    Add(attributes, "tool_name", permissionToolName);
+                    string requestId = "*";
+                    if (permissionToolName is not null && root.TryGetProperty("tool_input", out JsonElement permissionInput) &&
+                        permissionInput.ValueKind != JsonValueKind.Null && TryCanonicalize(permissionInput, out string permissionCanonical))
+                    {
+                        ClaudeOpenTool? match = state.OpenTools.LastOrDefault(tool =>
+                            tool.Name == permissionToolName && tool.CanonicalInput == permissionCanonical);
+                        if (match is not null) requestId = match.Id;
+                    }
+                    attributes["request_id"] = requestId;
+                    nextState = state.With(permissionEchoSeen: true);
                     break;
             }
         }
@@ -109,7 +156,7 @@ public static class ClaudeHookNormalizer
         };
         foreach ((string key, string value) in attributes) resultEvent.Attributes.Add(key, value);
         HarnessEventLimits.Apply(resultEvent);
-        return new ClaudeNormalizationResult(resultEvent, state);
+        return new ClaudeNormalizationResult(resultEvent, nextState);
     }
 
     private static bool TryParse(ReadOnlyMemory<byte> body, out JsonDocument? document, out JsonElement root)
@@ -190,5 +237,93 @@ public static class ClaudeHookNormalizer
     {
         if (root.TryGetProperty(property, out JsonElement value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False)
             values[name] = value.GetBoolean().ToString().ToLower(CultureInfo.InvariantCulture);
+    }
+
+    private static bool TryCanonicalize(JsonElement element, out string canonical)
+    {
+        var builder = new StringBuilder();
+        WriteCanonical(element, builder);
+        canonical = builder.ToString();
+        return true;
+    }
+
+    private static void WriteCanonical(JsonElement element, StringBuilder builder)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var properties = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+                foreach (JsonProperty property in element.EnumerateObject()) properties[property.Name] = property.Value;
+                builder.Append('{');
+                bool firstProperty = true;
+                foreach ((string name, JsonElement value) in properties.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+                {
+                    if (!firstProperty) builder.Append(',');
+                    firstProperty = false;
+                    WriteCanonicalString(name, builder);
+                    builder.Append(':');
+                    WriteCanonical(value, builder);
+                }
+                builder.Append('}');
+                break;
+            case JsonValueKind.Array:
+                builder.Append('[');
+                bool firstItem = true;
+                foreach (JsonElement item in element.EnumerateArray())
+                {
+                    if (!firstItem) builder.Append(',');
+                    firstItem = false;
+                    WriteCanonical(item, builder);
+                }
+                builder.Append(']');
+                break;
+            case JsonValueKind.String:
+                WriteCanonicalString(element.GetString() ?? string.Empty, builder);
+                break;
+            case JsonValueKind.Number:
+                builder.Append(element.GetRawText());
+                break;
+            case JsonValueKind.True:
+                builder.Append("true");
+                break;
+            case JsonValueKind.False:
+                builder.Append("false");
+                break;
+            case JsonValueKind.Null:
+                builder.Append("null");
+                break;
+            default:
+                throw new InvalidOperationException("Unexpected JSON value kind.");
+        }
+    }
+
+    private static void WriteCanonicalString(string value, StringBuilder builder)
+    {
+        builder.Append('"');
+        foreach (char character in value)
+        {
+            switch (character)
+            {
+                case '"': builder.Append("\\\""); break;
+                case '\\': builder.Append("\\\\"); break;
+                case '\b': builder.Append("\\b"); break;
+                case '\f': builder.Append("\\f"); break;
+                case '\n': builder.Append("\\n"); break;
+                case '\r': builder.Append("\\r"); break;
+                case '\t': builder.Append("\\t"); break;
+                default:
+                    if (character < 0x20)
+                    {
+                        builder.Append("\\u");
+                        builder.Append(((int)character).ToString("x4", CultureInfo.InvariantCulture));
+                    }
+                    else
+                    {
+                        builder.Append(character);
+                    }
+                    break;
+            }
+        }
+        builder.Append('"');
     }
 }
