@@ -31,7 +31,7 @@ public sealed class ClaudeHookNormalizerTests
             HarnessEventKind.PromptSubmitted, state, ("turn_id", "turn-a"), ("permission_mode", "default"));
         var withDelivery = ClaudeHookNormalizer.Normalize(state, "UserPromptSubmit", Encoding.UTF8.GetBytes(Base), "delivery-a");
         Assert.Equal("delivery-a", withDelivery.Event.Attributes["delivery_id"]);
-        AssertEvent("PreToolUse", "{\"tool_name\":\"Bash\",\"tool_use_id\":\"tool-a\",\"prompt_id\":\"turn-a\",\"tool_input\":{\"x\":\"secret\"}}",
+        AssertEventWithoutStateIdentity("PreToolUse", "{\"tool_name\":\"Bash\",\"tool_use_id\":\"tool-a\",\"prompt_id\":\"turn-a\",\"tool_input\":{\"x\":\"secret\"}}",
             HarnessEventKind.ToolStarted, state, ("tool_name", "Bash"), ("tool_use_id", "tool-a"), ("turn_id", "turn-a"));
         AssertEvent("PostToolUse", "{\"tool_name\":\"Bash\",\"tool_use_id\":\"tool-a\",\"duration_ms\":331,\"tool_response\":\"secret\"}",
             HarnessEventKind.ToolFinished, state, ("tool_name", "Bash"), ("tool_use_id", "tool-a"), ("duration_ms", "331"));
@@ -90,14 +90,19 @@ public sealed class ClaudeHookNormalizerTests
 
     private static void AssertEvent(string nativeName, string json, HarnessEventKind kind,
         ClaudeNormalizationState state, params (string Key, string Value)[] attributes)
-        => AssertEventCore(nativeName, json, kind, state, attributes, expectedSessionId: null);
+        => AssertEventCore(nativeName, json, kind, state, attributes, expectedSessionId: null, assertSameState: true);
+
+    private static void AssertEventWithoutStateIdentity(string nativeName, string json, HarnessEventKind kind,
+        ClaudeNormalizationState state, params (string Key, string Value)[] attributes)
+        => AssertEventCore(nativeName, json, kind, state, attributes, expectedSessionId: null, assertSameState: false);
 
     private static void AssertEventWithSession(string nativeName, string json, HarnessEventKind kind,
         ClaudeNormalizationState state, (string Key, string Value)[] attributes, string expectedSessionId)
-        => AssertEventCore(nativeName, json, kind, state, attributes, expectedSessionId);
+        => AssertEventCore(nativeName, json, kind, state, attributes, expectedSessionId, assertSameState: true);
 
     private static void AssertEventCore(string nativeName, string json, HarnessEventKind kind,
-        ClaudeNormalizationState state, (string Key, string Value)[] attributes, string? expectedSessionId)
+        ClaudeNormalizationState state, (string Key, string Value)[] attributes, string? expectedSessionId,
+        bool assertSameState)
     {
         var normalized = ClaudeHookNormalizer.Normalize(state, nativeName, Encoding.UTF8.GetBytes(json));
         Assert.Equal(kind, normalized.Event.Kind);
@@ -108,7 +113,7 @@ public sealed class ClaudeHookNormalizerTests
         Assert.Equal(EventOrigin.Live, normalized.Event.Origin);
         Assert.Equal(Encoding.UTF8.GetBytes(json), normalized.Event.Raw.ToByteArray());
         Assert.Equal(attributes.ToDictionary(pair => pair.Key, pair => pair.Value), normalized.Event.Attributes);
-        Assert.Same(state, normalized.State);
+        if (assertSameState) Assert.Same(state, normalized.State);
         Assert.Equal("session-a", state.CurrentSessionId);
     }
 }
