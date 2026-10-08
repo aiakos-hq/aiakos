@@ -47,6 +47,21 @@
 #                                         artifacts/trials/<story>/partial.md, labels "partial"
 #   tools/story.sh cleanup <issue>        removes the worktree and the local branch after merge
 #
+# Passing work on (the seats use this in place of "rig queue handoff"):
+#   tools/story.sh hand <target> [--role <role>] [--item <qitem>] --summary "<one line>"
+#                       (--body "<text>" | --body-file <path>) [--evidence <path or link>]
+#                                         <target> is a pool (low, high), a seat (architect,
+#                                         reviewer, gate, router) or "maintainer", which is
+#                                         the terminal of desk-lead. A pool needs
+#                                         --role: a file of rigs/aiakos-delivery/roles/. The
+#                                         destination gets a clean conversation when it is idle
+#                                         and has nothing in progress, then the item. --item
+#                                         closes the caller's own item as handed off.
+#                                         artifacts/hand.log records every delivery
+#   tools/story.sh events                 prints what changed on GitHub since the last look:
+#                                         merged pull requests, chores and bugs labelled
+#                                         ready. Each change once; the router runs it
+#
 # A slice is one brief: docs/briefs/<slice>/ with brief.md, items.tsv, stories.md and, while it
 # is reviewed, findings.md. A story is "<slice>-<n>" (for example 14-3-2); its issue title is
 # "<story>: <title>". Acceptance tests are written before the run and stay local, in
@@ -308,7 +323,7 @@ relabel() {
 has_label() { case " $labels " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # What the implementer does next. The seat that ran the command acts on it (route "impl": the
-# impl seat; "impl/senior": the senior seat).
+# Low pool; "impl/senior": the High pool).
 print_task() {
   echo
   echo "Next, for the $route implementer, in the worktree:"
@@ -485,7 +500,7 @@ cmd_next() {
   rm -f "${TMPDIR:-/tmp}/story-next.$$"
   if [ -z "$want" ] || [ "$want" = "impl/senior" ]; then
     chores="$(ready_chores || true)"
-    if [ -n "$chores" ]; then echo; echo "chores and bugs ready (for the senior seat):"; printf '%s\n' "$chores"; fi
+    if [ -n "$chores" ]; then echo; echo "chores and bugs ready (for the High pool):"; printf '%s\n' "$chores"; fi
   fi
 }
 
@@ -1031,12 +1046,193 @@ cmd_cleanup() {
   fi
 }
 
+# Passing work to a seat of the delivery rig (rigs/aiakos-delivery/). A long conversation is
+# sent again with every request, so an item is delivered into an empty conversation where that
+# can be done: a fresh launch of the seat (rig seat launch --fresh --stop), for a pool seat, the
+# architect and the reviewer. OpenRig then sends the seat its startup text again. A busy seat
+# is never touched; its item is queued and the log says that nothing was cleared.
+RIG="${AIAKOS_RIG:-aiakos-delivery}"
+POOL_LOW="team-low1 team-low2"
+POOL_HIGH="team-high1 team-high2"
+
+# "<seat> idle|busy <open items>" for every seat of the rig that is running and started.
+rig_seats() {
+  rig ps --nodes --rig "$RIG" --json 2>/dev/null | node -e '
+    let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+      let nodes; try { nodes = JSON.parse(s); } catch { process.exit(1); }
+      for (const n of nodes) {
+        if (n.sessionStatus !== "running" || n.startupStatus !== "ready") continue;
+        const idle = n.agentActivity && n.agentActivity.state === "idle" ? "idle" : "busy";
+        console.log(n.canonicalSessionName, idle, (n.assignedWorkCount || 0) + (n.pendingWorkCount || 0));
+      }
+    });'
+}
+
+# How many items a seat has in progress; prints nothing when that cannot be read.
+in_progress() {
+  rig queue list --destination "$1" --state in-progress --limit 1000 --json 2>/dev/null | node -e '
+    let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+      let rows; try { rows = JSON.parse(s); } catch { process.exit(1); }
+      if (!Array.isArray(rows)) process.exit(1);
+      console.log(rows.length);
+    });'
+}
+
+cmd_hand() {
+  local usage='usage: story.sh hand <low|high|architect|reviewer|gate|router|maintainer> [--role <role>] [--item <qitem>] --summary "<one line>" (--body "<text>" | --body-file <path>) [--evidence <path or link>]'
+  local target="${1:-}" role="" item="" summary="" body="" body_file="" evidence=""
+  [ $# -eq 0 ] || shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --role)      role="${2:-}"; shift 2 ;;
+      --item)      item="${2:-}"; shift 2 ;;
+      --summary)   summary="${2:-}"; shift 2 ;;
+      --body)      body="${2:-}"; shift 2 ;;
+      --body-file) body_file="${2:-}"; shift 2 ;;
+      --evidence)  evidence="${2:-}"; shift 2 ;;
+      *)           die "$usage" ;;
+    esac
+  done
+  [ -n "$target" ] && [ -n "$summary" ] || die "$usage"
+  if [ -n "$body_file" ]; then
+    [ -z "$body" ] || die "hand: give --body or --body-file, not both"
+    [ -f "$body_file" ] || die "hand: no file $body_file"
+  else
+    [ -n "$body" ] || die "hand: give --body or --body-file"
+  fi
+
+  # clear: whether the destination's conversation can be emptied ("fresh") or not ("no").
+  local pool="" dest="" clear="no" roles="$main_root/rigs/aiakos-delivery/roles"
+  case "$target" in
+    low)        pool="$POOL_LOW"; clear="fresh" ;;
+    high)       pool="$POOL_HIGH"; clear="fresh" ;;
+    architect)  dest="team-architect@$RIG"; clear="fresh" ;;
+    reviewer)   dest="team-reviewer@$RIG"; clear="fresh" ;;
+    gate)       dest="team-gate@$RIG" ;;
+    router)     dest="desk-router@$RIG" ;;
+    maintainer) dest="desk-lead@$RIG"; [ -n "$evidence" ] || die "hand maintainer needs --evidence <path or link>: what the maintainer should look at" ;;
+    *)          die "$usage" ;;
+  esac
+  if [ -n "$pool" ]; then
+    [ -n "$role" ] && [ -f "$roles/$role.md" ] || die "hand $target needs --role, one of: $(ls "$roles" 2>/dev/null | sed 's/\.md$//' | tr '\n' ' ')"
+  else
+    [ -z "$role" ] || die "hand: --role is only for the pools low and high"
+  fi
+  command -v rig >/dev/null 2>&1 || die "hand: rig is not on the PATH"
+  command -v node >/dev/null 2>&1 || die "hand: node is not on the PATH"
+
+  local table="" seat line state open best="" best_open="" count="" kept=""
+  table="$(rig_seats)" || true
+  [ -n "$table" ] || die "hand: cannot read the seats of rig $RIG. Is it running?"
+  if [ -n "$pool" ]; then
+    # An idle seat with nothing open, else the seat with the fewest open items.
+    for seat in $pool; do
+      line="$(printf '%s\n' "$table" | awk -v s="$seat@$RIG" '$1 == s { print $2, $3 }')"
+      [ -n "$line" ] || continue
+      state="${line% *}"; open="${line#* }"
+      if [ "$state" = "idle" ] && [ "$open" = "0" ]; then dest="$seat@$RIG"; break; fi
+      if [ -z "$best" ] || [ "$open" -lt "$best_open" ]; then best="$seat@$RIG"; best_open="$open"; fi
+    done
+    [ -n "$dest" ] || dest="$best"
+    [ -n "$dest" ] || die "hand: no seat of pool $target is running"
+  fi
+  if [ "$clear" != "no" ]; then
+    state="$(printf '%s\n' "$table" | awk -v s="$dest" '$1 == s { print $2 }')"
+    count="$(in_progress "$dest")" || true
+    if [ -z "$state" ]; then die "hand: $dest is not running; see: rig ps --nodes --rig $RIG"
+    elif [ "$state" != "idle" ]; then clear="no"; kept="it is busy"
+    elif [ -z "$count" ]; then clear="no"; kept="its queue could not be read"
+    elif [ "$count" != "0" ]; then clear="no"; kept="it has an item in progress"
+    fi
+  fi
+
+  local text
+  text="$(mktemp)"
+  if [ -n "$pool" ]; then
+    printf 'Role for this item: read %s before anything else.\n\n' "$roles/$role.md" > "$text"
+  fi
+  if [ -n "$body_file" ]; then cat "$body_file" >> "$text"; else printf '%s\n' "$body" >> "$text"; fi
+
+  if [ "${AIAKOS_NO_WRITE:-}" = "1" ]; then
+    echo "would hand to $dest (conversation: $clear${kept:+, kept because $kept}):"
+    sed 's/^/  /' "$text"
+    rm -f "$text"
+    return
+  fi
+
+  if [ "$clear" = "fresh" ]; then
+    rig seat launch "$dest" --fresh --stop --reason "clean conversation for the next item" >/dev/null 2>&1 \
+      || { rm -f "$text"; die "hand: could not start a fresh conversation in $dest; nothing was handed over. See: rig ps --nodes --rig $RIG"; }
+  fi
+
+  local args=(--summary "$summary" --body-file "$text")
+  [ -z "$evidence" ] || args+=(--evidence-ref "$evidence")
+  if [ -n "$item" ]; then
+    rig queue handoff "$item" --to "$dest" "${args[@]}" >/dev/null 2>"$text.err" \
+      || { cat "$text.err" >&2; rm -f "$text" "$text.err"; die "hand: rig queue handoff failed; $item is still yours"; }
+  else
+    rig queue create --destination "$dest" "${args[@]}" >/dev/null 2>"$text.err" \
+      || { cat "$text.err" >&2; rm -f "$text" "$text.err"; die "hand: rig queue create failed"; }
+  fi
+  rm -f "$text" "$text.err"
+
+  mkdir -p "$main_root/artifacts"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${OPENRIG_SESSION_NAME:-shell}" "$target" "$dest" "${role:--}" "$clear${kept:+ ($kept)}" "$summary" >> "$main_root/artifacts/hand.log"
+  echo "handed to $dest (conversation: $clear${kept:+, kept because $kept})"
+}
+
+# What changed on GitHub since the last look: a merged pull request, or a chore or bug that
+# the maintainer labelled ready. Nothing reports these to the rig, so the router runs this at
+# the start of each move and acts on what it prints. Each change is printed once. The first
+# run only records what exists.
+cmd_events() {
+  local seen="$main_root/artifacts/events.seen" now fresh
+  mkdir -p "$main_root/artifacts"
+  now="$(mktemp)"; fresh="$(mktemp)"
+  if ! gh pr list --repo "$REPO" --state merged --limit 40 --json number,title,headRefName \
+      --jq '.[] | "merged:\(.number)\tPull request #\(.number) was merged: \(.title) (branch \(.headRefName))"' > "$now"; then
+    rm -f "$now" "$fresh"; die "events: cannot read the pull requests of $REPO"
+  fi
+  if ! gh issue list --repo "$REPO" --state open --label ready --limit 100 --json number,title,labels \
+      --jq '.[] | select((.title | test("^[0-9]+-[0-9]+(-[0-9]+)?: ") | not) and ([.labels[].name] | any(. == "type/chore" or . == "type/bug"))) | "ready:\(.number)\tIssue #\(.number) (chore or bug) is labelled ready: \(.title)"' >> "$now"; then
+    rm -f "$now" "$fresh"; die "events: cannot read the issues of $REPO"
+  fi
+  # An item that asked the maintainer to merge a pull request is answered by the merge.
+  if [ "${AIAKOS_NO_WRITE:-}" != "1" ] && command -v rig >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
+    rig queue list --destination "desk-lead@$RIG" --state pending,in-progress,blocked --full --limit 200 --json 2>/dev/null | node -e '
+      let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+        let rows; try { rows = JSON.parse(s); } catch { return; }
+        for (const r of rows) { const m = /\/pull\/([0-9]+)\/?$/.exec(r.evidenceRef || ""); if (m) console.log(r.qitemId, m[1]); }
+      });' | while read -r item pr; do
+        grep -q "^merged:$pr	" "$now" || continue
+        rig queue update "$item" --state done --closure-reason no-follow-on --note "pull request #$pr is merged" >/dev/null 2>&1 || true
+      done
+  fi
+  if [ ! -f "$seen" ]; then
+    cut -f1 "$now" > "$seen"
+    echo "events: first look, $(wc -l < "$seen" | tr -d ' ') recorded; nothing new"
+    rm -f "$now" "$fresh"
+    return
+  fi
+  awk -F'\t' 'NR == FNR { s[$1]; next } !($1 in s)' "$seen" "$now" > "$fresh"
+  if [ -s "$fresh" ]; then
+    echo "events: changed on GitHub since the last look:"
+    cut -f2 "$fresh" | sed 's/^/- /'
+    [ "${AIAKOS_NO_WRITE:-}" = "1" ] || cut -f1 "$fresh" >> "$seen"
+  else
+    echo "events: nothing new"
+  fi
+  rm -f "$now" "$fresh"
+}
+
 case "${1:-}" in
   check)      cmd_check "${2:-}" ;;
   split)      cmd_split "${2:-}" ;;
   split-done) cmd_split_done "${2:-}" ;;
   show)       cmd_show "${2:-}" "${3:-}" ;;
   status)     cmd_status ;;
+  hand)       shift; cmd_hand "$@" ;;
+  events)     cmd_events ;;
   ready)      cmd_ready "${2:-}" "${3:-}" "${4:-}" ;;
   next)       cmd_next "${2:-}" ;;
   start)      cmd_start "${2:-}" "${3:-}" ;;

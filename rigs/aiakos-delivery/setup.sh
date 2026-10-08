@@ -5,10 +5,10 @@
 set -u
 
 RIG=aiakos-delivery
-OPENRIG_VERSION=0.6.4
+OPENRIG_VERSION=0.6.6
 PI_VERSION=1.0.1
 KEY_FILE="$HOME/.config/opencode-go/key"
-# Seats that run on Pi (pod-member, for example "verify-qa"). None at the moment: Pi and the
+# Seats that run on Pi (pod-member, for example "team-low1"). None at the moment: Pi and the
 # OpenCode Go key are only checked when this list is not empty (see docs/spikes/0006).
 PI_SEATS=""
 
@@ -26,6 +26,7 @@ need git    "sudo apt install git"
 need gh     "https://cli.github.com, then 'gh auth login'"
 need dotnet ".NET SDK from global.json"
 need docker "Docker Desktop with WSL integration for this distro"
+need rg     "sudo apt install ripgrep (acceptance gates call it; Claude Code's own rg is not seen by a script)"
 need rig    "npm install -g @openrig/cli@$OPENRIG_VERSION"
 need claude "Claude Code, then log in"
 need codex  "npm install -g @openai/codex, then 'codex login'"

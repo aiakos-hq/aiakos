@@ -2,20 +2,26 @@
 # Start it from the repository root in WSL:  rig up rigs/aiakos-delivery/rig.yaml
 #
 # Models, in one place. Change a seat's model on its `model:` line below.
-#   lead       claude-sonnet-5-5       runs scripts; needs no strong model
-#   author     gpt-6.1-sol             briefs and acceptance tests
-#   author2    gpt-6.1-sol             a second author, so two slices can be analysed at once
-#   architect  claude-opus-5-5         checks the analysis
-#   impl       gpt-6-luna              the default implementer (Sonnet level)
-#   impl2      gpt-6-luna              a second implementer, for stories that do not depend on each other
-#   senior     gpt-6.1-sol             escalated stories only
-#   qa         gpt-6-luna              runs the gate (a script decides; the seat only runs it)
-#   reviewer   claude-opus-5-5         reads the diff once
+#   desk   lead         claude-sonnet-5-5   the maintainer's console; gets only what needs the maintainer
+#   desk   router       claude-haiku-5-5    receives every report and makes the next move
+#   team   architect    claude-opus-5-5     checks the analysis; takes escalations
+#   team   reviewer     claude-opus-5-5     reads the diff once
+#   team   gate         claude-haiku-5-5    runs the baseline and the gate (a script decides)
+#   team   low1 low2    gpt-6-luna          Codex Pool Low: implement stories, write acceptance
+#                                           tests
+#   team   high1 high2  gpt-6.1-sol         Codex Pool High: brief and split, escalated stories,
+#                                           chores and bugs
+#
+# A seat of a pool has no role of its own: each item names the role file to read
+# (rigs/aiakos-delivery/roles/). `tools/story.sh hand` picks the seat and clears its
+# conversation before it delivers the item. Every start of the rig begins with empty
+# conversations (restore_policy: relaunch_fresh).
 version: "0.2"
 name: aiakos-delivery
 summary: >
   Delivery team for Aiakos. Codex writes briefs and implements, Claude checks and reviews,
-  and a Codex seat runs the acceptance gate. The maintainer approves briefs and merges.
+  and a seat runs the acceptance gate, which is a script. The maintainer approves briefs and
+  merges.
 
 culture_file: CULTURE.md
 
@@ -30,8 +36,9 @@ docs:
   - path: SETUP.md
 
 pods:
-  - id: lead
-    label: Lead
+  # What the maintainer looks at.
+  - id: desk
+    label: Desk
     members:
       - id: lead
         agent_ref: "local:agents/lead"
@@ -39,76 +46,33 @@ pods:
         runtime: claude-code
         model: claude-sonnet-5-5
         permission_policy: builtin:auto
+        restore_policy: relaunch_fresh
         cwd: "../.."
-    edges: []
+      - id: router
+        agent_ref: "local:agents/router"
+        profile: default
+        runtime: claude-code
+        model: claude-haiku-5-5
+        effort: high
+        permission_policy: builtin:auto
+        restore_policy: relaunch_fresh
+        cwd: "../.."
+    edges:
+      - kind: delegates_to
+        from: lead
+        to: router
 
-  - id: analysis
-    label: Analysis
+  # The seats that do the work. Nobody has to watch them one by one.
+  - id: team
+    label: Team
     members:
-      - id: author
-        agent_ref: "local:agents/author"
-        profile: default
-        runtime: codex
-        model: gpt-6.1-sol
-        permission_policy: builtin:yolo
-        cwd: "../.."
-      - id: author2
-        agent_ref: "local:agents/author"
-        profile: default
-        runtime: codex
-        model: gpt-6.1-sol
-        permission_policy: builtin:yolo
-        cwd: "../.."
       - id: architect
         agent_ref: "local:agents/architect"
         profile: default
         runtime: claude-code
         model: claude-opus-5-5
         permission_policy: builtin:auto
-        cwd: "../.."
-    edges:
-      - kind: delegates_to
-        from: author
-        to: architect
-      - kind: delegates_to
-        from: author2
-        to: architect
-
-  - id: build
-    label: Build
-    members:
-      - id: impl
-        agent_ref: "local:agents/impl"
-        profile: default
-        runtime: codex
-        model: gpt-6-luna
-        permission_policy: builtin:yolo
-        cwd: "../.."
-      - id: impl2
-        agent_ref: "local:agents/impl"
-        profile: default
-        runtime: codex
-        model: gpt-6-luna
-        permission_policy: builtin:yolo
-        cwd: "../.."
-      - id: senior
-        agent_ref: "local:agents/impl"
-        profile: default
-        runtime: codex
-        model: gpt-6.1-sol
-        permission_policy: builtin:yolo
-        cwd: "../.."
-    edges: []
-
-  - id: verify
-    label: Verify
-    members:
-      - id: qa
-        agent_ref: "local:agents/qa"
-        profile: default
-        runtime: codex
-        model: gpt-6-luna
-        permission_policy: builtin:yolo
+        restore_policy: relaunch_fresh
         cwd: "../.."
       - id: reviewer
         agent_ref: "local:agents/reviewer"
@@ -116,37 +80,73 @@ pods:
         runtime: claude-code
         model: claude-opus-5-5
         permission_policy: builtin:auto
+        restore_policy: relaunch_fresh
+        cwd: "../.."
+      - id: gate
+        agent_ref: "local:agents/gate"
+        profile: default
+        runtime: claude-code
+        model: claude-haiku-5-5
+        effort: high
+        permission_policy: builtin:auto
+        restore_policy: relaunch_fresh
+        cwd: "../.."
+      - id: low1
+        agent_ref: "local:agents/worker"
+        profile: default
+        runtime: codex
+        model: gpt-6-luna
+        permission_policy: builtin:yolo
+        restore_policy: relaunch_fresh
+        cwd: "../.."
+      - id: low2
+        agent_ref: "local:agents/worker"
+        profile: default
+        runtime: codex
+        model: gpt-6-luna
+        permission_policy: builtin:yolo
+        restore_policy: relaunch_fresh
+        cwd: "../.."
+      - id: high1
+        agent_ref: "local:agents/worker"
+        profile: default
+        runtime: codex
+        model: gpt-6.1-sol
+        permission_policy: builtin:yolo
+        restore_policy: relaunch_fresh
+        cwd: "../.."
+      - id: high2
+        agent_ref: "local:agents/worker"
+        profile: default
+        runtime: codex
+        model: gpt-6.1-sol
+        permission_policy: builtin:yolo
+        restore_policy: relaunch_fresh
         cwd: "../.."
     edges:
       - kind: delegates_to
-        from: qa
+        from: gate
         to: reviewer
 
 edges:
   - kind: delegates_to
-    from: lead.lead
-    to: analysis.author
+    from: desk.router
+    to: team.architect
   - kind: delegates_to
-    from: lead.lead
-    to: analysis.author2
+    from: desk.router
+    to: team.reviewer
   - kind: delegates_to
-    from: lead.lead
-    to: build.impl
+    from: desk.router
+    to: team.gate
   - kind: delegates_to
-    from: lead.lead
-    to: build.impl2
+    from: desk.router
+    to: team.low1
   - kind: delegates_to
-    from: lead.lead
-    to: build.senior
+    from: desk.router
+    to: team.low2
   - kind: delegates_to
-    from: build.impl
-    to: verify.qa
+    from: desk.router
+    to: team.high1
   - kind: delegates_to
-    from: build.impl2
-    to: verify.qa
-  - kind: delegates_to
-    from: build.senior
-    to: verify.qa
-  - kind: can_observe
-    from: verify.reviewer
-    to: build.impl
+    from: desk.router
+    to: team.high2

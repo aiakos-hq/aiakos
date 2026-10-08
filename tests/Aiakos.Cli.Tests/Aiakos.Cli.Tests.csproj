@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Aiakos.Cli\Aiakos.Cli.csproj" />
+    <ProjectReference Include="..\..\src\Aiakos.Spec\Aiakos.Spec.csproj" />
+  </ItemGroup>
+
+</Project>

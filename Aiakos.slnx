@@ -20,5 +20,6 @@
     <Project Path="tests/Aiakos.Node.Testing/Aiakos.Node.Testing.csproj" />
     <Project Path="tests/Aiakos.Orchestrator.Tests/Aiakos.Orchestrator.Tests.csproj" />
     <Project Path="tests/Aiakos.Spec.Tests/Aiakos.Spec.Tests.csproj" />
+    <Project Path="tests/Aiakos.Cli.Tests/Aiakos.Cli.Tests.csproj" />
   </Folder>
 </Solution>
