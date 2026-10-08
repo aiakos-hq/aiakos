@@ -12,7 +12,7 @@ Reviewed at commit 9205dba. Stories: 5. Check: ok.
 - [x] S1 (context-gap): R3 rejects a cursor outside the size as NotFound, but tmux reports `cursor_x` equal to `pane_width` after a character is written in the last column (pending wrap), so a live pane with a full-width line would be "not found" (from tmux behaviour as I know it; not run). Fix: state the bound as 0..width inclusive for x, or say what an out-of-range cursor returns instead of NotFound, and add the case to E3.
 - [x] S3 (context-gap): R11 does not say what a failed `ResubmitAsync` (identity mismatch or tmux failure) throws to the confirmer, nor what the report is when the confirmer throws OperationCanceledException while the delivery token is not cancelled. Fix: give both exact results in R11 and E11.
 - [x] S3 (context-gap): R12 does not say whether an empty key list takes the gate, so its result while a delivery holds the gate (Busy or no-op) is the implementer's choice. Fix: state it in R12 and E12.
-- [ ] S2 (judgment-gap): round 2, in text unchanged since round 1: R8/R9/E2 never verify the handle before `load-buffer`, so a delivery on a stale handle (pane gone or launch label changed) loads the buffer and returns a report with BufferLoaded and a NotFound error, while the 11-1 contract test `AStaleHandleIsNotFound` (`tests/Aiakos.Node.Testing/SessionHostContractTests.cs:452`) expects `DeliverAsync` to throw NotFound, and spec 0004's sequence (line 641) verifies before the load. Fix: in R8/R9/E2/E9 run VerifyMutableHandleAsync once after gate admission and before the load, throwing NotFound with no load, and keep the already-cancelled load of R10 after it.
+- [x] S2 (judgment-gap): round 2, in text unchanged since round 1: R8/R9/E2 never verify the handle before `load-buffer`, so a delivery on a stale handle (pane gone or launch label changed) loads the buffer and returns a report with BufferLoaded and a NotFound error, while the 11-1 contract test `AStaleHandleIsNotFound` (`tests/Aiakos.Node.Testing/SessionHostContractTests.cs:452`) expects `DeliverAsync` to throw NotFound, and spec 0004's sequence (line 641) verifies before the load. Fix: in R8/R9/E2/E9 run VerifyMutableHandleAsync once after gate admission and before the load, throwing NotFound with no load, and keep the already-cancelled load of R10 after it.
 
 ## Not checked
 
@@ -43,3 +43,14 @@ No implementation or acceptance tests run; author checked source contract/cancel
 Read at 9205dba. The eight round-1 findings are resolved as written: the fake
 (`FakeSessionHost.cs:315`) returns BufferLoaded for an already-cancelled request, as R10 now does.
 One finding is open; it was missed in round 1 and is not caused by the round-1 changes.
+
+## Author resolution, round 2
+
+- R8/R9 now require one bounded VerifyMutableHandleAsync call after gate admission and
+  before load-buffer. Failure throws NotFound with no load or buffer cleanup, releasing the gate.
+- R10 retains the already-cancelled BufferLoaded behavior only after that verification
+  succeeds; initial verification uses CancellationToken.None, like the bounded load.
+- E2/E8/E9/E10 explicitly describe this order, including stale handles with already-cancelled
+  callers; T3 requires permanent regression coverage. Item IDs and story ownership are unchanged.
+- The source contract AStaleHandleIsNotFound and spec 0004 delivery sequence agree with this
+  correction. No disagreement remains; no implementation or acceptance tests were run.
