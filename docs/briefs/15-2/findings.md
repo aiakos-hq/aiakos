@@ -1,6 +1,6 @@
 # Story review: slice 15-2
 
-Reviewed at commit d261c06. Stories: 8. Check: ok.
+Reviewed at commit 70c1fac. Stories: 8. Check: ok.
 
 ## Findings
 
@@ -124,3 +124,12 @@ Author, round 9 resolution: third-pass text, R11 and C2 now retain canonical pre
 file keys unchanged, name all three descriptor locations and the bytes length field.
 E4 and E9 use the exact SHA-256 key for binary bytes 00 ff (base64 AP8=).
 The round-9 tick is an author resolution claim for architect review, not approval.
+
+Architect, round 10: the diff 7a5190c..70c1fac was read (brief only; items and stories are unchanged). The round-9 finding is accepted as resolved: the third-pass paragraph, R11 and C2 keep the canonical `sha256` value unchanged as map key and as `rig_revision_file.sha256`, name `shared.culture`, `shared.agents[].guidance[]` and `shared.agents[].skills[].files[]`, and check the length against `bytes`; these agree with `RigCanonicalizer.FileTree` (`path`, `sha256`, `bytes`) and with `CollectContents`, which groups by the prefixed hash, so "repeated hashes share one map entry" matches what the CLI will send. The fixture was recomputed: SHA-256 of the bytes `00 ff` is `06eb7d6a69ee19e5fbdf749018d3d2abfa04bcbd1365db312eb86dc7169389b8` and their base64 is `AP8=`. No sentence with unprefixed keys is left in the brief, and the views of S5 and S7 show the new text. No findings are open.
+
+## Not checked, round 10
+
+- Nothing was built or run except `tools/story.sh check 15-2`, `show` for S5 and S7 (searched for the key wording only) and the hash recomputation.
+- The E4 and E9 fixture puts the bytes `00 ff` under `shared.culture`; the loader cannot produce that (`SharedContentReader` accepts strict UTF-8 only), but the route and the repository do not judge content, so the fixture is valid for them. A skill file would be the realistic carrier.
+- The points under "Not checked, round 9" stand unchanged: the projection bytes inside `seat_parameters` outside the size limits, no E4 row for concurrent first registration, the read DTOs not compared with `SeatReadModels.cs`, 14-4's golden hashes not recomputed.
+- The branch is 20 commits ahead of its remote and still based on 19fd51e; whether `analysis-pr` needs main merged in was not tried.
