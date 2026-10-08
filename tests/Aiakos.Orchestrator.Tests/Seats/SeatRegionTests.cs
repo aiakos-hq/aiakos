@@ -140,6 +140,54 @@ public sealed class SeatRegionTests
     }
 
     [Fact]
+    public async Task FailedInitialLoadKeepsChildNameReservedUntilTermination()
+    {
+        var keyA = new SeatKey(Tenant, SeatA);
+        var keyB = new SeatKey(Tenant, SeatB);
+        var failLoad = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var releaseStop = new ManualResetEventSlim();
+        var reader = new FakeReader(Snapshot(keyA), Snapshot(keyB), startupSeats: [keyA]);
+        reader.LoadOverride = async (key, count, ct) =>
+        {
+            if (key == keyA && count == 2)
+            {
+                // Keep the failed child's name alive while the region handles the next request.
+                ct.Register(() =>
+                {
+                    stopEntered.TrySetResult();
+                    releaseStop.Wait(Deadline);
+                });
+                await failLoad.Task.WaitAsync(Deadline, TestContext.Current.CancellationToken);
+                throw new InvalidOperationException("private reader detail");
+            }
+            return reader.Snapshot(key);
+        };
+        var writer = new FakeWriter(reader);
+        await using var rig = await RegionRig.StartAsync(reader, writer, startExplicitly: false);
+        try
+        {
+            failLoad.TrySetResult();
+            await writer.ActorStoppedFinding.Task.WaitAsync(Deadline, TestContext.Current.CancellationToken);
+            await stopEntered.Task.WaitAsync(Deadline, TestContext.Current.CancellationToken);
+
+            await AssertFailure("SEAT_ACTOR_UNAVAILABLE", rig.Gateway.ApplyAsync(Tenant, SeatA,
+                new OrchestratorRestarted(), CancellationToken.None));
+            await AssertFailure("SEAT_NOT_FOUND", rig.Gateway.ApplyAsync(OtherTenant, SeatA,
+                new OrchestratorRestarted(), CancellationToken.None));
+            Assert.NotNull(await rig.GetSeatAsync(SeatA));
+            Assert.Equal(8, (await rig.Gateway.ApplyAsync(Tenant, SeatB, new NodeLinkLost(), CancellationToken.None)
+                .WaitAsync(Deadline, TestContext.Current.CancellationToken)).Version);
+            Assert.Equal(0, writer.CommitCount(keyA));
+            Assert.Equal(1, writer.RecordActorStoppedCount);
+        }
+        finally
+        {
+            releaseStop.Set();
+        }
+    }
+
+    [Fact]
     public async Task ClonesEventsBeforeAdmissionAndKeepsCallerCancellationLocal()
     {
         var key = new SeatKey(Tenant, SeatA);
@@ -413,12 +461,16 @@ public sealed class SeatRegionTests
         public Task<SeatActorSnapshot?> LoadAsync(SeatKey key, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
-            _loads.AddOrUpdate(key, 1, static (_, count) => count + 1);
+            var count = _loads.AddOrUpdate(key, 1, static (_, count) => count + 1);
+            if (LoadOverride is { } load)
+                return load(key, count, ct);
             if (_failingLoads.ContainsKey(key))
                 return Task.FromException<SeatActorSnapshot?>(new InvalidOperationException("private reader detail"));
             _snapshots.TryGetValue(key, out var snapshot);
             return Task.FromResult(snapshot);
         }
+
+        public Func<SeatKey, int, CancellationToken, Task<SeatActorSnapshot?>>? LoadOverride { get; set; }
 
         public TaskCompletionSource<IReadOnlyList<SeatKey>>? StartupRead { get; init; }
         public TaskCompletionSource StartupEntered { get; } =

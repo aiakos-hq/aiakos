@@ -202,9 +202,15 @@ public sealed class SeatRegion : ReceiveActor, IWithUnboundedStash
 
         if (_childrenBySeat.TryGetValue(key.SeatId, out var existing))
         {
-            if (existing.Key != key || _expectedStops.Contains(existing.Actor))
+            if (existing.Key != key)
             {
                 FailRequest(envelope.Message, SeatNotFound);
+                return;
+            }
+
+            if (_expectedStops.Contains(existing.Actor))
+            {
+                FailRequest(envelope.Message, SeatActorUnavailable);
                 return;
             }
 
@@ -329,8 +335,7 @@ public sealed class SeatRegion : ReceiveActor, IWithUnboundedStash
         _startupPending.Remove(notice.Key);
         _expectedStops.Add(child.Actor);
         FailPending(child);
-        _childrenByActor.Remove(child.Actor);
-        _childrenBySeat.Remove(child.Key.SeatId);
+        // Terminated releases both the routing entry and Akka's reserved child name.
         Context.Stop(child.Actor);
         RecordActorStopped(notice.Key);
         CompleteStartupIfReady();
