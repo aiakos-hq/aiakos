@@ -1,6 +1,6 @@
 # Story review: slice 11-4
 
-Reviewed at commit d9d1d81. Stories: 6. Check: ok.
+Reviewed at commit 4ee8dd8. Stories: 8. Check: ok.
 
 ## Findings
 
@@ -12,6 +12,12 @@ Reviewed at commit d9d1d81. Stories: 6. Check: ok.
 - [x] S4 (context-gap): R7 "TickAsync never overlaps another tick" does not say what a second concurrent call does (waits and then runs, or returns without polling). Fix: say which in R7.
 - [x] S5 (judgment-gap): the story is the whole stop state machine (R9–R12: validation, three grace paths, the partial-report boundary, leftovers, dead cleanup with reverify) and a T5 of about 25 cases; that is more than one run of a Sonnet-level implementer, and it splits. Fix: split into the not-running path (R9, R12, E9, E12, their part of T5) and the live path (R10, R11, E10, E11, the rest of T5) that depends on it.
 - [x] S6 (judgment-gap): the story joins the starter change C1/T6 with the whole real-tmux proof T7 (five scenarios, AC7/8/10/16), where defects of the merged S1–S5 first show, and it has one retry. Fix: split T7 into a story of its own after the C1 story, or, if a story may not own only a test item, move the watcher and socket scenarios of T7 that need no starter lock to it with the rule they prove.
+- [ ] S5 (context-gap): round 2. The story owns E9/E12/T5 but delivers only "internal helpers" with no name or signature, and public StopAsync arrives in S6, so the acceptance tests (written first, from the story text alone) have no member to call; R9 also says "acquire the lifecycle name lease" while T5 says the helper is "called under an existing lifecycle lease" and still asserts "name-lock release on every exit". Fix: spell the internal member(s) S5 delivers in "Public surface" (exact name, parameters, return type, and whether the caller or the helper holds the lease), and move the lease acquisition of R9 and the lock-release case of T5 to whichever story owns it.
+- [ ] S2 (context-gap): round 2. T2 tests GetServerAsync ("exact #{pid} command"), but its argv (`display-message,-p,"#{pid}"`), the match of that positive PID in a same-user snapshot and the null result are stated only in R8, which S4 owns and `story.sh show 11-4 2` does not print. Fix: move that sentence into a rule S2 owns (R4 or a new rule), say what a failed or unparsable invocation returns, and leave in R8 only when the watcher calls it.
+
+## For the maintainer
+
+- C2 narrows spec 0004 R30 (a socket deleted before the watcher first runs is not recovered; an unremembered server with a live root stays degraded, with no SIGUSR1 and no vanish). The brief states it as a proposal. It is a change to a rule of a spec: merging this analysis approves it, and spec 0004 R30 then needs the amendment.
 
 ## Not checked
 
@@ -21,6 +27,9 @@ Reviewed at commit d9d1d81. Stories: 6. Check: ok.
 - R11's "Killed with a non-null Error" for a partial stop: accepted as consistent with spec 0004 ("report instead of throwing once the pane has changed"); how 11-5 and the proto map it was not read.
 - Whether the gate runs S6 with AIAKOS_TEST_TMUX=1.
 - No build and no test was run; this is a review of documents.
+- Round 2: the six other round-one findings were read against the changed R5, R7, R8, R10, E5, E7, E8, E10, T3, T4, T8 and the S5–S8 blocks only; the unchanged rules were not read again line by line.
+- Round 2: whether R7 logs the degraded Warning on every failed tick or once per episode, and whether a failed GetServerAsync marks the tick degraded, are left to "choose the simplest".
+- Round 2: the brief says the branch starts at 28902f7; the worktree also holds 05793c2 (11-3-2). Not checked whether that changes anything S1–S6 read.
 
 ## Author resolution, round 1
 
