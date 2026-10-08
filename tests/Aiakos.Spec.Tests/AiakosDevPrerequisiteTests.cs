@@ -60,7 +60,7 @@ public sealed class AiakosDevPrerequisiteTests
     [InlineData("tmux", "tmux 3.10")]
     [InlineData("claude", "2.1.284 (Claude Code)")]
     [InlineData("claude", "2.2.0 (Claude Code)")]
-    [InlineData("dotnet", "10.0.100")]
+    [InlineData("dotnet", "10.0.112")]
     [InlineData("dotnet", "10.1.0")]
     public async Task BoundaryAndNewerVersionsPass(string command, string output)
     {
@@ -248,7 +248,7 @@ public sealed class AiakosDevPrerequisiteTests
             Command("curl", "");
             Command("flock", "");
             Command("claude", "2.1.284 (Claude Code)");
-            Command("dotnet", "10.0.100");
+            Command("dotnet", "10.0.112");
             Command("docker", "private docker output");
             Command("gh", "private auth output");
             Git();
