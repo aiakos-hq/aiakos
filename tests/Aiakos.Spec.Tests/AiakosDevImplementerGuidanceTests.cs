@@ -49,7 +49,7 @@ public sealed class AiakosDevImplementerGuidanceTests
 
         AssertOrdered(skill,
             "gh issue view <n>", "merged linked spec", "docs/risks.md", "git status", "git fetch origin",
-            "git switch -c", "dotnet build -c Release", "dotnet test", "Changes after acceptance",
+            "git switch -c feat/", "dotnet build -c Release", "dotnet test", "Changes after acceptance",
             "conventional commit", "Aiakos-Seat: impl@aiakos-dev", "git push -u origin <branch>",
             "gh pr create", ".github/pull_request_template.md", "Closes #<n>", "gh pr checks",
             "REPORT impl@aiakos-dev");

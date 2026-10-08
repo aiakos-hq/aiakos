@@ -7,10 +7,13 @@ description: Implement one GitHub issue from its merged spec and open a PR.
    criteria, cited ADRs and plan sections, and its rows in `docs/risks.md`. Stop with a question
    if a nontrivial unmerged spec is required.
 2. Check `git status`. Stop if the worktree is dirty; do not reset, clean or stash it. Run
-   `git fetch origin`, then create `feat/<n>-<slug>`, `fix/<n>-<slug>` or `docs/<n>-<slug>` from
-   `origin/main` with `git switch -c <branch> origin/main`. A fetch failed by a shared-clone lock
-   may be retried once; if it still fails, report blocked and do not remove the lock. Do not retry
-   other unrelated failures automatically.
+   `git fetch origin`, then create the issue branch from `origin/main` with the matching command:
+   - feature: `git switch -c feat/<n>-<slug> origin/main`
+   - fix: `git switch -c fix/<n>-<slug> origin/main`
+   - documentation: `git switch -c docs/<n>-<slug> origin/main`
+
+   A fetch failed by a shared-clone lock may be retried once; if it still fails, report blocked
+   and do not remove the lock. Do not retry other unrelated failures automatically.
 3. Implement the issue and its tests. Run `dotnet build -c Release` and `dotnet test`. Update
    documentation as needed; record any spec deviation under “Changes after acceptance.” Do not
    claim the Windows development AppHost, WSL end-to-end tests or manual demos unless verified;
