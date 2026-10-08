@@ -512,15 +512,16 @@ public sealed class PostgresSeatActorWriterTests(PostgresContainerFixture postgr
             Event = new SeatEvent { Seq = 1, ProcessExited = new() { ExitCode = 0 } } };
         var surrogate = input with { Event = new SeatEvent { Seq = 1, Harness = new() { NativeName = "\ud800" } } };
         var nulState = input with { Step = input.Step with { State = input.Step.State with { PendingInputRequest = "a\0b" } } };
-        foreach (var rejected in new[] { result, surrogate, nulState })
+        Assert.Equal(new SeatStoreReceipt(8, Session), await writer.CommitAsync(before, [result], Ct));
+        foreach (var rejected in new[] { surrogate, nulState })
             await Assert.ThrowsAsync<SeatStoreRejectedException>(() => writer.CommitAsync(before, [rejected], Ct));
         await Assert.ThrowsAsync<SeatStoreRejectedException>(() => writer.RecordActorStoppedAsync(before.Key, At, Ct));
         Assert.Equal(new SeatStoreReceipt(7, Session), await writer.CommitAsync(before, [], Ct));
         using var canceled = new CancellationTokenSource();
         await canceled.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => writer.CommitAsync(before, [], canceled.Token));
-        Assert.Equal(7L, await ScalarAsync(db, "SELECT version FROM aiakos.seat_state"));
-        Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_event"));
+        Assert.Equal(8L, await ScalarAsync(db, "SELECT version FROM aiakos.seat_state"));
+        Assert.Equal(1L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_event"));
     }
 
     [Fact]

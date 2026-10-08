@@ -131,9 +131,7 @@ public sealed class PostgresSeatActorWriter(NpgsqlDataSource dataSource) : ISeat
         if (input.Event?.ObservedAt is { } observedAt && !IsValidTimestamp(observedAt))
             throw new SeatStoreRejectedException();
         var opaque = input.Event is { } evidence && IsOpaque(evidence);
-        if (input.Step.Effects.Any(effect => effect is not RequestCapture and not AdoptRotatedSession) ||
-            (!opaque && input.Input is EventReceived { Body: LaunchResultBody or StartNotCompletedBody or
-                StopResultBody or StopNotCompletedBody or ProcessExitedBody }))
+        if (input.Step.Effects.Any(effect => effect is not RequestCapture and not AdoptRotatedSession))
             throw new SeatStoreRejectedException();
         if (input.Event is { } value)
             ValidateText(value);
