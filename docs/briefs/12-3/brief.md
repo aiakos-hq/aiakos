@@ -2,7 +2,7 @@
 id: 12-3
 title: "#12 slice 3 — hook normalizer and screen classifier"
 issue: 12
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Node/Harnesses/ClaudeCode/, tests/Aiakos.Node.Tests/Harnesses/ClaudeCode/, tests/Aiakos.Node.Tests/Fixtures/claude-code/2.1.284/]
 date: 2026-10-08
