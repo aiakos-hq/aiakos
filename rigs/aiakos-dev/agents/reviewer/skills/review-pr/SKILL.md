@@ -24,7 +24,8 @@ description: Review the PR at its exact head and post one comment review.
 6. Perform one review per round. If a new commit is pushed, review the new exact head in a new
    round.
 7. End with the report defined in `CULTURE.md` and reviewer `GUIDANCE.md`, beginning
-   `REPORT review@aiakos-dev`; it is the last output and nothing follows it.
+   `REPORT review@aiakos-dev`; use status `reviewed` after posting the comment, or `blocked` or
+   `question` when appropriate. It is the last output and nothing follows it.
 
 If `git fetch origin` fails because of a shared-clone lock, retry once. If it still fails, stop and
 report blocked; do not remove the lock. Do not retry unrelated failures automatically.
