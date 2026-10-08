@@ -4,7 +4,7 @@ depends: -
 owns: C1, R1, R2, R3, R4, R5
 outputs: E1, E2, E3, E4, E5
 tests: T1, T2
-notes: Introduces the input component with CaptureAsync and shared identity helpers; do not stub later methods. Uses merged 11-1 records and 11-2 client/process contracts. The capture-only tail option preserves existing default runner results. R2 mutation verification is an available helper tested directly; callers land in S2/S3. Visible-screen priority may exceed a requested cap as in the existing fake.
+notes: Introduces the input component with CaptureAsync and shared identity helpers; do not stub later methods. Uses merged 11-1 records and 11-2 client/process contracts. The capture-only tail option preserves existing default runner results. R2 mutation verification is the named VerifyMutableHandleAsync helper tested directly; callers land in S2/S3. Visible-screen priority may exceed a requested cap as in the existing fake.
 
 ## S2: Serialized delivery stages and cancellation
 goal: Validated input is loaded, typed, pasted and submitted once, with accurate failure/cancellation reports and buffer cleanup.
@@ -28,7 +28,7 @@ depends: S1, S2, S3
 owns: R13
 outputs: E13
 tests: T5
-notes: Reuses 11-2 child tmux diagnostics rather than emitting duplicate measurements. Listener tests assert positive emission plus sentinel absence; this story closes no live-environment risk.
+notes: MERGE PREREQUISITE: 11-2 S8 (R22 child tmux diagnostics) must merge before S4 baseline/ready. Reuses those diagnostics rather than emitting duplicate measurements. Listener tests assert positive emission plus sentinel absence; this story closes no live-environment risk.
 
 ## S5: Isolated real tmux delivery and capture evidence
 goal: Opt-in component tests prove paste boundaries, maximum-size delivery, capture, concurrency and resubmit behavior on a private tmux socket.
