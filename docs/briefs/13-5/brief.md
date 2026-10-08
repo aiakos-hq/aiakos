@@ -2,7 +2,7 @@
 id: 13-5
 title: "#13 slice 5 — durable restart and integration evidence"
 issue: 13
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Orchestrator/Seats/, tests/Aiakos.Orchestrator.Tests/Seats/, tests/Aiakos.Orchestrator.Tests/Link/]
 date: 2026-10-08
