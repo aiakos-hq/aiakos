@@ -52,6 +52,21 @@ the work; look at them now and then. Give the team work by typing in the termina
 After you merge a pull request or label a chore or a bug `ready`, the lead notices at its next
 move (`tools/story.sh events`). When the whole rig is quiet, tell it "continue".
 
+**From another device.** The lead turns Remote Control on when it starts (`/remote-control
+aiakos-lead`, a startup action in `rig.yaml`), so the session `aiakos-lead` is in your Claude
+Code sessions on claude.ai and in the mobile app. Its terminal shows `/rc active`.
+
+**Allowances.** About twice an hour, while it is working, the lead adds one line with the Claude
+and Codex allowances (5-hour and weekly, with the reset times), and at once when one is at 85%
+or more. Any time, in any shell:
+
+```bash
+bash tools/story.sh allowance
+```
+
+The numbers are what the harnesses last reported (Claude Code to OpenRig, Codex in its session
+log), so the line says how old they are. An idle rig reports nothing new.
+
 **Start by name, not from the file.** `rig up rigs/aiakos-delivery/rig.yaml` on a stopped rig
 does not resume it: it creates a new rig with new seats and archives the old one. The new seats
 have no per-seat settings. Use the file only for the first start

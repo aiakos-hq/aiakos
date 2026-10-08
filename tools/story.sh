@@ -60,6 +60,9 @@
 #   tools/story.sh events                 prints what changed on GitHub since the last look:
 #                                         merged pull requests, chores and bugs labelled
 #                                         ready. Each change once; the lead runs it
+#   tools/story.sh allowance [--every <minutes>]
+#                                         one line with the Claude and Codex allowances as
+#                                         last reported; --every prints at most that often
 #
 # A slice is one brief: docs/briefs/<slice>/ with brief.md, items.tsv, stories.md and, while it
 # is reviewed, findings.md. A story is "<slice>-<n>" (for example 14-3-2); its issue title is
@@ -1215,6 +1218,65 @@ cmd_events() {
   rm -f "$now" "$fresh"
 }
 
+# The allowances of the two subscriptions, as the harnesses last reported them: Claude Code to
+# OpenRig (one file per Claude seat), Codex in its session log. "--every <minutes>" prints only
+# when that long has passed since the last print, or when a window is at 85% or more, so the
+# lead can run it at every move and pass the line on about twice an hour.
+cmd_allowance() {
+  local every="" last="$main_root/artifacts/allowance.last" line
+  if [ "${1:-}" = "--every" ]; then every="${2:-}"; [[ "$every" =~ ^[0-9]+$ ]] || die "usage: story.sh allowance [--every <minutes>]"; fi
+  command -v node >/dev/null 2>&1 || die "allowance: node is not on the PATH"
+  line="$(RIG="$RIG" OPENRIG_STATE="${OPENRIG_HOME:-$HOME/.openrig}/state/provider-usage" CODEX_SESSIONS="${CODEX_HOME:-$HOME/.codex}/sessions" node -e '
+    const fs = require("fs"), path = require("path");
+    const at = d => d.toLocaleString("en-GB", { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const win = (name, used, resets) => used == null ? name + " unknown" : name + " " + Math.round(used) + "%" + (resets ? " (resets " + at(resets) + ")" : "");
+    let worst = 0; const note = v => { if (typeof v === "number" && v > worst) worst = v; };
+    // Claude: the newest report of any Claude seat of this rig.
+    let claude = "Claude: unknown";
+    try {
+      const dir = process.env.OPENRIG_STATE;
+      const files = fs.readdirSync(dir).filter(f => f.endsWith("@" + process.env.RIG + ".json")).map(f => path.join(dir, f)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+      for (const f of files) {
+        const r = (JSON.parse(fs.readFileSync(f, "utf8")).rateLimits) || {};
+        if (!r.five_hour && !r.seven_day) continue;
+        const f5 = r.five_hour || {}, w = r.seven_day || {};
+        note(f5.usedPercent); note(w.usedPercent);
+        claude = "Claude: " + win("5h", f5.usedPercent, f5.resetsAt && new Date(f5.resetsAt)) + ", " + win("week", w.usedPercent, w.resetsAt && new Date(w.resetsAt)) + ", as of " + at(new Date(fs.statSync(f).mtimeMs));
+        break;
+      }
+    } catch {}
+    // Codex: the last rate limits in the newest session log.
+    let codex = "Codex: unknown";
+    try {
+      const logs = [];
+      const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith(".jsonl")) logs.push([fs.statSync(p).mtimeMs, p]); } };
+      walk(process.env.CODEX_SESSIONS);
+      logs.sort((a, b) => b[0] - a[0]);
+      for (const [, p] of logs.slice(0, 8)) {
+        const lines = fs.readFileSync(p, "utf8").split("\n");
+        let found = null;
+        for (let i = lines.length - 1; i >= 0 && !found; i--) {
+          if (!lines[i].includes("\"rate_limits\"")) continue;
+          try { const o = JSON.parse(lines[i]); const r = o.payload && o.payload.rate_limits; if (r && r.primary) found = [r, o.timestamp]; } catch {}
+        }
+        if (!found) continue;
+        const [r, ts] = found, p1 = r.primary || {}, p2 = r.secondary || {};
+        note(p1.used_percent); note(p2.used_percent);
+        codex = "Codex: " + win("5h", p1.used_percent, p1.resets_at && new Date(p1.resets_at * 1000)) + ", " + win("week", p2.used_percent, p2.resets_at && new Date(p2.resets_at * 1000)) + ", as of " + at(new Date(ts));
+        break;
+      }
+    } catch {}
+    console.log(worst + "\t" + (worst >= 85 ? "LOW ALLOWANCE. " : "Allowances. ") + claude + ". " + codex + ".");
+  ')" || die "allowance: could not read the allowances"
+  if [ -n "$every" ] && [ "${line%%$'\t'*}" -lt 85 ] 2>/dev/null && [ -f "$last" ] \
+      && [ $(( $(date +%s) - $(cat "$last") )) -lt $(( every * 60 )) ]; then
+    return
+  fi
+  mkdir -p "$main_root/artifacts"
+  [ -z "$every" ] || date +%s > "$last"
+  printf '%s\n' "${line#*$'\t'}"
+}
+
 case "${1:-}" in
   check)      cmd_check "${2:-}" ;;
   split)      cmd_split "${2:-}" ;;
@@ -1223,6 +1285,7 @@ case "${1:-}" in
   status)     cmd_status ;;
   hand)       shift; cmd_hand "$@" ;;
   events)     cmd_events ;;
+  allowance)  cmd_allowance "${2:-}" "${3:-}" ;;
   ready)      cmd_ready "${2:-}" "${3:-}" "${4:-}" ;;
   next)       cmd_next "${2:-}" ;;
   start)      cmd_start "${2:-}" "${3:-}" ;;

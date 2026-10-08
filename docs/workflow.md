@@ -319,6 +319,7 @@ bash tools/story.sh waive <issue> <run> infrastructure|test-defect "<evidence>"
 bash tools/story.sh pr <issue> [--maintainer-reviewed]
 bash tools/story.sh cleanup <issue>
 bash tools/story.sh events
+bash tools/story.sh allowance [--every <minutes>]
 bash tools/story.sh hand <low|high|architect|reviewer|gate|lead> [--role <role>] \
      [--item <qitem>] --summary "<one line>" (--body "<text>" | --body-file <path>)
 ```

@@ -15,6 +15,9 @@ what they say now:
   on every line it prints, in this move.
 - `bash tools/story.sh status`: the board.
 - `rig queue list`: the open items and who holds each.
+- `bash tools/story.sh allowance --every 30`: mostly prints nothing. When it prints a line (about
+  twice an hour, or at once when an allowance is at 85% or more), give that line to the
+  maintainer as it is, at the end of your reply.
 
 `unknown` is a valid answer. Say what you did not check.
 

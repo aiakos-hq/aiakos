@@ -47,6 +47,13 @@ pods:
         permission_policy: builtin:auto
         restore_policy: relaunch_fresh
         cwd: "../.."
+        # Remote Control, so the maintainer can reach the lead from claude.ai or the phone.
+        startup:
+          actions:
+            - type: slash_command
+              value: "/remote-control aiakos-lead"
+              phase: after_ready
+              idempotent: true
     edges: []
 
   # The seats that do the work. Nobody has to watch them one by one.
