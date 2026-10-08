@@ -28,6 +28,15 @@ public sealed class RigHashVerifierTests
         Assert.Equal("Resolved JSON is invalid.", exception.Message);
     }
 
+    [Fact]
+    public void HASHrejectsTopLevelLoneSurrogatePropertyNameWithStableFormatException()
+    {
+        var exception = Assert.Throws<FormatException>(() =>
+            RigHashVerifier.Verify("{\"\\ud800\":{},\"shared\":{}}", "", ""));
+
+        Assert.Equal("Resolved JSON is invalid.", exception.Message);
+    }
+
     private static string MinimalResolvedJson() =>
         "{\"binding\":" + Golden("minimal.binding.json") + ",\"shared\":" + Golden("minimal.shared.json") + "}";
 

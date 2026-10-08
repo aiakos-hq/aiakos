@@ -22,7 +22,7 @@ public static class RigHashVerifier
         {
             throw;
         }
-        catch (Exception exception) when (exception is JsonException or ArgumentException)
+        catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException)
         {
             throw new FormatException("Resolved JSON is invalid.", exception);
         }
