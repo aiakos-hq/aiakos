@@ -182,7 +182,7 @@ public sealed partial class TmuxSessionInput
             throw InvalidCaptureRequest();
 
         var metadataResult = await _client.RunAsync(["display-message", "-p", "-t", session.PaneId,
-            "#{pane_pid}\t#{@aiakos-launch}\t#{pane_width}\t#{pane_height}\t#{cursor_x}\t#{cursor_y}\t#{pane_dead}"],
+            "#{pane_pid}	#{@aiakos-launch}	#{pane_width}	#{pane_height}	#{cursor_x}	#{cursor_y}	#{pane_dead}"],
             null, ct).ConfigureAwait(false);
         var metadata = ParseCaptureMetadata(metadataResult, session);
         if (!metadata.PaneDead)
@@ -237,7 +237,7 @@ public sealed partial class TmuxSessionInput
         ct.ThrowIfCancellationRequested();
 
         var result = await _client.RunAsync(["display-message", "-p", "-t", session.PaneId,
-            "#{pane_pid}\t#{@aiakos-launch}\t#{pane_dead}"], null, ct).ConfigureAwait(false);
+            "#{pane_pid}	#{@aiakos-launch}	#{pane_dead}"], null, ct).ConfigureAwait(false);
         var values = ReadOutput(result).Split('\t');
         if (values.Length != 3 || !int.TryParse(values[0], NumberStyles.None, CultureInfo.InvariantCulture,
                 out var panePid) || panePid != session.PanePid ||
