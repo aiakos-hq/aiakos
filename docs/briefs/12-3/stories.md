@@ -4,7 +4,7 @@ depends: -
 owns: R1, R2, R3, R4
 outputs: E1, E2, E3, E4
 tests: T1, T2
-notes: G1/G2 apply throughout. R4 leaves permission events as Other until S3; R1 leaves clear/statusLine as Other until S4/S2. No driver or ingest dependency.
+notes: G1/G2 apply throughout. R4 leaves permission events as Other until S3; R1 leaves clear/statusLine as Other until S4/S2. S1 owns ClaudeFixtureLoader.cs and its private solution-root finder per T1. Permanent tests exclude later-owned interim fallbacks per G2/T1/T2. No driver or ingest dependency.
 
 ## S2: statusLine usage and rate limits
 goal: Normalize each statusLine into Telemetry with precise optional presence and rate-limit attributes.
@@ -32,8 +32,8 @@ notes: Replaces R1 clear fallback and R2 clear-end behavior; clears pairing/echo
 
 ## S5: Evidence-only screen classification
 goal: Classify blocked-screen labels and dead-pane reason strings through a pure deterministic classifier.
-depends: -
+depends: S1
 owns: R12, R13
 outputs: E12, E13
 tests: T6
-notes: Independent of normalization and session host; G1/G2 ensure strings are evidence with no side effects. Driver 12-4 owns applying labels after timeout or pane death.
+notes: Depends on S1 solely for ClaudeFixtureLoader.ReadText; no duplicate loader/finder. Independent of normalization behavior and session host; G1/G2 ensure strings are evidence with no side effects. Driver 12-4 owns applying labels after timeout or pane death.

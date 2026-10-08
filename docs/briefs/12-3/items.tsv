@@ -27,9 +27,9 @@ E10	output	once	R7,R9
 E11	output	once	R10,R11
 E12	output	once	R12
 E13	output	once	R13
-T1	test	once	R1,R2,R3
-T2	test	once	R1,R3,R4
+T1	test	once	R1,R2,R3,G1,G2
+T2	test	once	R1,R3,R4,G1,G2
 T3	test	once	R5,R6
-T4	test	once	R7,R8,R9
+T4	test	once	R7,R8,R9,G2
 T5	test	once	R10,R11
 T6	test	once	R12,R13

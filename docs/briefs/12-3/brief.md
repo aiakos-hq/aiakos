@@ -96,12 +96,18 @@ G2. Additive APIs preserve every earlier result. Null state/nativeName/currentSe
     throws ArgumentNullException with that parameter name; empty strings are allowed. Invalid
     payloads never throw or embed values in errors: malformed UTF-8/JSON, non-object roots,
     excessive JSON depth (>64), empty bytes use OTHER with no attributes/usage/session ID and
-    unchanged state. Valid objects ignore unknown fields. Expected scalar string fields accept
-    strings only; booleans use lowercase true/false; numeric attribute fields accept JSON numbers
+    unchanged state. Validate all JSON property names and string values recursively before
+    extracting fields or changing state, including unknown fields and strings nested in
+    tool_input. Any undecodable string (unpaired surrogate escape or invalid UTF-8 bytes) makes
+    the whole payload malformed with that same OTHER/empty-fields/unchanged-state result;
+    retain the R1 raw envelope. Do not treat just that field as absent. Valid objects ignore
+    unknown fields. Expected scalar string fields accept strings only; booleans use lowercase true/false; numeric attribute fields accept JSON numbers
     and retain their number text. Missing/null/wrong-type fields are absent, never "null" or
     invented zero. Duplicate JSON properties use the last occurrence. Names/IDs compare ordinal,
     numbers use invariant culture. No UUID validation belongs in these pure fixture APIs.
     Every story adds permanent tests of its owned rules and applicable G1/G2 boundaries.
+    Interim OTHER fallbacks for mappings owned by later stories are not permanent contracts;
+    permanent fallback tests use only the unknown native name Mystery of E1.
 
 ## Changes to earlier behavior
 
@@ -143,6 +149,8 @@ R5. statusLine => Telemetry. Usage uses proto optional presence: context_used_pe
     context_window.context_window_size if integer fits ulong; context_used_tokens is checked sum
     of context_window.current_usage.input_tokens + cache_creation_input_tokens +
     cache_read_input_tokens, only when all three are present integer ulongs and sum fits ulong.
+    For all integer usage fields, integer means a JSON number token with no fraction or
+    exponent: 16 is eligible, 16.0 and 1e2 are absent even though mathematically integral.
     Ignore output_tokens. cost_usd from cost.total_cost_usd if finite nonnegative number;
     model_id from model.id string or empty. Invalid/negative/fractional/out-of-range integer
     values are absent, not clamped or rounded. Set Usage only if at least one optional value
@@ -213,12 +221,12 @@ Screen rows use literal capture strings and return only classification strings.
 
 | ID | Input/change | Expected |
 |---|---|---|
-| `E1` | Mystery name with B; mismatched hook_event_name; invalid JSON/UTF8, [], null, empty body | Other; valid B retains session-a, invalid/nonobject has empty ID; empty attributes/no Usage; state unchanged; ToString exactly ClaudeNormalizationState / ClaudeNormalizationResult; null arguments per G2 |
+| `E1` | Mystery name with B; mismatched hook_event_name; invalid JSON/UTF8, [], null, empty body; otherwise valid objects containing session_id="\ud800", raw FF FE bytes inside a string, an undecodable property name/unknown string, or nested tool_input string "\ud800" | Other; valid B retains session-a, invalid/nonobject/undecodable-string payload has empty ID; empty attributes/no Usage; state unchanged; ToString exactly ClaudeNormalizationState / ClaudeNormalizationResult; null arguments per G2 |
 | `E2` | SessionStart startup/resume/fork, model="haiku", session_title="impl", context_tokens=42, seconds_since_last_response=2; compact; PreCompact trigger=manual; SessionEnd reason=other with session_id=old | starts SessionStarted source=<source>, model=haiku, session_title=impl; resume also context_tokens=42, seconds_since_last_response=2; compact Compacted source=compact only; PreCompact CompactionStarted trigger=manual; orphan SessionEnded ID=old reason=other; current ID unchanged |
 | `E3` | prompt permission_mode=default; caller deliveryId=delivery-a; pre/post tool_name=Bash, tool_use_id=tool-a, duration_ms=331; failure; Stop stop_hook_active=false; StopFailure last_assistant_message="Invalid API key" | PromptSubmitted turn_id=turn-a, permission_mode=default, delivery_id=delivery-a; ToolStarted tool_name=Bash, tool_use_id=tool-a, turn_id=turn-a; ToolFinished tool_name=Bash, tool_use_id=tool-a, duration_ms=331; failure also failed=true; TurnEnded turn_id=turn-a, stop_hook_active=false; TurnFailed turn_id=turn-a, error=Invalid API key |
 | `E4` | idle_prompt/unknown Notification; 300 KiB valid PostToolUse (large tool_response), multibyte 1100-byte error; raw lengths 262144/262145 | notifications Other notification_type=<type>; post ToolFinished with extracted attributes E3, RawSize=307200, Raw.Length=262144, RawTruncated=true; error <=1024 bytes with complete final character; raw boundary false/true; no tool_response/prompt in attributes |
 | `E5` | statusLine: used_percentage=16, size=200000, current_usage input=8/cache_creation=202/cache_read=32366/output=32, total_cost_usd=0.034351, model.id=haiku | Telemetry; Usage HasContextUsedPercent=true value16, HasContextWindowTokens=true value200000, HasContextUsedTokens=true value32576, HasCostUsd=true value0.034351, ModelId=haiku |
-| `E6` | null used_percentage/current_usage; explicit zero; negative/fractional/overflow fields or ulong sum overflow; all fields null | null makes HasContextUsedPercent/HasContextUsedTokens=false; explicit0 remains present; invalid numeric field only absent; entirely empty usage => Usage=null; one status input yields one event, no hook usage |
+| `E6` | null used_percentage/current_usage; explicit zero; negative/fractional/overflow fields, integer fields with tokens 16.0 or 1e2, or ulong sum overflow; all fields null | null makes HasContextUsedPercent/HasContextUsedTokens=false; explicit0 remains present; invalid numeric field only absent; entirely empty usage => Usage=null; one status input yields one event, no hook usage |
 | `E7` | statusLine version=2.1.284, session_name=impl, exceeds_200k_tokens=false; five_hour used_percentage=43/resets_at=1790684400, seven_day used_percentage=11/resets_at=1790823600 | claude.version=2.1.284, session_name=impl, exceeds_200k_tokens=false, rate_limit.five_hour.used_percent=43, rate_limit.five_hour.resets_at=1790684400, rate_limit.seven_day.used_percent=11, rate_limit.seven_day.resets_at=1790823600; null fields absent |
 | `E8` | pre tool-a Bash input={"command":"echo ok","nested":{"b":2,"a":1}} then PermissionRequest Bash input reordered with spaces; unmatched name/input; matching tool finished before request | request InputRequested tool_name=Bash, request_id=tool-a; unmatched/finished request_id=*; canonical equality ignores object order/spacing, preserves array order, distinguishes 1/1.0 and missing/null input |
 | `E9` | two identical open tools tool-a then tool-b; request; finish tool-b; request; failed finish tool-a; request; branch from earlier state | request IDs tool-b, tool-a, *; each event emitted; no earlier state mutated; two separate launches/branches cannot pair with one another; repeated tool-a ID becomes latest |
@@ -232,6 +240,13 @@ Screen rows use literal capture strings and return only classification strings.
 xUnit v3 as BackoffTests.cs. Fixture layout: <name>-<case>.json and <name>-<case>.expected.json;
 expected files describe kind/native ID/complete attributes/optional Usage presence. Compare
 contents, not just counts. Use /home/user paths and ordinary synthetic session/tool IDs.
+S1 owns the internal static ClaudeFixtureLoader in
+    tests/Aiakos.Node.Tests/Harnesses/ClaudeCode/ClaudeFixtureLoader.cs, namespace
+    Aiakos.Node.Tests.Harnesses.ClaudeCode, with internal static string ReadText(string fileName)
+    and internal static byte[] ReadBytes(string fileName). Both resolve fileName beneath
+    tests/Aiakos.Node.Tests/Fixtures/claude-code/2.1.284/ via the ancestor solution-root finder
+    described above; ReadText uses UTF-8, ReadBytes preserves exact bytes. The finder is private
+    to this type. Later stories reuse these methods and do not define another loader or finder.
 Every mapping owned by the current story gets a fixture; across the slice this includes orphan
 ends, compact/clear, idle_prompt and unknown names. Screen stories use text/expected-label fixtures. Reconstruct abbreviated spike samples as valid JSON; identify synthetic cases in tests
 (PermissionRequest, PostToolUseFailure, clear and classifier needles), never call them recorded
@@ -240,13 +255,20 @@ required. No automatic golden regeneration or new fixture tooling dependency.
 
 - T1. Permanent envelope/fallback/null/invalid-field tests E1, all R2 source/end cases E2 and
     prompt/tool/turn fixtures E3. Prove caller delivery evidence cannot come from JSON/prompt.
+    S1 creates ClaudeFixtureLoader with the solution-root finder and both shared read methods.
+    Permanent OTHER fallback assertions use only Mystery (E1); do not pin the interim mappings
+    of PermissionRequest, permission_prompt, SessionStart source clear, SessionEnd reason clear
+    or statusLine. R2 source/end tests cover only startup/resume/fork/compact and non-clear ends.
 - T2. Permanent Notification and truncation/snapshot/UTF8 tests E4, parse full 300 KiB fixture
     before cutting raw; absent scalar/null behavior and input/result state immutability G1/G2.
+    Apply the same permanent-fallback restriction as T1; idle_prompt and unknown Notification
+    types retain R4's final Other mapping and remain covered.
 - T3. Permanent statusLine fixtures E5–E7 (before turn, after turn, post-compact zero, all-null,
     incomplete/invalid current_usage, overflow and rate limit omissions), asserting proto Has*
     presence independently. Same inputs yield byte-equivalent events and immutable state.
 - T4. Permanent sequence tests E8–E10: nested canonical equality, arrays, duplicate keys,
-    latest identical parallel tool, unrelated/failed completion, wildcard fallback, echo reset,
+    malformed nested tool_input strings per G2/E1 (Other, no state mutation), latest identical
+    parallel tool, unrelated/failed completion, wildcard fallback, echo reset,
     launch isolation and independent branches. No events during silence; retain the known Escape
     gap without running a clock/actor or fabricating resolution.
 - T5. Permanent rotation tests E11 including clear without preceding end, repeated rotation,
