@@ -30,6 +30,7 @@ Acceptance tests are not here: they stay local, so that an implementer cannot re
 
 | Slice | Issue | Route | Status | Stories | Open findings | Issue / pull request |
 |---|---|---|---|---|---|---|
+| [16-2 Release pin and rig compatibility](16-2/brief.md) | #16 | `impl` | draft | [3](16-2/stories.md) | | |
 | [16-1 aiakos-dev rig files](16-1/brief.md) | #16 | `impl` | approved | [9](16-1/stories.md) | | |
 | [9-1 Deterministic orchestrator host disposal](9-1/brief.md) | #9 | `impl` + `impl/senior` | approved | [2](9-1/stories.md) | | #103 (superseded at ready) |
 | [10-1 Proto and buf checks](10-1/brief.md) | #10 | `impl/opencode` | implemented | not split (before the story workflow) | | PR #44 |
@@ -67,7 +68,7 @@ the new gate.
 | #11 tmux session host | 11-4 stop and watcher, 11-5 adoption |
 | #12 Claude Code adapter | 12-1 orchestrator half, 12-2 relay and ingest, 12-3 normalizer, 12-4 node driver, 12-5 end to end |
 | #15 CLI and released instance | 15-1 skeleton and dry run, 15-2 local API, 15-3 client commands, 15-4 instance host, 15-5 release |
-| #16 aiakos-dev rig, M1 acceptance | 16-2 pin and rig-compat, 16-3 acceptance run |
+| #16 aiakos-dev rig, M1 acceptance | 16-3 acceptance run |
 
 `tools/story.sh analysis-pr` updates the row of its slice (status, story count, findings). Change
 other rows by hand in the pull request that causes the change.
