@@ -44,4 +44,4 @@ depends: S5, S1
 owns: R9
 outputs: E9
 tests: T6
-notes: Instruments R5-R8 and scans relay R2 argv. Local latency interpretation needs architect review; no relay timestamp or production node wiring invented.
+notes: Instruments R5-R8 and scans relay R2 argv. Latency follows the decided spec R38 meaning: request received to enqueued; no production node wiring.

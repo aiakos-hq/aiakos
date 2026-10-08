@@ -212,13 +212,12 @@ R8. Hook posts enqueue immediately. Status posts coalesce per SeatId, across lau
 R9. ActivitySource name Aiakos.Node.Hooks; span hook_ingest.receive uses only hook.name, source_seq and aiakos.seat.address for
     authenticated accepted requests. Meter Aiakos.Node.Hooks exposes aiakos.node.hooks.received
     counter with name/result tags (result accepted, unauthorized, too-large), aiakos.node.hooks.gaps counter
-    on emitted runs and hooks.latency histogram. Since relay has no emission timestamp, latency
-    measures local request-body-read/enqueue elapsed milliseconds; never infer a timestamp from
-    sequence (persisted counter != clock). Every401 (missing, malformed, multiple, unknown or expired Authorization) has metric
+    on emitted runs and `aiakos.node.hooks.latency` histogram, unit `ms`, measured from request
+    received to enqueued and recorded only for accepted (204) requests. Since relay has no
+    emission timestamp, never infer a timestamp from sequence (persisted counter != clock). Every401 (missing, malformed, multiple, unknown or expired Authorization) has metric
     name="unknown"; no arbitrary
     unauthenticated names/IDs. Disable default Kestrel request logging that could capture secrets.
-    The latency interpretation is recorded as a spec clarification for architect/maintainer
-    review, not a claim to measure relay-to-node transit. No trust metrics in this slice.
+    No trust metrics in this slice.
 
 ## Expected outputs: exact text
 
@@ -236,7 +235,7 @@ are opaque; no actor or canonical-ID validator is required. Real-socket tests us
 | `E6` | hook-kind posts for multi-post cases, status at most once per seat; exactly1MiB/1MiB+1/chunked/abort; bad seq; blocked consumer | 204/413; no prefix published; malformed seq0; full accepted bytes independent; p99 response <50ms at20req/s over100 requests with consumer blocked |
 | `E7` | 1,2,4 then silence; late3; two runs; zero/duplicates/huge jump | one IngestUnavailable at2s after4, none before; late3 before deadline yields0; two contiguous missing runs yield2; seq0/duplicates no extra gap; launch baselines independent; L1(seq10 at0s), L2(seq11/12 at0.1s), L1(seq13 at0.2s) gives exactly one L1 gap at2.2s for11..12, no L2 gap (accepted per-launch scope limitation) |
 | `E8` | 50 status posts in2s; concurrent seat; hook alongside | <=3 raw status calls after trailing flush, final newest bytes with original launch metadata; other seat independently emits; every hook delivered |
-| `E9` | sentinel payload/header; accepted/401/413/gap requests | no sentinel in logs/spans/metrics/child argv; named fixed telemetry R9 with exact result tags; latency uses local elapsed duration |
+| `E9` | sentinel payload/header; accepted/401/413/gap requests | no sentinel in logs/spans/metrics/child argv; named fixed telemetry R9 with exact result tags; `aiakos.node.hooks.latency` histogram unit `ms`, elapsed time from request received to enqueued, recorded only for accepted (204) requests; no latency record for 401/413 |
 
 ## Tests
 

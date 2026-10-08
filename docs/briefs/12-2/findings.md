@@ -4,8 +4,8 @@ Reviewed at commit ffebbcbc5ebc537605afc97f97026fafac97e620. Stories: 6. Check: 
 
 ## Findings
 
-- [ ] S6 (context-gap): R9 gives `aiakos.node.hooks.latency` a local meaning while spec 0005 R38 still says "relay stamp to ingest"; the maintainer chose option 1 on 2026-10-08 (qitem-20261008130658-f322ba86), so the spec must change on this branch. Fix: edit spec 0005 R38 here to "time from request received to enqueued, in the ingest; histogram", and remove from R9 and the S6 `notes` the sentences that call the meaning pending architect/maintainer review.
-- [ ] S6 (context-gap): round 1 left R9 writing the histogram as `hooks.latency` with no instrument unit, a start point of "request-body-read/enqueue" that can be read as either request received or body read, and no statement of which requests record it, so E9's "latency uses local elapsed duration" still cannot be an exact test. Fix: in R9 write `aiakos.node.hooks.latency`, unit `ms`, measured from request received to enqueued and recorded only for accepted (204) requests, and name those in E9.
+- [x] S6 (context-gap): R9 gives `aiakos.node.hooks.latency` a local meaning while spec 0005 R38 still says "relay stamp to ingest"; the maintainer chose option 1 on 2026-10-08 (qitem-20261008130658-f322ba86), so the spec must change on this branch. Fix: edit spec 0005 R38 here to "time from request received to enqueued, in the ingest; histogram", and remove from R9 and the S6 `notes` the sentences that call the meaning pending architect/maintainer review.
+- [x] S6 (context-gap): round 1 left R9 writing the histogram as `hooks.latency` with no instrument unit, a start point of "request-body-read/enqueue" that can be read as either request received or body read, and no statement of which requests record it, so E9's "latency uses local elapsed duration" still cannot be an exact test. Fix: in R9 write `aiakos.node.hooks.latency`, unit `ms`, measured from request received to enqueued and recorded only for accepted (204) requests, and name those in E9.
 - [x] S6 (context-gap): R9 names the histogram `hooks.latency` without the `aiakos.node.` prefix and gives no unit, no ActivitySource name for `hook_ingest.receive`, and no `name` tag for a 401 other than an unknown token (missing, malformed, multiple, expired), so E9's "exact" telemetry cannot be written as a test. Fix: write the full instrument name and unit, the ActivitySource name, and the `name` tag for every 401 case in R9.
 - [x] S3 (context-gap): R6 logs `HOOK_CONSUMER_FAILED` and E9 scans logs, but the exact `HookIngest` constructor takes no logger, so the implementer must choose a sink and the tests cannot capture it. Fix: add the logging seam to the public surface (for example an `ILoggerFactory` constructor parameter) or state the sink and how a test reads it.
 - [x] S3 (context-gap): E5 and E6 do not say which kind their posts use, and S5 later coalesces `status` posts of one seat, so an S3 test that sends several `status` posts within 1 s and expects each delivered turns red when S5 merges. Fix: state in E5/E6 that multi-post cases use kind `hook` and that `status` is posted at most once per seat in S3's tests.
@@ -34,3 +34,11 @@ Nine findings resolved in the brief. R9 latency meaning remains open pending the
 Read at ffebbcb. Eight round-1 resolutions accepted as written (SeatFile names, relay stdin, registry order and reuse, logger seam, channel bound, lifecycle errors, E5/E6 kinds, interleaved E7 case under spec 0005 R19's per-launch scope). The R9 naming finding stays checked for the ActivitySource name and the 401 `name` tag; its instrument name and unit are reopened as the second open finding above.
 
 Not checked in round 2: the state of `HookIngest` after `HOOK_INGEST_BIND_FAILED` (R5 does not say whether a later `StartAsync` may retry; E5 has no case for it); `tools/story.sh show` output; whether `analysis-pr` accepts a spec file changed on the analysis branch.
+
+## Author resolution, round 2
+
+Both open S6 findings resolved following the maintainer's option 1 decision
+(qitem-20261008130658-f322ba86). Spec 0005 R38 now measures time from request received
+to enqueued, in the ingest. R9 and E9 specify `aiakos.node.hooks.latency`, unit `ms`,
+request received to enqueued, accepted (204) requests only; E9 excludes 401/413 records.
+R9 and S6 notes no longer describe the latency decision as pending review.
