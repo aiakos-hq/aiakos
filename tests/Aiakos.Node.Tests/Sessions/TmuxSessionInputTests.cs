@@ -238,6 +238,68 @@ public sealed class TmuxSessionInputTests
         Assert.Equal(DeliveryStage.Submitted, report.Stage);
     }
 
+    [Fact]
+    public async Task PreCancelledDeliveryStillVerifiesAndLoadsBeforeReturningCancellation()
+    {
+        await using var fixture = await Fixture.CreateAsync([]);
+        fixture.Runner.Enqueue(Result(stdout: "123\tlaunch\t0\n"));
+        fixture.Runner.Enqueue(Result());
+        fixture.Runner.Enqueue(Result());
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var report = await fixture.Input.DeliverAsync(Handle(), new DeliveryRequest("run", "body"),
+            cancellation.Token);
+
+        Assert.Equal(DeliveryStage.BufferLoaded, report.Stage);
+        Assert.Equal(SessionHostErrorCode.TmuxFailed, report.Error?.Code);
+        Assert.Equal("Delivery was cancelled.", report.Error?.Message);
+        Assert.Equal(["display-message", "load-buffer", "delete-buffer"],
+            fixture.Runner.Requests.Skip(2).Select(request => request.Arguments[5]));
+    }
+
+    [Fact]
+    public async Task InitialIdentityFailureWithCancelledCallerDoesNotLoadAndReleasesGate()
+    {
+        await using var fixture = await Fixture.CreateAsync([]);
+        fixture.Runner.Enqueue(Result(stdout: "999\tlaunch\t0\n"));
+        fixture.Runner.Enqueue(Result(stdout: "123\tlaunch\t0\n"));
+        fixture.Runner.Enqueue(Result());
+        fixture.Runner.Enqueue(Result(stdout: "123\tlaunch\t0\n"));
+        fixture.Runner.Enqueue(Result());
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var exception = await Assert.ThrowsAsync<SessionHostException>(() => fixture.Input.DeliverAsync(
+            Handle(), new DeliveryRequest("run", "body"), cancellation.Token));
+        Assert.Equal(SessionHostErrorCode.NotFound, exception.Code);
+
+        var report = await fixture.Input.DeliverAsync(Handle(), new DeliveryRequest("run", "body"),
+            cancellation.Token);
+        Assert.Equal(DeliveryStage.BufferLoaded, report.Stage);
+        Assert.Equal(2, fixture.Runner.Requests.Skip(2).Count(request => request.Arguments[5] == "display-message"));
+    }
+
+    [Fact]
+    public async Task FailedLeadReturnsLastSuccessfulStageAndCleansBuffer()
+    {
+        await using var fixture = await Fixture.CreateAsync([]);
+        fixture.Runner.Enqueue(Result(stdout: "123\tlaunch\t0\n"));
+        fixture.Runner.Enqueue(Result());
+        fixture.Runner.Enqueue(Result(stdout: "123\tlaunch\t0\n"));
+        fixture.Runner.Enqueue(Result(exitCode: 1, stderr: "tmux failure"));
+        fixture.Runner.Enqueue(Result());
+
+        var report = await fixture.Input.DeliverAsync(Handle(), new DeliveryRequest("run", "body"),
+            CancellationToken.None);
+
+        Assert.Equal(DeliveryStage.BufferLoaded, report.Stage);
+        Assert.Equal(SessionHostErrorCode.TmuxFailed, report.Error?.Code);
+        Assert.False(report.Error?.Retryable);
+        Assert.Equal("delete-buffer", fixture.Runner.Requests[^1].Arguments[5]);
+        Assert.DoesNotContain(fixture.Runner.Requests.Skip(2), request => request.Arguments.Contains("C-m"));
+    }
+
     private static SessionHandle Handle(bool readOnly = false) =>
         new("seat", "launch", "session", "$1", "%123", 123, 456, readOnly);
 
