@@ -507,7 +507,7 @@ listed here change with it.
   `source_seq`, sizes, outcomes and reasons.
 - **R38** Spans: `claude.prepare`, `claude.await_ready`, `claude.confirm` and `hook_ingest.receive`
   (with `hook.name`, `source_seq` and `aiakos.seat.address`). Metrics: `aiakos.node.hooks.received`
-  (tags: `name`, `result`), `aiakos.node.hooks.latency` (relay stamp to ingest; histogram),
+  (tags: `name`, `result`), `aiakos.node.hooks.latency` (time from request received to enqueued, in the ingest; histogram),
   `aiakos.node.hooks.gaps` and `aiakos.node.claude.trust_writes`.
 
 ## Design
