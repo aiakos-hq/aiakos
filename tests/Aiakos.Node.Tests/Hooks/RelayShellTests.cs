@@ -76,6 +76,7 @@ public sealed class RelayShellTests
         Assert.Empty(await process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken));
         Assert.Empty(await process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken));
         Assert.Equal(body, received.Body);
+        Assert.NotNull(received.Headers);
         Assert.Contains("Authorization: ingest-fixture", received.Headers, StringComparison.Ordinal);
         var sequenceLine = received.Headers.Split("\r\n", StringSplitOptions.RemoveEmptyEntries)
             .Single(line => line.StartsWith("X-Aiakos-Source-Seq:", StringComparison.OrdinalIgnoreCase));
