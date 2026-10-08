@@ -190,6 +190,7 @@ resolve_path() {
 }
 
 clone_physical=$(resolve_path "$clone_path") || clone_physical=
+# The committed example seat_root default is ~/aiakos/seats.
 seat_root_physical=$(resolve_path "$HOME/aiakos/seats") || seat_root_physical=
 filesystem_bad=0
 case "$clone_physical" in
