@@ -2,7 +2,7 @@
 id: 10-5
 title: "#10 slice 5 — commands"
 issue: 10
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Node/, src/Aiakos.Orchestrator/Link/, tests/Aiakos.Node.Tests/, tests/Aiakos.Orchestrator.Tests/]
 date: 2026-10-08
