@@ -78,7 +78,8 @@ public sealed class HookSequenceTracker
 public sealed class HookIngest : IAsyncDisposable
 {
     public HookIngest(int port, HookLaunchRegistry registry,
-        IHookIngestConsumer consumer, TimeProvider timeProvider);
+        IHookIngestConsumer consumer, TimeProvider timeProvider,
+        Microsoft.Extensions.Logging.ILoggerFactory loggerFactory);
     public Uri BaseUri { get; } // includes /v1/hooks; available after StartAsync
     public Task StartAsync(CancellationToken ct);
     public Task StopAsync(CancellationToken ct);
@@ -114,8 +115,8 @@ None. Existing adapter consumes supplied relay files; existing node link is unaf
 ## Rules
 
 R1. Embed UTF-8/noBOM/LF/final-LF script at Resources/aiakos-hook-relay with logical name
-    Aiakos.ClaudeCode.HookRelay. BuildFile returns a fresh SeatFile: Root=SeatHome,
-    RelativePath="aiakos/bin/aiakos-hook-relay", Mode=0755, Expand=false and embedded bytes.
+    Aiakos.ClaudeCode.HookRelay. BuildFile returns a fresh SeatFile: Root=FileRoot.SeatHome,
+    Path="aiakos/bin/aiakos-hook-relay", Mode=0755, Expand=false, Content=embedded bytes.
     No file IO/environment reads at runtime and no settings/projection assembly in this API.
 
 R2. Relay uses /bin/sh, arguments hook|status and name. Read stdin completely and POST its bytes
@@ -124,9 +125,10 @@ R2. Relay uses /bin/sh, arguments hook|status and name. Read stdin completely an
     -H @"$AIAKOS_SEAT_TOKEN_FILE", and X-Aiakos-Source-Seq. Never read token content into argv
     or environment. Always exit 0, suppress stderr and hook stdout; status prints exactly
     "aiakos <AIAKOS_SEAT>\n" before posting (unset seat uses "seat"). Missing URL, unreadable
-    header or dependencies => same stdout/exit and no decision. Buffer stdin in a private
-    temporary file with cleanup traps so shell command substitution cannot remove final LF.
-    Do not leave payload files after ordinary exit; no payload in file names. Tests provide
+    header or dependencies => same stdout/exit and no decision. Let curl --data-binary @- read the relay stdin directly; never use body command
+    substitution or temporary payload files. Drain remaining stdin with cat >/dev/null after
+    curl exits and on every no-post path, with errors suppressed. No additional mktemp
+    dependency; no on-disk payload even if the relay is killed. Tests provide
     finite stdin; a producer that never closes stdin is not a network-timeout test.
 
 R3. Before POST, increment decimal counter $AIAKOS_SEAT_SEQ_FILE under flock on <file>.lock,
@@ -141,6 +143,10 @@ R4. Registry.Register accepts nonempty ASCII token with no whitespace/control an
     launch metadata without control; otherwise ArgumentException("INVALID_HOOK_LAUNCH").
     Tokens are unique; collision throws InvalidOperationException("HOOK_TOKEN_IN_USE").
     Re-registering a LaunchId throws InvalidOperationException("HOOK_LAUNCH_IN_USE").
+    Check argument validity first, then remove expired token entries, then check token collision,
+    then LaunchId collision: a collision on both returns HOOK_TOKEN_IN_USE. Expired token may
+    be reused for a never-seen LaunchId; every previously registered LaunchId is remembered
+    for this registry lifetime and cannot be reused, even after its token expires.
     End records end time once; current launches resolve, ended launches resolve until strictly
     before end+60s, and at/after boundary fail. Unknown End is a no-op. Expired tokens are removed
     on access; no refresh from requests. Distinct old/new launches of same seat coexist. Identity
@@ -149,7 +155,16 @@ R4. Registry.Register accepts nonempty ASCII token with no whitespace/control an
 R5. HookIngest uses WebApplication.CreateSlimBuilder, Kestrel HTTP/1.1 bound ONLY to
     IPAddress.Loopback, supplied port 0..65535 (0 requests an ephemeral test port), no redirect,
     TLS, wildcard, forwarded-header or authentication fallback. Start exposes actual BaseUri;
-    occupied port fails without alternate-port retry. Only POST /v1/hooks/{kind}/{name}, kind
+    occupied port throws InvalidOperationException("HOOK_INGEST_BIND_FAILED") without
+    inner exception or alternate-port retry. Constructor out-of-range port throws
+    ArgumentOutOfRangeException(nameof(port)) (framework message need not be matched).
+    BaseUri before successful start throws InvalidOperationException("HOOK_INGEST_NOT_STARTED").
+    Second StartAsync while started throws InvalidOperationException("HOOK_INGEST_ALREADY_STARTED").
+    StopAsync before start is a no-op; after start it cancels workers/closes listener and is
+    idempotent. A stopped/disposed ingest cannot restart: StartAsync throws
+    InvalidOperationException("HOOK_INGEST_STOPPED"). BaseUri remains its last started value
+    after stop. Concurrent lifecycle calls are serialized; start cancellation releases partial
+    resources and leaves instance stopped. Only POST /v1/hooks/{kind}/{name}, kind
     exactly hook/status, nonempty single ASCII name [A-Za-z0-9_-]+. Unmatched path/invalid kind
     or name => 404; other methods on matched route => 405. No request-triggered launch creation.
     Require exactly one Authorization value "Bearer <registered token>" (case-sensitive bearer
@@ -160,10 +175,11 @@ R6. After authentication, accept <=1048576 body bytes and enqueue full bytes/reg
     Content-Length and streaming/chunked/unknown length; aborted body never publishes a prefix.
     Invalid/missing/multiple/overflow/nondecimal Source-Seq header => 0; valid decimal ulong
     (including 0) retained. No JSON parsing or session-ID check. Enqueue uses an in-memory
-    channel and background consumer, so a delayed consumer or disconnected orchestrator cannot
+    unbounded channel and background consumer, so a delayed consumer or disconnected orchestrator cannot
     delay 204. Use a single ordered worker for consumer calls; handler never awaits consumer.
     Do not introduce persistent spool or publish dummy normalized events. Consumer errors are
-    caught at worker boundary, logged as fixed "HOOK_CONSUMER_FAILED" without exception detail,
+    caught at worker boundary, logged through loggerFactory.CreateLogger("Aiakos.Node.Hooks.HookIngest") at Error
+    as fixed "HOOK_CONSUMER_FAILED" without exception detail,
     worker continues; no HTTP retry or duplicate consumption. Stop cancels outstanding calls and
     discards local pending bodies; shutdown persistence is outside this component contract.
 
@@ -178,6 +194,10 @@ R7. Tracker receives every accepted seq before status coalescing, scoped by Laun
     TakeExpiredGaps returns one launch entry per newly expired run. Ingest polls with a
     TimeProvider-backed 100ms timer and queues GapAsync in the same worker as raw consumption.
     Clock deadlines, not HTTP arrival sorting, decide expiry; tracker never reorders hooks.
+    Scope is intentionally per launch as accepted spec0005 R19 requires. Interleaved old/new
+    launches sharing a seat counter can cause an apparent per-launch gap even when all seat
+    numbers arrived: do not silently substitute seat-scoped accounting. Document this limitation
+    in tests and handoff; a later improvement needs a spec amendment, not an inferred fix.
 
 R8. Hook posts enqueue immediately. Status posts coalesce per SeatId, across launch registrations:
     first status emits immediately; within 1s of last emission retain only the newest arrival.
@@ -189,12 +209,13 @@ R8. Hook posts enqueue immediately. Status posts coalesce per SeatId, across lau
     have independent clocks; hook-kind posts are never throttled. "TELEMETRY" mapping/null usage
     conversion is deferred to 12-3; this rule supplies the raw emission bar needed for AC5.
 
-R9. Span hook_ingest.receive uses only hook.name, source_seq and aiakos.seat.address for
+R9. ActivitySource name Aiakos.Node.Hooks; span hook_ingest.receive uses only hook.name, source_seq and aiakos.seat.address for
     authenticated accepted requests. Meter Aiakos.Node.Hooks exposes aiakos.node.hooks.received
     counter with name/result tags (result accepted, unauthorized, too-large), aiakos.node.hooks.gaps counter
     on emitted runs and hooks.latency histogram. Since relay has no emission timestamp, latency
     measures local request-body-read/enqueue elapsed milliseconds; never infer a timestamp from
-    sequence (persisted counter != clock). Unknown-token metric name="unknown"; no arbitrary
+    sequence (persisted counter != clock). Every401 (missing, malformed, multiple, unknown or expired Authorization) has metric
+    name="unknown"; no arbitrary
     unauthenticated names/IDs. Disable default Kestrel request logging that could capture secrets.
     The latency interpretation is recorded as a spec clarification for architect/maintainer
     review, not a claim to measure relay-to-node transit. No trust metrics in this slice.
@@ -207,13 +228,13 @@ are opaque; no actor or canonical-ID validator is required. Real-socket tests us
 
 | ID | Change | Expected |
 |---|---|---|
-| `E1` | two BuildFile calls | exact embedded bytes; SeatHome, aiakos/bin/aiakos-hook-relay, decimal mode493, Expand=false; independent snapshots |
+| `E1` | two BuildFile calls | exact embedded bytes; SeatHome, aiakos/bin/aiakos-hook-relay, decimal mode493, Expand=false; independent snapshots with generated FileRoot.SeatHome, Path and Content names |
 | `E2` | finite stdin trailing LF/nonUTF8; ingest down/hangs/500; missing env/dependency | exact posted bytes when reachable, Authorization only from header file, exit0; hook stdout empty, status exactly aiakos impl@aiakos-dev LF; uncontended-lock failures <2.6s |
 | `E3` | missing counter, 200 calls, persisted counter, held lock | seed above microsecond time sampled before call; sorted 200 seqs strictly increasing; next launch increments persisted value; lock timeout header0 and retained files |
-| `E4` | unknown token, end at t0, another launch same seat | unknown false; L1 resolves before t0+60s, false at boundary; new L2 unaffected; fixed collision/invalid errors R4 |
-| `E5` | wrong route/method/token; payload tries alternate identity | exact 404/405/401 as R5; no callbacks for rejected posts; accepted registration remains S1/I1/L1 despite session_id |
-| `E6` | exactly1MiB/1MiB+1/chunked/abort; bad seq; blocked consumer | 204/413; no prefix published; malformed seq0; full accepted bytes independent; p99 response <50ms at20req/s over100 requests with consumer blocked |
-| `E7` | 1,2,4 then silence; late3; two runs; zero/duplicates/huge jump | one IngestUnavailable at2s after4, none before; late3 before deadline yields0; two contiguous missing runs yield2; seq0/duplicates no extra gap; launch baselines independent |
+| `E4` | unknown token, end at t0, another launch same seat | unknown false; L1 resolves before t0+60s, false at boundary; new L2 unaffected; both-collision HOOK_TOKEN_IN_USE; expired token/new LaunchId accepted, previously seen LaunchId HOOK_LAUNCH_IN_USE; fixed invalid errors R4 |
+| `E5` | hook-kind posts for multi-post cases, status at most once per seat; wrong route/method/token; payload tries alternate identity; lifecycle | exact 404/405/401 as R5; no callbacks for rejected posts; accepted registration remains S1/I1/L1 despite session_id; port invalid ArgumentOutOfRangeException(port), occupied HOOK_INGEST_BIND_FAILED, pre-start BaseUri HOOK_INGEST_NOT_STARTED, repeated start HOOK_INGEST_ALREADY_STARTED, stop before start/repeated stop no-op, restart HOOK_INGEST_STOPPED, port released after stop |
+| `E6` | hook-kind posts for multi-post cases, status at most once per seat; exactly1MiB/1MiB+1/chunked/abort; bad seq; blocked consumer | 204/413; no prefix published; malformed seq0; full accepted bytes independent; p99 response <50ms at20req/s over100 requests with consumer blocked |
+| `E7` | 1,2,4 then silence; late3; two runs; zero/duplicates/huge jump | one IngestUnavailable at2s after4, none before; late3 before deadline yields0; two contiguous missing runs yield2; seq0/duplicates no extra gap; launch baselines independent; L1(seq10 at0s), L2(seq11/12 at0.1s), L1(seq13 at0.2s) gives exactly one L1 gap at2.2s for11..12, no L2 gap (accepted per-launch scope limitation) |
 | `E8` | 50 status posts in2s; concurrent seat; hook alongside | <=3 raw status calls after trailing flush, final newest bytes with original launch metadata; other seat independently emits; every hook delivered |
 | `E9` | sentinel payload/header; accepted/401/413/gap requests | no sentinel in logs/spans/metrics/child argv; named fixed telemetry R9 with exact result tags; latency uses local elapsed duration |
 
@@ -226,7 +247,7 @@ Orchestrator.Tests. No Node reference to Orchestrator and no acceptance tests co
 
 - T1. Permanent embedded-resource/path/mode/byte/snapshot tests E1 and shell tests E2/E3,
     including /proc child cmdline sentinel scan while listener delays response, counter reuse,
-    missing tools and no leftover payload tempfiles. Never print sentinel or raw argv on failure.
+    missing tools and absence of payload files (including after forced relay kill). Never print sentinel or raw argv on failure.
 - T2. Permanent registry tests E4 and concurrent resolution/end/expiry, all G1 input boundaries.
 - T3. Permanent HTTP tests E5/E6 with real TCP, chunked limit/abort, recorded consumer, delayed
     consumer, exact byte preservation and full lifecycle cancellation/port-binding checks.
