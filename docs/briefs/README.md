@@ -37,7 +37,7 @@ Acceptance tests are not here: they stay local, so that an implementer cannot re
 | [10-4 Buffered node events](10-4/brief.md) | #10 | `impl` | approved | [7](10-4/stories.md) | | |
 | [10-3 Authenticated node link](10-3/brief.md) | #10 | `impl` | approved | [10](10-3/stories.md) | | |
 | [10-2 Contract helpers and contract tests](10-2/brief.md) | #10 | `impl/opencode` | approved | [1](10-2/stories.md) | | |
-| [12-2 Relay and ingest](12-2/brief.md) | #12 | `impl` | draft | [6](12-2/stories.md) | | |
+| [12-2 Relay and ingest](12-2/brief.md) | #12 | `impl` | approved | [6](12-2/stories.md) | | |
 | [12-1 Claude orchestrator adapter](12-1/brief.md) | #12 | `impl` | approved | [5](12-1/stories.md) | | |
 | [11-2 Tmux runner and start](11-2/brief.md) | #11 | `impl` | approved | [9](11-2/stories.md) | | |
 | [11-1 Session host interface, validators and the fake](11-1/brief.md) | #11 | `impl/sonnet` | draft | [4](11-1/stories.md) | [2](11-1/findings.md) | |

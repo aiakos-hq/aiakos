@@ -2,7 +2,7 @@
 id: 12-2
 title: "#12 slice 2 — relay and ingest"
 issue: 12
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Orchestrator/Harnesses/ClaudeCode/, src/Aiakos.Orchestrator/Aiakos.Orchestrator.csproj, tests/Aiakos.Orchestrator.Tests/Harnesses/ClaudeCode/, src/Aiakos.Node/Hooks/, tests/Aiakos.Node.Tests/Hooks/]
 date: 2026-10-08
