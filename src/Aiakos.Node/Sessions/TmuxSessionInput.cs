@@ -38,8 +38,6 @@ public sealed partial class TmuxSessionInput
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(request);
         ValidateHandle(session, requireWritable: true);
-        ct.ThrowIfCancellationRequested();
-
         var lead = InputValidator.CheckLead(request.Lead);
         var body = InputValidator.CheckBody(request.Body);
         if (lead.Problem != InputProblem.None)
@@ -54,12 +52,13 @@ public sealed partial class TmuxSessionInput
         if (request.Lead.Length == 0 && body.Normalized.Length == 0)
             throw new SessionHostException(new SessionHostError(SessionHostErrorCode.InputNotAllowed,
                 "Lead and body cannot both be empty.", false));
-        if (request.SubmitDelay > MaximumSubmitDelay)
-            throw InvalidArgument("SubmitDelay exceeds the supported delay range.");
+        if (!Enum.IsDefined(request.Submit) || request.SubmitDelay < TimeSpan.Zero ||
+            request.SubmitDelay > MaximumSubmitDelay)
+            throw InvalidArgument("Invalid delivery request.");
 
         var gateKey = GateKey(session);
         var gate = _deliveryGates.GetOrAdd(gateKey, static _ => new SemaphoreSlim(1, 1));
-        if (!await gate.WaitAsync(0, ct).ConfigureAwait(false))
+        if (!await gate.WaitAsync(0, CancellationToken.None).ConfigureAwait(false))
             throw Busy();
 
         using var deliveryCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -78,42 +77,56 @@ public sealed partial class TmuxSessionInput
         string? resubmitReason = null;
         var deliveryContext = new TmuxDeliveryContext(this, session, deliveryId, submittedAt,
             () => resubmits++, value => resubmitReason = value, token);
+        var bufferName = "aiakos-" + deliveryId[..8] + "-1";
+        var bodyBytes = Encoding.UTF8.GetBytes(body.Normalized);
+        var loaded = false;
+        var pasted = false;
+        SessionHostError? error = null;
         try
         {
             try
             {
-                token.ThrowIfCancellationRequested();
-                await VerifyMutableHandleAsync(session, token).ConfigureAwait(false);
-                var bufferName = "aiakos-" + deliveryId;
-                var bodyBytes = Encoding.UTF8.GetBytes(body.Normalized);
-                await RunCheckedAsync(["load-buffer", "-b", bufferName, "-"], bodyBytes, token).ConfigureAwait(false);
+                await VerifyMutableHandleAsync(session, CancellationToken.None).ConfigureAwait(false);
+                await RunCheckedAsync(["load-buffer", "-b", bufferName, "-"], bodyBytes, CancellationToken.None)
+                    .ConfigureAwait(false);
+                loaded = true;
                 stage = DeliveryStage.BufferLoaded;
+                token.ThrowIfCancellationRequested();
 
                 if (request.Lead.Length > 0)
                 {
-                    await VerifyMutableHandleAsync(session, token).ConfigureAwait(false);
-                    await RunCheckedAsync(["send-keys", "-t", session.PaneId, "-l", "--", request.Lead], null, token)
+                    await VerifyMutableHandleAsync(session, CancellationToken.None).ConfigureAwait(false);
+                    token.ThrowIfCancellationRequested();
+                    await RunCheckedAsync(["send-keys", "-t", session.PaneId, "-l", "--", request.Lead], null,
+                            CancellationToken.None)
                         .ConfigureAwait(false);
+                    stage = DeliveryStage.LeadTyped;
+                    token.ThrowIfCancellationRequested();
                 }
-                stage = DeliveryStage.LeadTyped;
 
                 if (body.Normalized.Length > 0)
                 {
-                    await VerifyMutableHandleAsync(session, token).ConfigureAwait(false);
-                    await RunCheckedAsync(["paste-buffer", "-p", "-d", "-b", bufferName, "-t", session.PaneId], null,
-                        token).ConfigureAwait(false);
+                    await VerifyMutableHandleAsync(session, CancellationToken.None).ConfigureAwait(false);
+                    token.ThrowIfCancellationRequested();
+                    await RunCheckedAsync(["paste-buffer", "-p", "-r", "-d", "-b", bufferName, "-t", session.PaneId], null,
+                        CancellationToken.None).ConfigureAwait(false);
                     stage = DeliveryStage.BodyPasted;
+                    pasted = true;
+                    token.ThrowIfCancellationRequested();
                 }
 
                 if (request.SubmitDelay > TimeSpan.Zero)
-                    await Task.Delay(request.SubmitDelay, _timeProvider, token).ConfigureAwait(false);
+                    await Task.Delay(request.SubmitDelay, _timeProvider, token).WaitAsync(token).ConfigureAwait(false);
 
                 if (request.Submit == SubmitKey.CtrlM)
                 {
-                    await VerifyMutableHandleAsync(session, token).ConfigureAwait(false);
-                    await RunCheckedAsync(["send-keys", "-t", session.PaneId, "C-m"], null, token)
+                    await VerifyMutableHandleAsync(session, CancellationToken.None).ConfigureAwait(false);
+                    token.ThrowIfCancellationRequested();
+                    await RunCheckedAsync(["send-keys", "-t", session.PaneId, "C-m"], null, CancellationToken.None)
                         .ConfigureAwait(false);
                     stage = DeliveryStage.Submitted;
+                    submittedAt = _timeProvider.GetUtcNow();
+                    token.ThrowIfCancellationRequested();
                 }
 
                 token.ThrowIfCancellationRequested();
@@ -129,11 +142,27 @@ public sealed partial class TmuxSessionInput
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
-                // Report the last committed delivery stage while releasing the local gate.
+                error = CancelledError();
+                confirmation = new Confirmation(ConfirmationOutcome.Unconfirmed, null);
+            }
+            catch (SessionHostException exception) when (loaded)
+            {
+                error = exception.Error with { Retryable = false };
+                confirmation = new Confirmation(ConfirmationOutcome.Unconfirmed, null);
+            }
+
+            if (loaded && !pasted)
+            {
+                try
+                {
+                    await _client.RunAsync(["delete-buffer", "-b", bufferName], null, CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception) { }
             }
 
             return new DeliveryReport(deliveryId, stage, confirmation, resubmits, body.Bytes,
-                body.LineEndingsNormalized, null, resubmitReason);
+                body.LineEndingsNormalized, error, resubmitReason);
         }
         finally
         {
@@ -365,6 +394,9 @@ public sealed partial class TmuxSessionInput
 
     private static SessionHostException Busy() =>
         new(new SessionHostError(SessionHostErrorCode.Busy, "A delivery is already in progress for this session.", true));
+
+    private static SessionHostError CancelledError() =>
+        new(SessionHostErrorCode.TmuxFailed, "Delivery was cancelled.", false);
 
     private static SessionHostException InvalidCaptureRequest() =>
         InvalidArgument("Invalid capture request.");
