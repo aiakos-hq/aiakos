@@ -19,6 +19,28 @@ internal static class RigCanonicalizer
             Hash(sharedJson), Hash(bindingJson), contents);
     }
 
+    internal static (string SpecHash, string BindingHash) HashCanonicalJson(JsonElement resolved)
+    {
+        if (resolved.ValueKind != JsonValueKind.Object)
+            throw new FormatException("Resolved JSON is invalid.");
+
+        var properties = resolved.EnumerateObject().ToArray();
+        if (properties.Length != 2 || properties.Select(property => property.Name)
+                .Order(StringComparer.Ordinal).SequenceEqual(["binding", "shared"]) is false)
+            throw new FormatException("Resolved JSON is invalid.");
+
+        var binding = resolved.GetProperty("binding");
+        var shared = resolved.GetProperty("shared");
+        if (binding.ValueKind != JsonValueKind.Object || shared.ValueKind != JsonValueKind.Object)
+            throw new FormatException("Resolved JSON is invalid.");
+
+        var canonical = $"{{\"binding\":{CanonicalJson.Write(binding)},\"shared\":{CanonicalJson.Write(shared)}}}";
+        if (!StringComparer.Ordinal.Equals(canonical, resolved.GetRawText()))
+            throw new FormatException("Resolved JSON is invalid.");
+
+        return (Hash(CanonicalJson.Write(shared)), Hash(CanonicalJson.Write(binding)));
+    }
+
     private static object SharedTree(ResolvedRig rig) => new
     {
         name = rig.Name,
