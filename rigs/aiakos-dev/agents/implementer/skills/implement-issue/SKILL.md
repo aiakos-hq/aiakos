@@ -25,4 +25,4 @@ description: Implement one GitHub issue from its merged spec and open a PR.
    or closed, and attribute it with `Implemented by impl@aiakos-dev`. Check it with
    `gh pr checks <n>` and fix failures caused by this change.
 6. End with the prescribed turn report from `CULTURE.md` and `GUIDANCE.md`, beginning
-   `REPORT impl@aiakos-dev`.
+   `REPORT impl@aiakos-dev`, with status `ready-for-review`.

@@ -14,8 +14,9 @@ description: Address each finding on the existing PR without rewriting history.
 5. Make a conventional commit with the trailer `Aiakos-Seat: impl@aiakos-dev`, then push
    the existing branch with `git push`.
 6. Comment on the existing PR with `gh pr comment <n>`, beginning `Addressed at <sha>:` and
-   listing one line for each finding.
+   listing one line for each finding. Use `--body-file` for multiline GitHub content; never
+   shell interpolate report or review text.
 7. End with the prescribed turn report from `CULTURE.md` and `GUIDANCE.md`, beginning
-   `REPORT impl@aiakos-dev`.
+   `REPORT impl@aiakos-dev`, with status `changes-pushed`.
 
 Follow the stop rules in `CULTURE.md` and the implementer `GUIDANCE.md`.
