@@ -23,10 +23,16 @@ owns the transport-free command dispatcher and exact command messages. Its bridg
 story in this slice and is gated on 13-4 merging; tests use ports only and never fake production.
 
 The required 13-4 seam is: `Aiakos.Core.CallerContext(Guid TenantId, string User, string Sender)`;
-`Aiakos.Orchestrator.Seats.ISeatCommandDispatcher.DispatchAsync(SeatEnvelope, CallerContext,
-CancellationToken)`; and immutable command/reply records for `SeatUp(bool Fresh,string? Note)`,
+`Aiakos.Core.SeatCommandEnvelope(Guid TenantId, Guid SeatId, object Message)`;
+`Aiakos.Core.ISeatCommandDispatcher.DispatchAsync(SeatCommandEnvelope, CallerContext,
+CancellationToken): Task<object>`; and immutable command/reply records for `SeatUp(bool Fresh,string? Note)`,
 `SeatDown`, `SeatSend(string Body,bool Force)`, `SeatCapture(int HistoryLines)`, with accepted,
-already-up/no-op, rejected, capture-completed and capture-timeout replies. The API bridge passes
+already-up/no-op, rejected, capture-completed and capture-timeout replies. Reply records live in
+`Aiakos.Orchestrator.Seats`: `SeatCommandAccepted(Guid? LaunchId, Guid CommandId)`,
+`SeatAlreadyUp(Guid LaunchId)`, `SeatAlreadyDown`, `SeatCommandRejected(string Reason)`,
+`SeatCaptureCompleted(Aiakos.Contracts.Node.V1.PaneCapture Capture)`, and
+`SeatCommandTimedOut(string Reason)` (capture timeout reason `CAPTURE_TIMEOUT`). Up, down and
+send complete after admission; capture waits for its committed terminal result. The API bridge passes
 the authenticated context and never takes identity from request JSON. If 13-4 changes these exact
 names before merge, this bridge story follows the merged 13-4 contract; it does not invent a
 second dispatcher.
