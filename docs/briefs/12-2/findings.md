@@ -1,6 +1,6 @@
 # Story review: slice 12-2
 
-Reviewed at commit ffebbcbc5ebc537605afc97f97026fafac97e620. Stories: 6. Check: ok.
+Reviewed at commit f1065f8e9d4affba29b35fba395eebd4fdb19334. Stories: 6. Check: ok.
 
 ## Findings
 
@@ -42,3 +42,15 @@ Both open S6 findings resolved following the maintainer's option 1 decision
 to enqueued, in the ingest. R9 and E9 specify `aiakos.node.hooks.latency`, unit `ms`,
 request received to enqueued, accepted (204) requests only; E9 excludes 401/413 records.
 R9 and S6 notes no longer describe the latency decision as pending review.
+
+## Architect, round 3
+
+Read at f1065f8: the diff from c8fdd3e (brief R9 and E9, the S6 `notes`, spec 0005 R38). Both
+S6 findings are resolved as asked: R38, R9 and E9 give `aiakos.node.hooks.latency` the same
+meaning (unit `ms`, request received to enqueued, accepted (204) requests only, no record for
+401/413), and no text calls it pending. No open findings.
+
+Not checked in round 3: the round-2 list still holds (`HookIngest` after
+`HOOK_INGEST_BIND_FAILED`, `tools/story.sh show` output, whether `analysis-pr` accepts a spec
+file changed on the analysis branch); other documents that may quote R38's old wording beyond
+`docs/specs`, `docs/adr`, `docs/plan.md` and `docs/risks.md`, where a search found none.
