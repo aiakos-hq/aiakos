@@ -22,7 +22,7 @@ if [ "$post" -eq 1 ]; then
         lockfile=$seqfile.lock
         now=$(date +%s%N 2>/dev/null)
         now=${now%???}
-        if exec 9>"$lockfile" 2>/dev/null; then
+        {
             if flock -w 0.95 9 2>/dev/null; then
                 old=
                 if [ -r "$seqfile" ]; then IFS= read -r old <"$seqfile" || :; fi
@@ -42,8 +42,7 @@ if [ "$post" -eq 1 ]; then
                 esac
                 flock -u 9 2>/dev/null || :
             fi
-            exec 9>&-
-        fi
+        } 2>/dev/null 9>"$lockfile" || :
     fi
     curl --connect-timeout 0.5 --max-time 2 --silent --output /dev/null \
         --data-binary @- -H 'Expect:' -H 'Content-Type: application/json' \

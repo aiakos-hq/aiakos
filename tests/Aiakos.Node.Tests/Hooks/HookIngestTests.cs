@@ -65,8 +65,11 @@ public sealed class HookIngestTests
         Assert.False(registry.TryResolve("Token", out _));
     }
 
-    [Fact]
-    public async Task RelayPostsExactBytesAndPersistsSourceSequenceWhenLinuxToolsAreAvailable()
+    [Theory]
+    [InlineData("valid")]
+    [InlineData("lock-io-failure")]
+    [InlineData("counter-io-failure")]
+    public async Task RelayPostsExactBytesAndHandlesSequenceIoWhenLinuxToolsAreAvailable(string scenario)
     {
         if (!OperatingSystem.IsLinux()) return;
         foreach (var tool in new[] { "sh", "curl", "flock", "timeout", "date" })
@@ -77,6 +80,12 @@ public sealed class HookIngestTests
         Directory.CreateDirectory(temp.Path);
         var tokenFile = System.IO.Path.Combine(temp.Path, "headers");
         var seqFile = System.IO.Path.Combine(temp.Path, "seq");
+        if (scenario == "lock-io-failure")
+        {
+            await File.WriteAllTextAsync(seqFile, "not a directory", TestContext.Current.CancellationToken);
+            seqFile = System.IO.Path.Combine(seqFile, "counter");
+        }
+        else if (scenario == "counter-io-failure") Directory.CreateDirectory(seqFile);
         await File.WriteAllTextAsync(tokenFile, "Authorization: ingest-fixture\n", TestContext.Current.CancellationToken);
         var scriptPath = FindRelay();
         using var reservation = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
@@ -113,13 +122,19 @@ public sealed class HookIngestTests
         await process.StandardInput.BaseStream.WriteAsync(body, TestContext.Current.CancellationToken);
         process.StandardInput.Close();
         await process.WaitForExitAsync(TestContext.Current.CancellationToken);
-        var received = await server;
         Assert.Equal(0, process.ExitCode);
+        var received = await server.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         Assert.Empty(await process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken));
         Assert.Equal(body, received.Body);
         Assert.Contains("Authorization: ingest-fixture", received.Headers, StringComparison.Ordinal);
         var sequenceLine = received.Headers.Split("\r\n", StringSplitOptions.RemoveEmptyEntries)
             .Single(line => line.StartsWith("X-Aiakos-Source-Seq:", StringComparison.OrdinalIgnoreCase));
+        if (scenario != "valid")
+        {
+            Assert.Equal("0", sequenceLine.Split(':')[1].Trim());
+            return;
+        }
         var persisted = (await File.ReadAllTextAsync(seqFile, TestContext.Current.CancellationToken)).Trim();
         Assert.Equal(sequenceLine.Split(':')[1].Trim(), persisted);
         Assert.True(ulong.TryParse(persisted, out var sequence) && sequence > 0);
