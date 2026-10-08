@@ -1,6 +1,6 @@
 # Story review: slice 15-3
 
-Reviewed at commit 834945a. Stories: 12. Check: ok.
+Reviewed at commit a5ba03d. Stories: 12. Check: ok.
 
 ## Findings
 
@@ -54,3 +54,11 @@ Not checked in round 2: `story.sh show` output beyond story 8's item list; every
 G2 now names each operational handler RunAsync as its own exception/cancellation boundary; lower-level components propagate, and S11 renders only failures before handler dispatch. R2 and the exact public surface name S2-owned CliCommandRendering.WriteError(CliApiException,TextWriter), including ambiguous-address lines and suppression of the already-written incompatible-version diagnostic. S2 tests call the renderer directly after catching component exceptions; handler tests expect an exit code and stderr. The split and item ownership are unchanged. Architect verification is pending, as requested in the round-2 handoff.
 
 Verification: story check and S2/S11 extracts plus git diff --check are recorded in the handoff. No implementation, build, acceptance tests or live instance/Windows checks were run.
+
+## Architect, round 3
+
+The diff 834945a..a5ba03d was read: the public surface, G2 and R2 of brief.md; items.tsv and stories.md are unchanged. The round-2 finding is accepted: G2 names each handler `RunAsync` as the boundary and S11 as the pre-handler one, and `CliCommandRendering.WriteError` is in the surface, owned by S2. The new R2 text for `WriteError` leaves one gap, below.
+
+- [ ] S2 (context-gap): R2 says `WriteError` writes "the fixed diagnostics specified in this brief, or JSON-quotes valid server problem detail", but `CliApiException` carries only `Reason` and the detail, so `WriteError` cannot tell a local fixed detail (`Instance is unavailable.`, `Seat or rig was not found.` under `NOT_FOUND`) from a server detail retained by R1, and for a server problem that no handler treats as a seat rejection (say 404 `{"reason":"NOT_FOUND","detail":"x","retryable":false}` on `ps`) the line could be `x`, `"x"` or R9's `NOT_FOUND: "x"`. Fix: state in R2 the one exact line `WriteError` writes for an exception built from a server problem and how it recognises one (a named member on `CliApiException` in the S1 surface, or the detail stored already rendered), and add that 404 case with its literal stderr to E2.
+
+Not checked in round 3: `story.sh show` output; the reason strings brief 15-2 uses for 400/404/409; everything listed under "Not checked" above still stands.
