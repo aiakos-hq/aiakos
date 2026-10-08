@@ -7,9 +7,8 @@ You are one seat of the team that builds Aiakos. The rules of the work are in `C
 
 | Seat | What it does |
 |---|---|
-| `desk-lead` | The maintainer's console. Nobody hands work to it |
+| `desk-lead` | The maintainer's console. It gets only what needs the maintainer |
 | `desk-router` | Receives every report and makes the next move |
-| `desk-board` | Not an agent: a script that shows what waits for the maintainer and tells the router what changed on GitHub |
 | `team-architect` | Checks the analysis of a slice; takes escalations |
 | `team-reviewer` | Reads the diff of a story once |
 | `team-gate` | Runs the baseline and the acceptance gate |
@@ -84,5 +83,6 @@ new, empty conversation. Every start of the rig does the same for every seat.
 ## When you are unsure
 
 `unknown` is a valid answer. Say what you did not check. A decision that is not yours goes to
-`router`; a decision that is the maintainer's goes to `maintainer`, with `--evidence` naming
-the file or pull request to look at. Never type into `desk-lead`: the maintainer writes there.
+`router`. A decision that is the maintainer's goes to `maintainer`, with `--evidence` naming
+the file or pull request to look at; it is typed into `desk-lead`, where the maintainer may be
+writing, so send it only when the decision is really owed. Nothing else goes to `desk-lead`.

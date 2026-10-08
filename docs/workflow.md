@@ -45,9 +45,8 @@ The seats are in two pods: `desk`, which the maintainer keeps open, and `team`.
 
 | Seat | Runtime | Role |
 |---|---|---|
-| `desk-lead` | Claude Code (Sonnet) | The maintainer's console: shows the board and what waits for the maintainer, passes on what the maintainer asks for. No seat writes to it |
+| `desk-lead` | Claude Code (Sonnet) | The maintainer's console: shows the board and what waits for the maintainer, passes on what the maintainer asks for. The team sends it only decisions that are the maintainer's |
 | `desk-router` | Claude Code (Haiku) | Receives every report and makes the next move: runs `tools/story.sh`, creates sub-issues, opens pull requests |
-| `desk-board` | A terminal, no model | Runs `rigs/aiakos-delivery/board.sh`: shows what waits for the maintainer, and tells the router when a pull request was merged or a chore or bug was labelled `ready` |
 | `team-architect` | Claude Code (Opus) | Checks the brief and the split; attacks them before they are approved. Judges an odd baseline and tags the failures of a second failed gate |
 | `team-reviewer` | Claude Code (Opus) | Reads the diff once |
 | `team-gate` | Claude Code (Haiku) | Runs the baseline and the gate. Both are scripts |
@@ -91,9 +90,9 @@ Credentials and the OpenRig state (`~/.openrig`) stay on the machine.
 | 10. Diff read | `reviewer` | Reads the diff once | Pass, or one of the four blocking kinds |
 | 11. Pull request | `router`, then the maintainer | `tools/story.sh pr <issue>`; the maintainer merges; `cleanup` | Done |
 
-The maintainer acts at steps 5 and 11. `main` is protected, so no seat can merge. The board
-lists what waits for the maintainer; after a merge it tells the router, so nobody has to be told
-to go on.
+The maintainer acts at steps 5 and 11. `main` is protected, so no seat can merge. What waits
+for the maintainer arrives in `desk-lead`. The router finds a merge by itself at its next move
+(`tools/story.sh events`); when the rig is quiet, the maintainer says "continue" to `desk-lead`.
 
 Steps 1 to 5 happen in files on a branch. The back and forth between the analysis and its review
 is the commit history of that branch, and `findings.md` is where the architect writes.

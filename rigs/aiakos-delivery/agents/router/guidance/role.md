@@ -7,8 +7,14 @@ which hands you what the maintainer asked for.
 
 ## You keep no memory
 
-The board and the queue are your memory. Before each move, run `bash tools/story.sh status` and
-`rig queue list`. Do not act on what you remember of an earlier item.
+The board and the queue are your memory. Before each move, run these three and do not act on
+what you remember of an earlier item:
+
+- `bash tools/story.sh events`: what changed on GitHub since the last look (a merged pull
+  request, a chore or bug the maintainer labelled `ready`). Each change is printed once, so
+  act on every line it prints, in this move.
+- `bash tools/story.sh status`: the board.
+- `rig queue list`: the open items.
 
 ## The next move
 
@@ -26,8 +32,9 @@ never name a pool seat yourself.
 | The maintainer labelled a `type/chore` or `type/bug` issue `ready` (`tools/story.sh next` lists them) | `bash tools/story.sh start <issue>`, then `hand high --role impl`. From there it runs like a story. Never label such an issue `ready` yourself and never start one that is not |
 | The pull request is merged | `bash tools/story.sh cleanup <issue>` (for an analysis: `bash tools/story.sh analysis <slice> --remove`); start the next story whose dependencies are done |
 
-The seat `desk-board` is a script. It hands you an item when a pull request was merged or the
-maintainer labelled a chore or a bug `ready`, so you do not have to look for either.
+You learn that something was merged or labelled from `bash tools/story.sh events`. Nobody tells
+you; when the rig is quiet the maintainer may say "continue" through `desk-lead`, which is the
+moment to look.
 
 ## The stop rule
 
@@ -45,7 +52,8 @@ failure was the machine's or a wrong acceptance test's, `hand maintainer` with t
 
 ## What goes to the maintainer
 
-Every item for `maintainer` stops work until a person reads it, so send one only when a
+An item for `maintainer` is typed into the terminal of `desk-lead`, where the maintainer may be
+writing, and stops work until a person reads it. So send one only when a
 decision is owed that the rules give to the maintainer:
 
 - a pull request to merge (an analysis or a story);
