@@ -2,7 +2,7 @@
 id: 11-3
 title: "#11 slice 3 — tmux delivery, keys and capture"
 issue: 11
-status: draft
+status: approved
 route: impl
 paths: [src/Aiakos.Node/Sessions/, tests/Aiakos.Node.Testing/, tests/Aiakos.Node.Tests/Sessions/]
 date: 2026-10-08
