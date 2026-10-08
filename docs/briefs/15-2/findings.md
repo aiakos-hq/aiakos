@@ -1,6 +1,6 @@
 # Story review: slice 15-2
 
-Reviewed at commit a762bae. Stories: 8. Check: ok.
+Reviewed at commit d261c06. Stories: 8. Check: ok.
 
 ## Findings
 
@@ -51,6 +51,7 @@ removed from this slice.
 - [x] S5 (context-gap), round 8: `SeatRegistrationResponse.Drifted` has no rule (spec 0007 R36 compares the running launch's hashes), a retired seat that returns is not un-retired by any sentence (spec 0007 R34 requires it), and "session is absent or exited" names no table, nor the answer for a seat with no `aiakos.seat_state` row. Fix: give in R5 the rule for `Drifted`, the un-retire rule (`retired_at` back to NULL), and the guard as `aiakos.seat_state.session` with a missing row counted as absent, each with a row in E4.
 - [x] S5, S7 (context-gap), round 8, tie: `AppendAsync` returns only `RigRevisionReceipt`, so the way the repository reports a running removal is not defined, yet S7's fake repository must raise it for E9's `SEAT_REMOVED_WHILE_RUNNING` body and S5 must raise the same thing. Fix: name the exception type (or result member) in the `IRigRevisionRepository` contract and refer to it in R5 and R11.
 - [x] S5 (judgment-gap), round 8: the E4 row of the first outputs table still lists "mismatch `HASH_MISMATCH`" and the shared E4 paragraph gives HTTP statuses and problem bodies, while the round-7 section and T4 say the repository has no hash mismatch and S5 has no HTTP handler; S5's view shows both. Fix: remove the mismatch from the E4 row and say in the shared paragraph which lines are the repository's (receipt values, the named failure) and which are E9's.
+- [ ] S7, S5 (context-gap), round 9: the brief gives `FilesBySha256` and `rig_revision_file.sha256` "lowercase SHA-256 hex keys" and matches them to "every canonical path/hash/size entry" without naming where those entries are, but the canonical form writes each file as `{path, sha256, bytes}` with `sha256` equal to `sha256:` plus the hex (`SharedContentReader.cs:107`, `SharedSkillReader.cs:206`) under `shared.culture`, `shared.agents[].guidance[]` and `shared.agents[].skills[].files[]`, and `CanonicalRigResult.Contents`, which the CLI will send, is keyed by that prefixed string; a route written to the brief rejects every real rig that has a file, or the implementer decides whether to strip the prefix. Fix: state in the third-pass paragraph, R11 and C2 that a key is the canonical `sha256` value unchanged (`sha256:` plus 64 lowercase hex), name the three canonical locations and the `bytes` field the length is checked against, and use such a key in the E9 and E4 fixtures.
 
 ## Not checked
 
@@ -108,3 +109,13 @@ new rig/seat IDs, current-relative flags and reused-pair application, retirement
 un-retire/drift rules. The shared SeatRemovedWhileRunningException is owned by contracts
 and consumed by S5/S7; E4 is repository-only and E9 owns all HTTP documents. T4/T9 pin the
 new cases. These ticks are author resolutions for architect review, not approval.
+
+Architect, round 9: the diff 659085d..d261c06 was read. All six round-8 findings are accepted as resolved. The column sources in R5 were compared with `RigCanonicalizer` (`shared.name`, `shared.seats[].id`, `.kind`, `.agent.harness`, `binding.placement[].seat` and `.node` exist under those names) and with `aiakos.rig`, `aiakos.seat`, `aiakos.seat_state` and `aiakos.seat_launch` in migration 0002; `Aiakos.Spec.ResolvedSeatParameters` exists with `Seat`, `Rig`, `Node`, `Harness`, `SpecHash`, `BindingHash` and `Projection`, and `RigLoader` sets each record's two hashes to the rig's, so R11's equality check holds for loader output. The first registration, the A, B, A and binding-only rows, un-retire, drift, the missing state row and the named exception each have a rule and an E4 row; the exception's definition and `seat_parameters` are visible in the views of S2, S5 and S7; E4 is the repository's and E9 the route's. One finding is open, marked "round 9" above: it is in the third-pass text, not in this diff, and comes from opening the loader's file hashes, which rounds 7 and 8 list as not opened.
+
+## Not checked, round 9
+
+- Nothing was built or run except `tools/story.sh check 15-2` and `show` for S2 and S7 (headings and the lines named above only).
+- `ResolvedSeatParameters.Projection.Contents` holds the bytes of every projected file, so R11 as written puts them, base64, in the request and in `aiakos.seat.parameters` for each seat, outside the 1 MiB and 16 MiB limits; the brief gives one answer (persist unchanged) and 13-4 expects the projection in its launch material, so this is not a finding. Whether a size limit is wanted is the router's or the maintainer's call.
+- "Serialize registrations for one tenant/name" in R5 has no E4 row; a concurrent first registration is not pinned by any test.
+- The DTOs that mirror the four read rows were again not compared with `SeatReadModels.cs`; 14-4's golden hashes were not recomputed.
+- The branch is still based on 19fd51e; whether `analysis-pr` needs main merged in was not tried.
