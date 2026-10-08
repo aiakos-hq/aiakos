@@ -51,12 +51,16 @@
 #   tools/story.sh hand <target> [--role <role>] [--item <qitem>] --summary "<one line>"
 #                       (--body "<text>" | --body-file <path>) [--evidence <path or link>]
 #                                         <target> is a pool (low, high), a seat (architect,
-#                                         reviewer, gate, router) or "maintainer". A pool needs
+#                                         reviewer, gate, router) or "maintainer", which is
+#                                         the terminal of desk-lead. A pool needs
 #                                         --role: a file of rigs/aiakos-delivery/roles/. The
 #                                         destination gets a clean conversation when it is idle
 #                                         and has nothing in progress, then the item. --item
 #                                         closes the caller's own item as handed off.
 #                                         artifacts/hand.log records every delivery
+#   tools/story.sh events                 prints what changed on GitHub since the last look:
+#                                         merged pull requests, chores and bugs labelled
+#                                         ready. Each change once; the router runs it
 #
 # A slice is one brief: docs/briefs/<slice>/ with brief.md, items.tsv, stories.md and, while it
 # is reviewed, findings.md. A story is "<slice>-<n>" (for example 14-3-2); its issue title is
@@ -1050,7 +1054,6 @@ cmd_cleanup() {
 RIG="${AIAKOS_RIG:-aiakos-delivery}"
 POOL_LOW="team-low1 team-low2"
 POOL_HIGH="team-high1 team-high2"
-MAINTAINER="${AIAKOS_MAINTAINER:-operator-human@kernel}"
 
 # "<seat> idle|busy <open items>" for every seat of the rig that is running and started.
 rig_seats() {
@@ -1107,7 +1110,7 @@ cmd_hand() {
     reviewer)   dest="team-reviewer@$RIG"; clear="fresh" ;;
     gate)       dest="team-gate@$RIG" ;;
     router)     dest="desk-router@$RIG" ;;
-    maintainer) dest="$MAINTAINER"; [ -n "$evidence" ] || die "hand maintainer needs --evidence <path or link>: what the maintainer should look at" ;;
+    maintainer) dest="desk-lead@$RIG"; [ -n "$evidence" ] || die "hand maintainer needs --evidence <path or link>: what the maintainer should look at" ;;
     *)          die "$usage" ;;
   esac
   if [ -n "$pool" ]; then
@@ -1119,10 +1122,8 @@ cmd_hand() {
   command -v node >/dev/null 2>&1 || die "hand: node is not on the PATH"
 
   local table="" seat line state open best="" best_open="" count="" kept=""
-  if [ "$target" != "maintainer" ]; then
-    table="$(rig_seats)" || true
-    [ -n "$table" ] || die "hand: cannot read the seats of rig $RIG. Is it running?"
-  fi
+  table="$(rig_seats)" || true
+  [ -n "$table" ] || die "hand: cannot read the seats of rig $RIG. Is it running?"
   if [ -n "$pool" ]; then
     # An idle seat with nothing open, else the seat with the fewest open items.
     for seat in $pool; do
@@ -1180,6 +1181,50 @@ cmd_hand() {
   echo "handed to $dest (conversation: $clear${kept:+, kept because $kept})"
 }
 
+# What changed on GitHub since the last look: a merged pull request, or a chore or bug that
+# the maintainer labelled ready. Nothing reports these to the rig, so the router runs this at
+# the start of each move and acts on what it prints. Each change is printed once. The first
+# run only records what exists.
+cmd_events() {
+  local seen="$main_root/artifacts/events.seen" now fresh
+  mkdir -p "$main_root/artifacts"
+  now="$(mktemp)"; fresh="$(mktemp)"
+  if ! gh pr list --repo "$REPO" --state merged --limit 40 --json number,title,headRefName \
+      --jq '.[] | "merged:\(.number)\tPull request #\(.number) was merged: \(.title) (branch \(.headRefName))"' > "$now"; then
+    rm -f "$now" "$fresh"; die "events: cannot read the pull requests of $REPO"
+  fi
+  if ! gh issue list --repo "$REPO" --state open --label ready --limit 100 --json number,title,labels \
+      --jq '.[] | select((.title | test("^[0-9]+-[0-9]+(-[0-9]+)?: ") | not) and ([.labels[].name] | any(. == "type/chore" or . == "type/bug"))) | "ready:\(.number)\tIssue #\(.number) (chore or bug) is labelled ready: \(.title)"' >> "$now"; then
+    rm -f "$now" "$fresh"; die "events: cannot read the issues of $REPO"
+  fi
+  # An item that asked the maintainer to merge a pull request is answered by the merge.
+  if [ "${AIAKOS_NO_WRITE:-}" != "1" ] && command -v rig >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
+    rig queue list --destination "desk-lead@$RIG" --state pending,in-progress,blocked --full --limit 200 --json 2>/dev/null | node -e '
+      let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+        let rows; try { rows = JSON.parse(s); } catch { return; }
+        for (const r of rows) { const m = /\/pull\/([0-9]+)\/?$/.exec(r.evidenceRef || ""); if (m) console.log(r.qitemId, m[1]); }
+      });' | while read -r item pr; do
+        grep -q "^merged:$pr	" "$now" || continue
+        rig queue update "$item" --state done --closure-reason no-follow-on --note "pull request #$pr is merged" >/dev/null 2>&1 || true
+      done
+  fi
+  if [ ! -f "$seen" ]; then
+    cut -f1 "$now" > "$seen"
+    echo "events: first look, $(wc -l < "$seen" | tr -d ' ') recorded; nothing new"
+    rm -f "$now" "$fresh"
+    return
+  fi
+  awk -F'\t' 'NR == FNR { s[$1]; next } !($1 in s)' "$seen" "$now" > "$fresh"
+  if [ -s "$fresh" ]; then
+    echo "events: changed on GitHub since the last look:"
+    cut -f2 "$fresh" | sed 's/^/- /'
+    [ "${AIAKOS_NO_WRITE:-}" = "1" ] || cut -f1 "$fresh" >> "$seen"
+  else
+    echo "events: nothing new"
+  fi
+  rm -f "$now" "$fresh"
+}
+
 case "${1:-}" in
   check)      cmd_check "${2:-}" ;;
   split)      cmd_split "${2:-}" ;;
@@ -1187,6 +1232,7 @@ case "${1:-}" in
   show)       cmd_show "${2:-}" "${3:-}" ;;
   status)     cmd_status ;;
   hand)       shift; cmd_hand "$@" ;;
+  events)     cmd_events ;;
   ready)      cmd_ready "${2:-}" "${3:-}" "${4:-}" ;;
   next)       cmd_next "${2:-}" ;;
   start)      cmd_start "${2:-}" "${3:-}" ;;

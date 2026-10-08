@@ -2,7 +2,7 @@
 # Start it from the repository root in WSL:  rig up rigs/aiakos-delivery/rig.yaml
 #
 # Models, in one place. Change a seat's model on its `model:` line below.
-#   desk   lead         claude-sonnet-5-5   the maintainer's console; receives nothing by itself
+#   desk   lead         claude-sonnet-5-5   the maintainer's console; gets only what needs the maintainer
 #   desk   router       claude-haiku-5-5    receives every report and makes the next move
 #   team   architect    claude-opus-5-5     checks the analysis; takes escalations
 #   team   reviewer     claude-opus-5-5     reads the diff once

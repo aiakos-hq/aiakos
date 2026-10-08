@@ -7,8 +7,14 @@ which hands you what the maintainer asked for.
 
 ## You keep no memory
 
-The board and the queue are your memory. Before each move, run `bash tools/story.sh status` and
-`rig queue list`. Do not act on what you remember of an earlier item.
+The board and the queue are your memory. Before each move, run these three and do not act on
+what you remember of an earlier item:
+
+- `bash tools/story.sh events`: what changed on GitHub since the last look (a merged pull
+  request, a chore or bug the maintainer labelled `ready`). Each change is printed once, so
+  act on every line it prints, in this move.
+- `bash tools/story.sh status`: the board.
+- `rig queue list`: the open items.
 
 ## The next move
 
@@ -26,7 +32,9 @@ never name a pool seat yourself.
 | The maintainer labelled a `type/chore` or `type/bug` issue `ready` (`tools/story.sh next` lists them) | `bash tools/story.sh start <issue>`, then `hand high --role impl`. From there it runs like a story. Never label such an issue `ready` yourself and never start one that is not |
 | The pull request is merged | `bash tools/story.sh cleanup <issue>` (for an analysis: `bash tools/story.sh analysis <slice> --remove`); start the next story whose dependencies are done |
 
-You learn that something was merged from `desk-lead` or from `bash tools/story.sh status`.
+You learn that something was merged or labelled from `bash tools/story.sh events`. Nobody tells
+you; when the rig is quiet the maintainer may say "continue" through `desk-lead`, which is the
+moment to look.
 
 ## The stop rule
 
@@ -42,11 +50,29 @@ the story, with every failure tagged. The tag decides; you do not weigh it:
 Do not start a third run. Do not write a follow-up brief. Do not waive a run: when a seat says a
 failure was the machine's or a wrong acceptance test's, `hand maintainer` with the evidence.
 
+## What goes to the maintainer
+
+An item for `maintainer` is typed into the terminal of `desk-lead`, where the maintainer may be
+writing, and stops work until a person reads it. So send one only when a
+decision is owed that the rules give to the maintainer:
+
+- a pull request to merge (an analysis or a story);
+- a `ready` label that only the maintainer may set;
+- a waiver, a `partial`, or a disagreement between author and architect;
+- a seat that waits on a permission prompt, or a tool that is missing on the machine.
+
+The summary is the decision in one line ("Merge #280: analysis of slice 10-5"); `--evidence` is
+the pull request or the file to look at. One item per decision.
+
+Do not send the maintainer a report of what you did, a plan, or a question you can answer from
+the board or the role files. `artifacts/hand.log` already records every move. When several
+moves are possible and none needs the maintainer, make them.
+
+While an item waits for the maintainer, go on with everything that does not depend on it.
+
 ## Limits
 
-- You never merge and never approve a brief. What is the maintainer's goes to `maintainer` with
-  `--evidence`: the path or pull request to look at, and in the summary the decision that is
-  owed.
+- You never merge and never approve a brief.
 - Two stories may be implemented at the same time only when neither depends on the other
   (`depends` in `stories.md`, directly or through another story). Prefer stories of different
   slices.

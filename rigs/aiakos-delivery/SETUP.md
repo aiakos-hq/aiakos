@@ -6,7 +6,7 @@ logins, per-seat permission choices and OpenRig's own state (`~/.openrig`).
 
 ## Once per machine
 
-1. Tools in WSL: `tmux`, `git`, `gh`, Node, the .NET SDK from `global.json`, Docker (Docker
+1. Tools in WSL: `tmux`, `git`, `gh`, `rg` (ripgrep), Node, the .NET SDK from `global.json`, Docker (Docker
    Desktop with WSL integration), and optionally `herdr`.
 2. Agents and OpenRig:
 
@@ -46,9 +46,12 @@ and reads its queue.
 
 The rig has two pods. `desk` holds the two seats to keep open: `desk-lead`, which you talk to,
 and `desk-router`, which moves the work. `team` holds the seven seats that do it; look at them
-now and then. Give the team work by typing in the terminal of `desk-lead`. Nothing else writes
-there, so a message you are typing is not cut. Do not type into `desk-router`: the seats' reports
-arrive in it.
+now and then. Give the team work by typing in the terminal of `desk-lead`. The only thing the team sends
+there is a decision that it owes you, so a message you are typing is rarely cut. Answer it
+there. Do not type into `desk-router`: the seats' reports arrive in it.
+
+After you merge a pull request or label a chore or a bug `ready`, the router notices at its
+next move (`tools/story.sh events`). When the whole rig is quiet, tell `desk-lead` "continue".
 
 **Start by name, not from the file.** `rig up rigs/aiakos-delivery/rig.yaml` on a stopped rig
 does not resume it: it creates a new rig with new seats and archives the old one. The new seats
