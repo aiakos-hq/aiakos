@@ -1,0 +1,1 @@
+{"kind":"Telemetry","attributes":{"claude.version":"2.1.284","session_name":"impl","exceeds_200k_tokens":"false"},"usage":{"context_used_percent":16,"context_window_tokens":200000,"context_used_tokens":32576,"cost_usd":0.034351,"model_id":"haiku"}}

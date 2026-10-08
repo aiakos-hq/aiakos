@@ -1,0 +1,1 @@
+{"session_id":"session-a","version":"2.1.284","session_name":"impl","exceeds_200k_tokens":false,"rate_limits":{"five_hour":{"used_percentage":43,"resets_at":1790684400},"seven_day":{"used_percentage":11,"resets_at":1790823600}}}
