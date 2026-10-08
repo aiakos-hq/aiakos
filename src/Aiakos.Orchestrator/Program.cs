@@ -2,6 +2,7 @@ using System.Globalization;
 
 using Aiakos.Data;
 using Aiakos.Orchestrator;
+using Aiakos.Orchestrator.Harnesses;
 using Aiakos.Orchestrator.Link;
 using Aiakos.Orchestrator.Seats;
 using Aiakos.ServiceDefaults;
@@ -25,6 +26,8 @@ builder.Services.AddSingleton<DatabaseMigrator>();
 builder.Services.AddHostedService<MigrationHostedService>();
 
 builder.AddAiakosServiceDefaults();
+
+builder.Services.AddClaudeCodeHarness();
 
 // ASP.NET Core instrumentation lives here, not in ServiceDefaults (R41). Health probes are not traced.
 builder.Services.AddOpenTelemetry()
