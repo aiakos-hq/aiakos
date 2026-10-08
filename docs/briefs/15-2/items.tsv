@@ -27,8 +27,11 @@ E8	output	once	R10,C3
 T1	test	once	C1,G3
 T2	test	once	R2,R3,G2
 T3	test	once	R4
-T4	test	once	C2,R5,G4
+T4	test	once	C1,C2,R5,G4
 T5	test	once	R1,R6,R7,G1
 T6	test	once	R8
 T7	test	once	R9,G2,G4
 T8	test	once	C3,R10
+R11	rule	once	-
+E9	output	once	R11
+T9	test	once	C1,R11
