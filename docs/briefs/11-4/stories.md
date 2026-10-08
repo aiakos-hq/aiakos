@@ -36,7 +36,7 @@ depends: S2, S3
 owns: R9, R12
 outputs: E9, E12
 tests: T5
-notes: Implement internal helpers for request/registry validation and the not-running cleanup path; public StopAsync is completed in S6. No temporary public Alive behavior or missing live-path stub. Test helpers directly using the existing test friend assembly. R12 is a reusable postcondition; S6 invokes it only after successful live verification. Never recursively acquire ObserveAsync.
+notes: Deliver ValidateRequest, ObserveUnderLeaseAsync and CleanupUnderLeaseAsync with the exact signatures and caller-held lease contract in Public surface; public StopAsync is completed in S6. No temporary public Alive behavior or missing live-path stub. Test helpers directly using the existing test friend assembly. R12 is a reusable postcondition; S6 invokes it only after successful live verification. Never recursively acquire ObserveAsync.
 
 ## S6: Live process-tree termination and partial reports
 goal: Public StopAsync uses the merged validation/cleanup helpers and terminates tracked live identities with verified leftovers.
@@ -44,7 +44,7 @@ depends: S1, S2, S3, S5
 owns: R10, R11
 outputs: E10, E11
 tests: T8
-notes: Reuse S5 for validation, initial NotRunning and final cleanup; this story owns graceful waits, identity tracking, signal rounds and the partial-report boundary. Grace polling includes snapshots before status. No cleanup on a failed live verification.
+notes: Reuse S5 for validation, initial NotRunning and final cleanup; this story owns graceful waits, identity tracking, signal rounds and the partial-report boundary. Grace polling includes snapshots before status. No cleanup on a failed live verification. R10 owns lifecycle lease acquisition/disposal and T8 proves release on every return/throw.
 
 ## S7: Start-stop lifecycle integration
 goal: The actual starter shares lifecycle exclusion and registers committed handles while preserving old callers.

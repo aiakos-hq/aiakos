@@ -12,8 +12,8 @@ Reviewed at commit 4ee8dd8. Stories: 8. Check: ok.
 - [x] S4 (context-gap): R7 "TickAsync never overlaps another tick" does not say what a second concurrent call does (waits and then runs, or returns without polling). Fix: say which in R7.
 - [x] S5 (judgment-gap): the story is the whole stop state machine (R9–R12: validation, three grace paths, the partial-report boundary, leftovers, dead cleanup with reverify) and a T5 of about 25 cases; that is more than one run of a Sonnet-level implementer, and it splits. Fix: split into the not-running path (R9, R12, E9, E12, their part of T5) and the live path (R10, R11, E10, E11, the rest of T5) that depends on it.
 - [x] S6 (judgment-gap): the story joins the starter change C1/T6 with the whole real-tmux proof T7 (five scenarios, AC7/8/10/16), where defects of the merged S1–S5 first show, and it has one retry. Fix: split T7 into a story of its own after the C1 story, or, if a story may not own only a test item, move the watcher and socket scenarios of T7 that need no starter lock to it with the rule they prove.
-- [ ] S5 (context-gap): round 2. The story owns E9/E12/T5 but delivers only "internal helpers" with no name or signature, and public StopAsync arrives in S6, so the acceptance tests (written first, from the story text alone) have no member to call; R9 also says "acquire the lifecycle name lease" while T5 says the helper is "called under an existing lifecycle lease" and still asserts "name-lock release on every exit". Fix: spell the internal member(s) S5 delivers in "Public surface" (exact name, parameters, return type, and whether the caller or the helper holds the lease), and move the lease acquisition of R9 and the lock-release case of T5 to whichever story owns it.
-- [ ] S2 (context-gap): round 2. T2 tests GetServerAsync ("exact #{pid} command"), but its argv (`display-message,-p,"#{pid}"`), the match of that positive PID in a same-user snapshot and the null result are stated only in R8, which S4 owns and `story.sh show 11-4 2` does not print. Fix: move that sentence into a rule S2 owns (R4 or a new rule), say what a failed or unparsable invocation returns, and leave in R8 only when the watcher calls it.
+- [x] S5 (context-gap): round 2. The story owns E9/E12/T5 but delivers only "internal helpers" with no name or signature, and public StopAsync arrives in S6, so the acceptance tests (written first, from the story text alone) have no member to call; R9 also says "acquire the lifecycle name lease" while T5 says the helper is "called under an existing lifecycle lease" and still asserts "name-lock release on every exit". Fix: spell the internal member(s) S5 delivers in "Public surface" (exact name, parameters, return type, and whether the caller or the helper holds the lease), and move the lease acquisition of R9 and the lock-release case of T5 to whichever story owns it.
+- [x] S2 (context-gap): round 2. T2 tests GetServerAsync ("exact #{pid} command"), but its argv (`display-message,-p,"#{pid}"`), the match of that positive PID in a same-user snapshot and the null result are stated only in R8, which S4 owns and `story.sh show 11-4 2` does not print. Fix: move that sentence into a rule S2 owns (R4 or a new rule), say what a failed or unparsable invocation returns, and leave in R8 only when the watcher calls it.
 
 ## For the maintainer
 
@@ -43,3 +43,21 @@ Reviewed at commit 4ee8dd8. Stories: 8. Check: ok.
 
 Verification: story.sh split-done and check pass (8 stories, 38 items); git diff --check clean.
 No build, unit test, real tmux run, or acceptance trial read. Architect must re-review; C2 is not an approved spec change.
+
+
+## Author resolution, round 2
+
+- S5's Public surface now names ValidateRequest, ObserveUnderLeaseAsync and CleanupUnderLeaseAsync
+  with exact parameters/return types and behavior. ValidateRequest takes no lease and does no IO;
+  both UnderLease helpers require, retain and never reacquire the caller-held lease. S5's T5
+  calls them directly through the existing friend assembly. R10 (S6) now owns public StopAsync's
+  lease acquisition/disposal; the release-on-every-exit case stays in S6's T8.
+- R4 (S2) owns GetServerAsync's exact argv, positive PID and same-user snapshot match, null cases,
+  fixed propagated errors and cancellation. R8 keeps watcher scheduling and remembered identity.
+  T2 explicitly covers the R4 cases, visible in S2's generated story.
+- C2 and its maintainer proposal are unchanged. The architect must move Reviewed at commit after
+  reading this resolution; this author has not approved the review or the spec narrowing.
+
+Verification: story.sh check passes (8 stories, 38 items); generated S2/S5/S6 story text
+contains the moved rules and named helpers; git diff --check is clean.
+No build, unit test, real tmux run, or acceptance trial read.

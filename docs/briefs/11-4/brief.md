@@ -115,9 +115,25 @@ public sealed class TmuxSessionStopper
     public TmuxSessionStopper(TmuxClient client, TmuxPaneObserver observer,
         IProcessSnapshot processes, IProcessSignals signals, ISessionRegistry registry,
         SessionLifecycle lifecycle, TimeProvider? timeProvider = null);
+    // S5 delivers the constructor and these internal members; S6 adds public StopAsync.
+    internal void ValidateRequest(SessionHandle session, StopRequest request);
+    internal Task<PaneStatus> ObserveUnderLeaseAsync(SessionHandle session, CancellationToken ct);
+    internal Task<StopReport> CleanupUnderLeaseAsync(SessionHandle session, StopOutcome outcome,
+        int childrenSignalled, CancellationToken ct);
     public Task<StopReport> StopAsync(SessionHandle session, StopRequest request, CancellationToken ct);
 }
 ```
+
+S5's ValidateRequest performs R9's handle/request validation without IO and without taking a
+lease. ObserveUnderLeaseAsync validates the registry/launch and returns the fresh status under
+R9, throwing its fixed errors for a mismatch or Unknown. CleanupUnderLeaseAsync implements R12,
+including its fresh observation and registry exit fallback; its caller has already verified no
+leftovers and no earlier error. For initial Exited/Missing call it with NotRunning and zero
+children; for a verified live stop call it with the established Stopped/Killed and count.
+Both UnderLease members require the caller to hold lifecycle.EnterAsync for this session name;
+neither acquires nor disposes that lease. Acceptance/unit tests call these internal members via
+the existing Aiakos.Node.Tests friend assembly. S5 does not deliver public StopAsync or an Alive
+stub. S6 delivers StopAsync and owns acquisition/disposal of its lease on every return/throw.
 
 S7 adds an optional trailing `SessionLifecycle? lifecycle = null` to the existing
 TmuxSessionStarter constructor. Old callers compile with unchanged behavior. It is only a
@@ -201,6 +217,12 @@ R4. Poll uses one list-panes,-a,-F invocation with format
     pane ID/PID and launch, and verify live start time via one snapshot. Unmatched -> Missing.
     Unrelated rows are not registered or mutated. Parse status/signal as R3; errors produce no
     partial events. Empty supplied handles still permit a listing. No listing classification here.
+    GetServerAsync uses exactly display-message,-p,"#{pid}" through this same TmuxClient.
+    Trim a single final LF/CRLF only; parse one positive integer PID and match it in a fresh
+    same-user snapshot, returning that ProcessInfo (including start time), otherwise null.
+    Failed invocation (including timeout/no-server), malformed/nonpositive PID, or no snapshot
+    match returns null; snapshot failure and unavailable client propagate their existing fixed
+    errors, and caller cancellation propagates. No argv/socket-name discovery or mutation.
 
 R5. SessionLifecycle retains registered handles keyed by session name with ordinal equality.
     Register is idempotent for identical handles; a new launch replaces the previous handle.
@@ -242,9 +264,7 @@ R7. Watcher TickAsync serializes calls with a cancellation-aware gate; a concurr
     promptly, not degradation. Watcher is an explicitly run component, not NodeProgram registration.
     Events use TimeProvider UTC. Kept dead panes and repeated ticks publish only once through R5/R6.
 
-R8. On a successful reachable poll with registered live handles, remember the private server's
-    identity by display-message,-p,"#{pid}" through this same TmuxClient and matching that positive
-    PID in a same-user snapshot (GetServerAsync returns ProcessInfo or null). Run GetServerAsync
+R8. Remember the private server identity returned by R4's GetServerAsync. Run GetServerAsync
     exactly once on every successful reachable poll containing at least one Alive observation,
     before observing any terminal rows; otherwise do not call it. No discovery by
     argv pattern. This binds the remembered PID/start time to the private socket that answered.
@@ -263,16 +283,24 @@ R8. On a successful reachable poll with registered live handles, remember the pr
     failures emit no events and retry next tick. Record no server identity on disk in this slice.
 
 R9. Stop validates handle as R3, session name using existing TmuxNames address rules, and Grace/
-    ChildGrace as G2; invalid duration/signal/callback-null -> InvalidArgument,"Invalid stop request.",false
-    before pane mutation. Default Graceful is Signal(15), ChildGrace is 2 seconds. Acquire the
-    lifecycle name lease and recheck status/identity before any action. Exited/Missing -> NotRunning,
+    ChildGrace as G2 through ValidateRequest; invalid duration/signal/callback-null ->
+    InvalidArgument,"Invalid stop request.",false
+    before pane mutation. Default Graceful is Signal(15), ChildGrace is 2 seconds. Recheck
+    status/identity through ObserveUnderLeaseAsync under the caller-held lifecycle name lease
+    before any action. Exited/Missing -> NotRunning,
     recorded exit status from matching registry if absent in observation, ChildrenSignalled=0,
     Leftovers=[], Error=null. Exited still follows R12 dead cleanup/publication; Missing unregisters
     and deletes only a matching entry, without kill-session. Unknown throws TmuxTimeout or
     TmuxFailed with R3 safe reason before any change. A stale handle/registry mismatch throws
     NotFound and must not unregister/delete a different launch. Missing with no entry is idempotent.
 
-R10. For Alive, snapshot/Expand before graceful action; require the matching root or throw
+R10. Public StopAsync calls ValidateRequest before acquiring a lease, then acquires
+    lifecycle.EnterAsync(session.SessionName,ct) and disposes it on every return or throw.
+    Under that lease call ObserveUnderLeaseAsync; for Exited/Missing return
+    CleanupUnderLeaseAsync(session,NotRunning,0,ct). Otherwise execute the live path below;
+    after verified completion invoke CleanupUnderLeaseAsync with the established outcome/count.
+    All shared helper calls and live actions remain inside this one lease; no recursive acquisition.
+    For Alive, snapshot/Expand before graceful action; require the matching root or throw
     NotFound before signals. Default/explicit signal is sent only to root via IProcessSignals;
     Custom invokes the callback once with handle/ct and never sends automatic graceful input.
     Wait for Exited/Missing by polling status every min(100 ms, remaining Grace), starting with an
@@ -302,7 +330,9 @@ R11. After final kill, check snapshots every <=100 ms for up to 1 second; a trac
     survivors (last safe snapshot, no guessed death). Callback invocation crosses the boundary
     even if it throws. No automatic retry or completion after cancellation is required.
 
-R12. Final cleanup occurs only if there are no leftovers, no earlier error and a fresh observation
+R12. CleanupUnderLeaseAsync implements final cleanup without acquiring or releasing the caller's
+    lifecycle name lease. Final cleanup occurs only if there are no leftovers, no earlier error
+    and a fresh observation
     is Exited or Missing; Unknown/Alive returns Error=TmuxFailed,"Stop did not complete.",false
     and keeps evidence. Exited: persist/publish exit through the R5 rules while already holding
     the lease (use an internal non-locking helper, never recursively acquire it). Reverify exact
@@ -353,7 +383,8 @@ Unit tests run without tmux on all OS; Linux syscall tests and real tests dynami
     R2 sends to exact identity and never to reused/absent PID. No fixtures resembling tokens.
 - T2. Permanent observer goldens cover every E3/E4 case, malformed/truncated UTF-8/fields/numbers,
     stale session/launch/PID/start time, no-server versus timeout and parser failure, empty exit
-    fields and signal 0/9. GetServer verifies recorded private server via exact #{pid} command.
+    fields and signal 0/9. GetServer asserts R4's exact argv and positive-PID snapshot match,
+    null for failed/unparsable/nonpositive/unmatched results, and fixed propagated errors/cancellation.
 - T3. Permanent lifecycle tests cover matching persistence before enqueue/after enqueue, retry of
     Reported=false, persisted true, read-only/no-entry, writable/no-entry NotFound without event, registry mismatch, starter callback dedupe,
     reader ownership/cancellation/FIFO, disposed publication and per-name locking. State explicitly
@@ -365,14 +396,17 @@ Unit tests run without tmux on all OS; Linux syscall tests and real tests dynami
     unremembered/no-root permits vanish, exact GetServer call schedule, no input/kill-server.
 - T5. Permanent not-running stopper helper tests cover shared request validation before mutation,
     read-only handles, stale handles, dead cleanup order/reverify, matching entry deletion only,
-    unknown status, nullable recorded exit fields, name-lock release on every exit and failures
-    before/after removal. Use an internal not-running cleanup helper called under an existing
-    lifecycle lease, with no recursive acquisition; S6 builds the public StopAsync around it.
+    unknown status, nullable recorded exit fields and failures before/after removal.
+    Call ValidateRequest, ObserveUnderLeaseAsync and CleanupUnderLeaseAsync by their exact
+    signatures above. Tests acquire/dispose the lifecycle lease themselves; prove both UnderLease
+    helpers return/throw without recursive acquisition or releasing that caller-held lease.
+    S6 builds public StopAsync around these helpers and tests lock release in T8.
 - T8. Permanent live stopper tests cover graceful success/ignored TERM/custom callback, zero grace,
     ChildGrace default/zero, root initially alone then forks on a grace poll and exits leaving the
     tracked child, reparent/setsid, reused PIDs, leftovers, signal failures, safe partial reports,
     cancellation before/after boundary, no cleanup on unknown/failed verification, outcome/counts
-    and lease release. S6 reuses S5 validation and cleanup without changing their tested behavior.
+    and name-lock release on every return/throw (including initial NotRunning and failures).
+    S6 reuses S5 validation and cleanup without changing their tested behavior.
 - T6. Permanent integrated start/stop tests use the actual starter only after prerequisites merge,
     shared lifecycle and blocking scripted runner. Start holds creation, stop waits, different seats
     proceed, input operations remain independent, cancelled waiter mutates nothing, constructor
