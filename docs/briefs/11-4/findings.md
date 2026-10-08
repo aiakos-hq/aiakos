@@ -1,6 +1,6 @@
 # Story review: slice 11-4
 
-Reviewed at commit 4ee8dd8. Stories: 8. Check: ok.
+Reviewed at commit 32f262b. Stories: 8. Check: ok.
 
 ## Findings
 
@@ -18,6 +18,7 @@ Reviewed at commit 4ee8dd8. Stories: 8. Check: ok.
 ## For the maintainer
 
 - C2 narrows spec 0004 R30 (a socket deleted before the watcher first runs is not recovered; an unremembered server with a live root stays degraded, with no SIGUSR1 and no vanish). The brief states it as a proposal. It is a change to a rule of a spec: merging this analysis approves it, and spec 0004 R30 then needs the amendment.
+  Still open after round 3 (with the maintainer through lead); it is not a finding for the author and does not hold the review.
 
 ## Not checked
 
@@ -30,6 +31,9 @@ Reviewed at commit 4ee8dd8. Stories: 8. Check: ok.
 - Round 2: the six other round-one findings were read against the changed R5, R7, R8, R10, E5, E7, E8, E10, T3, T4, T8 and the S5–S8 blocks only; the unchanged rules were not read again line by line.
 - Round 2: whether R7 logs the degraded Warning on every failed tick or once per episode, and whether a failed GetServerAsync marks the tick degraded, are left to "choose the simplest".
 - Round 2: the brief says the branch starts at 28902f7; the worktree also holds 05793c2 (11-3-2). Not checked whether that changes anything S1–S6 read.
+- Round 3: only the two round-two findings were read, against the changed Public surface, R4, R8, R9, R10, R12, T2, T5, T8, the S5 and S6 blocks and `story.sh show 11-4 2` and `5`; both are accepted. Nothing else was read again.
+- Round 3: what the watcher does with its remembered identity when GetServerAsync returns null or throws on a reachable poll is not stated in R8 and no expected output depends on it; left to "choose the simplest".
+- Round 3: R12's "internal non-locking helper" for publishing under the held lease is not a named member; whether S3's merged SessionLifecycle will offer one or S5 adds it was not checked.
 
 ## Author resolution, round 1
 
