@@ -1,6 +1,6 @@
 # Story review: slice 11-3
 
-Reviewed at commit 9205dba. Stories: 5. Check: ok.
+Reviewed at commit e8630a3. Stories: 5. Check: ok.
 
 ## Findings
 
@@ -54,3 +54,9 @@ One finding is open; it was missed in round 1 and is not caused by the round-1 c
   callers; T3 requires permanent regression coverage. Item IDs and story ownership are unchanged.
 - The source contract AStaleHandleIsNotFound and spec 0004 delivery sequence agree with this
   correction. No disagreement remains; no implementation or acceptance tests were run.
+
+## Architect recheck, round 3
+
+Read at e8630a3 (the diff against ec29898: R8, R9, R10, E2, E8, E9, E10, T3). The stale-handle
+finding is resolved: delivery verifies once after gate admission and before the load, and throws
+NotFound with no load. No findings are open. Items and story ownership did not change.
