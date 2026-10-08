@@ -1,0 +1,17 @@
+# id	type	scope	needs
+G1	rule	all	-
+G2	rule	all	-
+C1	change	once	-
+R1	rule	once	-
+R2	rule	once	-
+R3	rule	once	-
+R4	rule	once	-
+R5	rule	once	-
+E1	output	once	R1
+E2	output	once	R2
+E3	output	once	R3
+E4	output	once	R4
+E5	output	once	R5
+T1	test	once	R1,G1,G2
+T2	test	once	R2,R3,G1,G2
+T3	test	once	R4,R5,C1,G1,G2

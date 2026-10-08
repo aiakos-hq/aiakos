@@ -294,9 +294,10 @@ R22–R28 are recorded in [ADR 0035](../adr/0035-local-api.md) (the local API an
 - **R39** Rejections print the next step: `RESUME_LOST` → `--fresh --seat <seat>`;
   `SEAT_STATE_UNKNOWN` → `aiakos capture <seat>` to look, then `aiakos down <seat>` and `up` again
   (this is also the path after a reboot); `NODE_NOT_CONNECTED` → `aiakos instance status`.
-- **R40** When a seat resumes (decision `resume` or `resume-unverified`) and its projection hash
-  differs from the one its conversation started with, `up` prints: "guidance changes apply to fresh
-  sessions or after `/compact`" (spec 0005 D11), until spec 0005 RK5 shows otherwise.
+- **R40** When a seat resumes (decision `resume` or `resume-unverified`), `up` always prints:
+  "guidance changes apply to fresh sessions or after `/compact`" (spec 0005 D11), until spec 0005
+  RK5 shows otherwise. This conservative note also appears when guidance is unchanged: the launch
+  read contract does not expose the conversation-start projection hash.
 
 ### `down`
 
@@ -336,7 +337,8 @@ R22–R28 are recorded in [ADR 0035](../adr/0035-local-api.md) (the local API an
 - **R48** `aiakos ps [--rig <rig>] [--wide] [--watch] [--json]` lists seats from
   `SeatQueries.ListAsync`; `aiakos ps <seat>` shows the detail of `GetDetailAsync` (axes with
   reasons and `since`, current launch, last transitions, open findings, last deliveries).
-  `--watch` refreshes every 2 s until Ctrl+C.
+  `--watch` refreshes every 2 s until Ctrl+C. Combining `--json` with `--watch` is rejected locally
+  with exit 2 and stderr `JSON watch is not supported.\n`, before instance discovery.
 - **R49** Rendering: `unknown` is always printed with its reason, `unknown (node-link-lost)`;
   human seats show `human` in SESSION; a drifted seat (R36) has `*` after its address; a context
   percentage that is `null` shows `?`, never `0`; findings show count and worst severity. A header

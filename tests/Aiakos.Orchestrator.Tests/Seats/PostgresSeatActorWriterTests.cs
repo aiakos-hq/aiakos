@@ -18,9 +18,277 @@ public sealed class PostgresSeatActorWriterTests(PostgresContainerFixture postgr
     private static readonly Guid Epoch = Guid.Parse("33333333-3333-4333-8333-333333333333");
     private static readonly Guid Launch = Guid.Parse("44444444-4444-4444-8444-444444444444");
     private static readonly Guid Session = Guid.Parse("55555555-5555-4555-8555-555555555555");
+    private static readonly Guid StartCommand = Guid.Parse("77777777-7777-4777-8777-777777777777");
+    private static readonly Guid DeliverCommand = Guid.Parse("88888888-8888-4888-8888-888888888888");
+    private static readonly Guid StopCommand = Guid.Parse("99999999-9999-4999-8999-999999999999");
+    private static readonly Guid CaptureCommand = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     private static readonly DateTimeOffset At = DateTimeOffset.Parse("2026-10-06T00:00:00Z",
         System.Globalization.CultureInfo.InvariantCulture);
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task CommandResultsUpdateExistingCommandAndMatchingLaunchMetadata()
+    {
+        await using var db = await SeedAsync();
+        await InsertCommandAsync(db, StartCommand, "start");
+        await InsertCommandAsync(db, DeliverCommand, "deliver");
+        await InsertCommandAsync(db, StopCommand, "stop");
+        await InsertCommandAsync(db, CaptureCommand, "capture");
+        var before = Snapshot() with { Commands = new Dictionary<Guid, SeatStoredCommand>
+        {
+            [StartCommand] = new(StartCommand, Launch, SeatCommandKind.Start, "sent", null),
+            [DeliverCommand] = new(DeliverCommand, Launch, SeatCommandKind.Deliver, "sent", null),
+            [StopCommand] = new(StopCommand, Launch, SeatCommandKind.Stop, "sent", null),
+            [CaptureCommand] = new(CaptureCommand, Launch, SeatCommandKind.Capture, "sent", null)
+        }};
+        var start = CommandInput(before, 1, new SeatEvent
+        {
+            Seq = 1, LaunchId = Launch.ToString(), CommandResult = new CommandResult
+            {
+                CommandId = StartCommand.ToString(), Status = CommandStatus.Completed,
+                Launch = new LaunchResult
+                {
+                    Outcome = LaunchOutcome.Failed, Reason = "launch-failure", ObservedSessionId = "observed",
+                    ExitCode = 0, Evidence = new PaneCapture { Text = "captured evidence" }
+                }
+            }
+        });
+        var deliver = CommandInput(before, 2, new SeatEvent
+        {
+            Seq = 2, LaunchId = Launch.ToString(), CommandResult = new CommandResult
+            {
+                CommandId = DeliverCommand.ToString(), Status = CommandStatus.Completed,
+                Delivery = new DeliveryResult { Outcome = DeliveryOutcome.SubmittedUnconfirmed, TurnId = "" }
+            }
+        });
+        var stop = CommandInput(before, 3, new SeatEvent
+        {
+            Seq = 3, LaunchId = Launch.ToString(), CommandResult = new CommandResult
+            {
+                CommandId = StopCommand.ToString(), Status = CommandStatus.Completed,
+                Stop = new StopResult { Outcome = StopOutcome.Killed }
+            }
+        });
+        var capture = CommandInput(before, 4, new SeatEvent
+        {
+            Seq = 4, LaunchId = Launch.ToString(), CommandResult = new CommandResult
+            {
+                CommandId = CaptureCommand.ToString(), Status = CommandStatus.Completed,
+                Capture = new PaneCapture { Text = "safe capture", PaneDead = false }
+            }
+        });
+
+        Assert.Equal(new SeatStoreReceipt(8, Session), await new PostgresSeatActorWriter(db)
+            .CommitAsync(before, [start, deliver, stop, capture], Ct));
+
+        await using (var command = db.CreateCommand("""
+            SELECT command_id,status,outcome,error_reason,turn_id,result,completed_at,launch_id
+            FROM aiakos.seat_command WHERE tenant_id=@tenant AND seat_id=@seat ORDER BY command_id
+            """))
+        {
+            command.Parameters.AddWithValue("tenant", Tenant);
+            command.Parameters.AddWithValue("seat", Seat);
+            await using var rows = await command.ExecuteReaderAsync(Ct);
+            var values = new Dictionary<Guid, (string Status, string? Outcome, string? Reason, string? TurnId, string Result, DateTimeOffset? At) >();
+            while (await rows.ReadAsync(Ct))
+            {
+                var id = rows.GetGuid(0);
+                Assert.Equal("completed", rows.GetString(1));
+                values.Add(id, (rows.GetString(1), rows.IsDBNull(2) ? null : rows.GetString(2),
+                    rows.IsDBNull(3) ? null : rows.GetString(3), rows.IsDBNull(4) ? null : rows.GetString(4),
+                    rows.GetString(5), rows.IsDBNull(6) ? null : rows.GetFieldValue<DateTimeOffset>(6)));
+            }
+            Assert.Equal(4, values.Count);
+            Assert.Equal(("failed", null, null), (values[StartCommand].Outcome, values[StartCommand].Reason,
+                values[StartCommand].TurnId));
+            Assert.Equal(("submitted-unconfirmed", null, null), (values[DeliverCommand].Outcome,
+                values[DeliverCommand].Reason, values[DeliverCommand].TurnId));
+            Assert.Equal(("killed", null, null), (values[StopCommand].Outcome, values[StopCommand].Reason,
+                values[StopCommand].TurnId));
+            Assert.Null(values[CaptureCommand].Outcome);
+            Assert.Equal(At.AddSeconds(1), values[StartCommand].At);
+            Assert.Equal(At.AddSeconds(2), values[DeliverCommand].At);
+            Assert.Equal(At.AddSeconds(3), values[StopCommand].At);
+            Assert.Equal(At.AddSeconds(4), values[CaptureCommand].At);
+            using var launchJson = System.Text.Json.JsonDocument.Parse(values[StartCommand].Result);
+            Assert.Equal("launch-failure", launchJson.RootElement.GetProperty("launch").GetProperty("reason").GetString());
+            using var deliveryJson = System.Text.Json.JsonDocument.Parse(values[DeliverCommand].Result);
+            Assert.Equal("DELIVERY_OUTCOME_SUBMITTED_UNCONFIRMED", deliveryJson.RootElement.GetProperty("delivery").GetProperty("outcome").GetString());
+            using var captureJson = System.Text.Json.JsonDocument.Parse(values[CaptureCommand].Result);
+            Assert.Equal("safe capture", captureJson.RootElement.GetProperty("capture").GetProperty("text").GetString());
+        }
+
+        Assert.Equal("failed", await ScalarAsync(db, "SELECT outcome FROM aiakos.seat_launch WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND launch_id='44444444-4444-4444-8444-444444444444'"));
+        Assert.Equal("launch-failure", await ScalarAsync(db, "SELECT outcome_reason FROM aiakos.seat_launch WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND launch_id='44444444-4444-4444-8444-444444444444'"));
+        Assert.Equal("observed", await ScalarAsync(db, "SELECT observed_session_id FROM aiakos.seat_launch WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND launch_id='44444444-4444-4444-8444-444444444444'"));
+        Assert.Equal(0, await ScalarAsync(db, "SELECT exit_code FROM aiakos.seat_launch WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND launch_id='44444444-4444-4444-8444-444444444444'"));
+        Assert.Equal("captured evidence", await ScalarAsync(db, "SELECT evidence FROM aiakos.seat_launch WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND launch_id='44444444-4444-4444-8444-444444444444'"));
+        Assert.Equal(1L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_finding WHERE kind='delivery-unconfirmed' AND status='open'"));
+        Assert.Equal(new byte[] { 0 }, Assert.IsType<byte[]>(await ScalarAsync(db,
+            "SELECT seat_token_hash FROM aiakos.seat_launch WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND launch_id='44444444-4444-4444-8444-444444444444'")));
+    }
+
+    [Fact]
+    public async Task NoncompletedDeliveryAndStopOutcomesAndProcessExitUpdateOnlyExistingRows()
+    {
+        await using var db = await SeedAsync();
+        await InsertCommandAsync(db, DeliverCommand, "deliver");
+        await InsertCommandAsync(db, StopCommand, "stop");
+        var before = Snapshot() with { Commands = new Dictionary<Guid, SeatStoredCommand>
+        {
+            [DeliverCommand] = new(DeliverCommand, Launch, SeatCommandKind.Deliver, "sent", null),
+            [StopCommand] = new(StopCommand, Launch, SeatCommandKind.Stop, "sent", null)
+        }};
+        var failedDelivery = CommandInput(before, 1, new SeatEvent
+        {
+            Seq = 1, LaunchId = Launch.ToString(), CommandResult = new CommandResult
+            {
+                CommandId = DeliverCommand.ToString(), Status = CommandStatus.TimedOut,
+                Error = new Aiakos.Contracts.Node.V1.Error { Reason = "DELIVERY_TIMEOUT" }
+            }
+        });
+        var stopped = CommandInput(before, 2, new SeatEvent
+        {
+            Seq = 2, LaunchId = Launch.ToString(), CommandResult = new CommandResult
+            {
+                CommandId = StopCommand.ToString(), Status = CommandStatus.Completed,
+                Stop = new StopResult { Outcome = StopOutcome.Stopped }
+            }
+        });
+
+        await new PostgresSeatActorWriter(db).CommitAsync(before, [failedDelivery, stopped], Ct);
+
+        Assert.Equal("failed", await ScalarAsync(db, "SELECT outcome FROM aiakos.seat_command WHERE command_id='88888888-8888-4888-8888-888888888888'"));
+        Assert.Equal("DELIVERY_TIMEOUT", await ScalarAsync(db, "SELECT error_reason FROM aiakos.seat_command WHERE command_id='88888888-8888-4888-8888-888888888888'"));
+        Assert.Equal("stopped", await ScalarAsync(db, "SELECT outcome FROM aiakos.seat_command WHERE command_id='99999999-9999-4999-8999-999999999999'"));
+        Assert.Equal("stopped", await ScalarAsync(db, "SELECT end_reason FROM aiakos.seat_launch WHERE launch_id='44444444-4444-4444-8444-444444444444'"));
+        Assert.Equal(At.UtcDateTime.AddSeconds(2), Assert.IsType<DateTime>(await ScalarAsync(db,
+            "SELECT ended_at FROM aiakos.seat_launch WHERE launch_id='44444444-4444-4444-8444-444444444444'")));
+
+        await using var exitedDb = await SeedAsync();
+        var exitBefore = Snapshot();
+        var exited = CommandInput(exitBefore, 1, new SeatEvent
+        {
+            Seq = 1, LaunchId = Launch.ToString(), ProcessExited = new ProcessExited { ExitCode = 0 }
+        });
+        await new PostgresSeatActorWriter(exitedDb).CommitAsync(exitBefore, [exited], Ct);
+        Assert.Equal("exited", await ScalarAsync(exitedDb, "SELECT end_reason FROM aiakos.seat_launch WHERE launch_id='44444444-4444-4444-8444-444444444444'"));
+        Assert.Equal(0, await ScalarAsync(exitedDb, "SELECT exit_code FROM aiakos.seat_launch WHERE launch_id='44444444-4444-4444-8444-444444444444'"));
+        Assert.True(Convert.IsDBNull(await ScalarAsync(exitedDb, "SELECT exit_signal FROM aiakos.seat_launch WHERE launch_id='44444444-4444-4444-8444-444444444444'")));
+    }
+
+    [Fact]
+    public async Task OpaqueResultsLeaveCommandAndLaunchMetadataAndFindingsUntouched()
+    {
+        await using var db = await SeedAsync();
+        await InsertCommandAsync(db, StartCommand, "start");
+        await InsertCommandAsync(db, CaptureCommand, "capture");
+        var before = Snapshot() with { Commands = new Dictionary<Guid, SeatStoredCommand>
+        {
+            [StartCommand] = new(StartCommand, Launch, SeatCommandKind.Start, "sent", null),
+            [CaptureCommand] = new(CaptureCommand, Launch, SeatCommandKind.Capture, "sent", null)
+        }};
+        var nul = CommandInput(before, 1, new SeatEvent
+        {
+            Seq = 1, LaunchId = Launch.ToString(), CommandResult = new CommandResult
+            {
+                CommandId = StartCommand.ToString(), Status = CommandStatus.Completed,
+                Launch = new LaunchResult { Outcome = LaunchOutcome.Failed, Reason = "bad\0body" }
+            }
+        });
+        var timestamp = CommandInput(before, 2, new SeatEvent
+        {
+            Seq = 2, LaunchId = Launch.ToString(), CommandResult = new CommandResult
+            {
+                CommandId = CaptureCommand.ToString(), Status = CommandStatus.Completed,
+                Capture = new PaneCapture { Text = "bad timestamp", CapturedAt = new Google.Protobuf.WellKnownTypes.Timestamp { Seconds = 253402300800 } }
+            }
+        });
+        nul = nul with { Step = nul.Step with { Findings = [new(SeatVocabulary.FindingObservationGap, true)] } };
+        timestamp = timestamp with { Step = timestamp.Step with { Findings = [new(SeatVocabulary.FindingObservationGap, true)] } };
+
+        await new PostgresSeatActorWriter(db).CommitAsync(before, [nul, timestamp], Ct);
+
+        Assert.Equal(2L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_event WHERE body_type='unknown' AND raw IS NOT NULL"));
+        Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_finding WHERE kind='observation-gap'"));
+        Assert.Equal("sent", await ScalarAsync(db, "SELECT status FROM aiakos.seat_command WHERE command_id='77777777-7777-4777-8777-777777777777'"));
+        Assert.Equal("sent", await ScalarAsync(db, "SELECT status FROM aiakos.seat_command WHERE command_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'"));
+        Assert.True(Convert.IsDBNull(await ScalarAsync(db, "SELECT outcome FROM aiakos.seat_launch WHERE launch_id='44444444-4444-4444-8444-444444444444'")));
+        Assert.True(Convert.IsDBNull(await ScalarAsync(db, "SELECT outcome FROM aiakos.seat_command WHERE command_id='77777777-7777-4777-8777-777777777777'")));
+        Assert.True(Convert.IsDBNull(await ScalarAsync(db, "SELECT result FROM aiakos.seat_command WHERE command_id='77777777-7777-4777-8777-777777777777'")));
+    }
+
+    [Fact]
+    public async Task ForeignMissingAndDuplicateCommandResultsNeverMutateOrManufactureRows()
+    {
+        await using var db = await SeedAsync();
+        await InsertCommandAsync(db, StartCommand, "start");
+        var foreignId = Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+        await InsertForeignCommandAsync(db, foreignId);
+        var before = Snapshot() with { Commands = new Dictionary<Guid, SeatStoredCommand>
+        {
+            [foreignId] = new(foreignId, Launch, SeatCommandKind.Start, "sent", null)
+        }};
+        static SeatEvent ResultEvent(long seq, Guid commandId) => new()
+        {
+            Seq = (ulong)seq, LaunchId = Launch.ToString(), CommandResult = new CommandResult
+            {
+                CommandId = commandId.ToString(), Status = CommandStatus.Completed,
+                Launch = new LaunchResult { Outcome = LaunchOutcome.Failed, Reason = "do not apply" }
+            }
+        };
+        var foreign = CommandInput(before, 1, ResultEvent(1, foreignId));
+        var missing = CommandInput(before, 2, ResultEvent(2,
+            Guid.Parse("cccccccc-cccc-4ccc-8ccc-cccccccccccc")));
+        var duplicate = CommandInput(before, 3, ResultEvent(3, StartCommand)) with
+        {
+            Step = CommandInput(before, 3, ResultEvent(3, StartCommand)).Step with
+                { Disposition = EventDisposition.Duplicate }
+        };
+
+        await new PostgresSeatActorWriter(db).CommitAsync(before, [foreign, missing, duplicate], Ct);
+
+        Assert.Equal(2L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_event"));
+        Assert.Equal(2L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_command"));
+        Assert.Equal("sent", await ScalarAsync(db, "SELECT status FROM aiakos.seat_command WHERE command_id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'"));
+        Assert.True(Convert.IsDBNull(await ScalarAsync(db, "SELECT result FROM aiakos.seat_command WHERE command_id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'")));
+        Assert.Equal("sent", await ScalarAsync(db, "SELECT status FROM aiakos.seat_command WHERE command_id='77777777-7777-4777-8777-777777777777'"));
+        Assert.True(Convert.IsDBNull(await ScalarAsync(db, "SELECT outcome FROM aiakos.seat_launch WHERE launch_id='44444444-4444-4444-8444-444444444444'")));
+    }
+
+    [Fact]
+    public async Task ResultChangesRollBackWithLaterInvalidState()
+    {
+        await using var db = await SeedAsync();
+        await InsertCommandAsync(db, StartCommand, "start");
+        var before = Snapshot() with { Commands = new Dictionary<Guid, SeatStoredCommand>
+        {
+            [StartCommand] = new(StartCommand, Launch, SeatCommandKind.Start, "sent", null)
+        }};
+        var result = CommandInput(before, 1, new SeatEvent
+        {
+            Seq = 1, LaunchId = Launch.ToString(), CommandResult = new CommandResult
+            {
+                CommandId = StartCommand.ToString(), Status = CommandStatus.Completed,
+                Launch = new LaunchResult { Outcome = LaunchOutcome.Ready, ObservedSessionId = "ready" }
+            }
+        });
+        var invalid = CommandInput(before, 2, new SeatEvent { Seq = 2 }) with
+        {
+            Step = CommandInput(before, 2, new SeatEvent { Seq = 2 }).Step with
+            {
+                State = before.State with { Session = SessionValue.Unknown, SessionReason = null }
+            }
+        };
+
+        await Assert.ThrowsAsync<SeatStoreRejectedException>(() => new PostgresSeatActorWriter(db)
+            .CommitAsync(before, [result, invalid], Ct));
+
+        Assert.Equal("sent", await ScalarAsync(db, "SELECT status FROM aiakos.seat_command WHERE command_id='77777777-7777-4777-8777-777777777777'"));
+        Assert.True(Convert.IsDBNull(await ScalarAsync(db, "SELECT outcome FROM aiakos.seat_launch WHERE launch_id='44444444-4444-4444-8444-444444444444'")));
+        Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_event"));
+        Assert.Equal(7L, await ScalarAsync(db, "SELECT version FROM aiakos.seat_state"));
+    }
 
     [Fact]
     public async Task WriteAtomicLinksEachTransitionAndRollsBackInvalidFinalState()
@@ -244,15 +512,16 @@ public sealed class PostgresSeatActorWriterTests(PostgresContainerFixture postgr
             Event = new SeatEvent { Seq = 1, ProcessExited = new() { ExitCode = 0 } } };
         var surrogate = input with { Event = new SeatEvent { Seq = 1, Harness = new() { NativeName = "\ud800" } } };
         var nulState = input with { Step = input.Step with { State = input.Step.State with { PendingInputRequest = "a\0b" } } };
-        foreach (var rejected in new[] { result, surrogate, nulState })
+        Assert.Equal(new SeatStoreReceipt(8, Session), await writer.CommitAsync(before, [result], Ct));
+        foreach (var rejected in new[] { surrogate, nulState })
             await Assert.ThrowsAsync<SeatStoreRejectedException>(() => writer.CommitAsync(before, [rejected], Ct));
         await Assert.ThrowsAsync<SeatStoreRejectedException>(() => writer.RecordActorStoppedAsync(before.Key, At, Ct));
         Assert.Equal(new SeatStoreReceipt(7, Session), await writer.CommitAsync(before, [], Ct));
         using var canceled = new CancellationTokenSource();
         await canceled.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => writer.CommitAsync(before, [], canceled.Token));
-        Assert.Equal(7L, await ScalarAsync(db, "SELECT version FROM aiakos.seat_state"));
-        Assert.Equal(0L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_event"));
+        Assert.Equal(8L, await ScalarAsync(db, "SELECT version FROM aiakos.seat_state"));
+        Assert.Equal(1L, await ScalarAsync(db, "SELECT count(*) FROM aiakos.seat_event"));
     }
 
     [Fact]
@@ -676,6 +945,54 @@ public sealed class PostgresSeatActorWriterTests(PostgresContainerFixture postgr
         };
         return new(new(Tenant, Seat), "agent", "test", "node", false, 7, Session, state,
             new Dictionary<Guid, SeatStoredCommand>());
+    }
+
+    private static SeatAppliedInput CommandInput(SeatActorSnapshot before, long seq, SeatEvent value)
+    {
+        var input = new EventReceived(Epoch, seq, checked((long)value.SourceSeq),
+            string.IsNullOrEmpty(value.LaunchId) ? null : Guid.Parse(value.LaunchId), new UnknownBody());
+        var step = new SeatStep(before.State with { NextSeq = seq + 1 }, null, EventDisposition.Applied, [], [], []);
+        return new(input, step, At.AddSeconds(seq), value, null);
+    }
+
+    private static async Task InsertCommandAsync(NpgsqlDataSource db, Guid id, string kind)
+    {
+        await using var command = db.CreateCommand("""
+            INSERT INTO aiakos.seat_command
+                (tenant_id,command_id,seat_id,launch_id,kind,status,payload,requested_by)
+            VALUES (@tenant,@id,@seat,@launch,@kind,'sent','{}','operator')
+            """);
+        command.Parameters.AddWithValue("tenant", Tenant);
+        command.Parameters.AddWithValue("id", id);
+        command.Parameters.AddWithValue("seat", Seat);
+        command.Parameters.AddWithValue("launch", Launch);
+        command.Parameters.AddWithValue("kind", kind);
+        await command.ExecuteNonQueryAsync(Ct);
+    }
+
+    private static async Task InsertForeignCommandAsync(NpgsqlDataSource db, Guid id)
+    {
+        var otherSeat = Guid.Parse("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+        await using (var seat = db.CreateCommand("""
+            INSERT INTO aiakos.seat
+                (tenant_id,seat_id,rig_id,member,address,kind,harness,node_name,spec_hash,binding_hash)
+            VALUES (@tenant,@seat,@rig,'other','other@writer-rig','agent','test','node','s','b')
+            """))
+        {
+            seat.Parameters.AddWithValue("tenant", Tenant);
+            seat.Parameters.AddWithValue("seat", otherSeat);
+            seat.Parameters.AddWithValue("rig", Guid.Parse("66666666-6666-4666-8666-666666666666"));
+            await seat.ExecuteNonQueryAsync(Ct);
+        }
+        await using var command = db.CreateCommand("""
+            INSERT INTO aiakos.seat_command
+                (tenant_id,command_id,seat_id,kind,status,payload,requested_by)
+            VALUES (@tenant,@id,@seat,'start','sent','{}','operator')
+            """);
+        command.Parameters.AddWithValue("tenant", Tenant);
+        command.Parameters.AddWithValue("id", id);
+        command.Parameters.AddWithValue("seat", otherSeat);
+        await command.ExecuteNonQueryAsync(Ct);
     }
 
     private static SeatAppliedInput Applied(long seq, SeatState state, SeatEvent value)
