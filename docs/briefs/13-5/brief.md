@@ -128,7 +128,9 @@ SeatRegionTests, NodeLinkEventAckTests and existing TestKitCompatibility pattern
 
 T1. Commit startup barrier/overlay/no-op/supervision tests, including already-set overlay, failed initial commit/load, two live agents and absent/human/retired cases. Update only the earlier live-startup expectation identified by C1; no weakening of writer/gateway tests.
 
-T2. Commit real Postgres/actor same/new-instance scenarios with exact sequences/states/cursors/counts, snapshot checks between replay batches, persisted capture-before-send and mismatch evidence. Production facade checkpoint read must be used, not a test-computed replay value.
+T2. Commit the R3 real Postgres fixture and R4 same-instance actor scenario with exact sequences/states/cursors/counts and snapshot checks between replay batches. Production facade checkpoint read must be used, not a test-computed replay value.
+
+T6. Commit the R5 new-instance scenario with exact states/cursors/counts, persisted capture-before-send, duplicate attach suppression and mismatch evidence, using the R3 fixture and production facade checkpoint.
 
 T3. Commit real-store command recovery and readiness/timer/capture-order tests with injected node port and fake time. Assert dispatch count/command ID before and after restart/new epoch and no text-based activity classification.
 

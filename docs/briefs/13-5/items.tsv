@@ -22,8 +22,9 @@ CRASH	output	once	R8
 AMBIGUOUS	output	once	R9
 ISOLATION	output	once	R10
 T1	test	once	R1,R2,C1,BOOT
-T2	test	once	R3,R4,R5,FIXTURE,SAME,NEW
+T2	test	once	R3,R4,FIXTURE,SAME
 T3	test	once	R6,R7,COMMAND,ORDER
 T4	test	once	R8,R9,CRASH,AMBIGUOUS
 T5	test	once	R10,ISOLATION
 T0	test	all	G1,G2
+T6	test	once	R5,NEW
