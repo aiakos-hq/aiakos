@@ -18,7 +18,7 @@ Reviewed at commit 32f262b. Stories: 8. Check: ok.
 ## For the maintainer
 
 - C2 narrows spec 0004 R30 (a socket deleted before the watcher first runs is not recovered; an unremembered server with a live root stays degraded, with no SIGUSR1 and no vanish). The brief states it as a proposal. It is a change to a rule of a spec: merging this analysis approves it, and spec 0004 R30 then needs the amendment.
-  Still open after round 3 (with the maintainer through lead); it is not a finding for the author and does not hold the review.
+  Decided 2026-10-08 by the maintainer (through lead, qitem-20261008202417-2b4d075f20be4d9c): the narrowing is accepted. Spec 0004 R30 still needs the amendment; this slice does not write it.
 
 ## Not checked
 
