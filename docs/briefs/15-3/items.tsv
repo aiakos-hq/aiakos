@@ -10,7 +10,7 @@ T1	test	once	R1,E1
 R2	rule	once	R1
 E2	output	once	R2
 T2	test	once	R2,E2
-R3	rule	once	-
+R3	rule	once	R1
 E3	output	once	R3
 T3	test	once	R3,E3
 R4	rule	once	R1,R2,R9
@@ -25,7 +25,7 @@ T6	test	once	R6,E6
 R7	rule	once	R1,R2,R3,R9
 E7	output	once	R7
 T7	test	once	R7,E7
-R8	rule	once	R1,R2,R9
+R8	rule	once	R1,R2,R9,R13
 E8	output	once	R8
 T8	test	once	R8,E8
 R9	rule	once	-
@@ -40,3 +40,6 @@ T11	test	once	R11,E11
 R12	rule	once	R1,R11
 E12	output	once	R12
 T12	test	once	R12,E12
+R13	rule	once	-
+E13	output	once	R13
+T13	test	once	R13,E13
