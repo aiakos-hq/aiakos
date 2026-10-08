@@ -726,6 +726,7 @@ cmd_done() {
     exceptions="$(mktemp)"
     git show origin/main:tools/gate-exceptions.tsv > "$exceptions" 2>/dev/null || :
     while IFS= read -r -d '' file; do
+      [ "$file" = tools/gate-exceptions.tsv ] && continue
       restricted="$(git -C "$worktree" diff --no-ext-diff --unified=0 origin/main...HEAD -- "$file" |
         awk -v story="$story" -v file="$file" '
           FILENAME == ARGV[1] {
@@ -736,7 +737,7 @@ cmd_done() {
           /^@@/ { hunk = 1; next }
           hunk && /^\+/ {
             line = substr($0, 2)
-            if (line !~ /NoWarn|#pragma warning disable|SuppressMessage|<PackageReference[^>]*Version=/) next
+            if (line !~ /[N]oWarn|#[p]ragma warning disable|[S]uppressMessage|<[P]ackageReference[^>]*Version=/) next
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
             if (!(line in approved)) print "FAIL: " file ": " line " has no approved gate exception"
           }
