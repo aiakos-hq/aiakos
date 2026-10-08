@@ -1044,8 +1044,9 @@ cmd_cleanup() {
 
 # Passing work to a seat of the delivery rig (rigs/aiakos-delivery/). A long conversation is
 # sent again with every request, so an item is delivered into an empty conversation where that
-# can be done: "/new" for a Codex seat of a pool, a fresh launch for architect and reviewer.
-# A busy seat is never touched; its item is queued and the log says that nothing was cleared.
+# can be done: a fresh launch of the seat (rig seat launch --fresh --stop), for a pool seat, the
+# architect and the reviewer. OpenRig then sends the seat its startup text again. A busy seat
+# is never touched; its item is queued and the log says that nothing was cleared.
 RIG="${AIAKOS_RIG:-aiakos-delivery}"
 POOL_LOW="team-low1 team-low2"
 POOL_HIGH="team-high1 team-high2"
@@ -1097,11 +1098,11 @@ cmd_hand() {
     [ -n "$body" ] || die "hand: give --body or --body-file"
   fi
 
-  # clear: how the destination's conversation can be emptied (new, fresh) or "no".
+  # clear: whether the destination's conversation can be emptied ("fresh") or not ("no").
   local pool="" dest="" clear="no" roles="$main_root/rigs/aiakos-delivery/roles"
   case "$target" in
-    low)        pool="$POOL_LOW"; clear="new" ;;
-    high)       pool="$POOL_HIGH"; clear="new" ;;
+    low)        pool="$POOL_LOW"; clear="fresh" ;;
+    high)       pool="$POOL_HIGH"; clear="fresh" ;;
     architect)  dest="team-architect@$RIG"; clear="fresh" ;;
     reviewer)   dest="team-reviewer@$RIG"; clear="fresh" ;;
     gate)       dest="team-gate@$RIG" ;;
@@ -1158,14 +1159,10 @@ cmd_hand() {
     return
   fi
 
-  case "$clear" in
-    new)
-      if rig send "$dest" "/new" --raw --wait-for-idle 20 >/dev/null 2>&1; then sleep 2
-      else clear="no"; kept="/new could not be delivered"; fi ;;
-    fresh)
-      rig seat launch "$dest" --fresh --stop --reason "clean conversation for the next item" >/dev/null 2>&1 \
-        || { rm -f "$text"; die "hand: could not start a fresh conversation in $dest; nothing was handed over. See: rig ps --nodes --rig $RIG"; } ;;
-  esac
+  if [ "$clear" = "fresh" ]; then
+    rig seat launch "$dest" --fresh --stop --reason "clean conversation for the next item" >/dev/null 2>&1 \
+      || { rm -f "$text"; die "hand: could not start a fresh conversation in $dest; nothing was handed over. See: rig ps --nodes --rig $RIG"; }
+  fi
 
   local args=(--summary "$summary" --body-file "$text")
   [ -z "$evidence" ] || args+=(--evidence-ref "$evidence")

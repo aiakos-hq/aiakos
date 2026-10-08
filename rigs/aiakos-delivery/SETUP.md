@@ -116,13 +116,13 @@ all of it finished work (issue #278). So a seat does not keep its conversation b
 
 - **Every start of the rig** begins with empty conversations.
 - **Every delivery** goes through `tools/story.sh hand`. When the destination is idle and has
-  nothing in progress, it gets an empty conversation first: `/new` for a Codex seat of a pool, a
-  fresh launch (`rig seat launch --fresh --stop`) for `team-architect` and `team-reviewer`. A
-  busy seat is never touched; its item is queued.
+  nothing in progress, it gets an empty conversation first: a fresh launch
+  (`rig seat launch --fresh --stop`) of a pool seat, `team-architect` or `team-reviewer`. It
+  takes 5 to 12 seconds. A busy seat is never touched; its item is queued.
 - **`desk-lead`, `desk-router` and `team-gate`** keep their conversation until the rig stops.
 
 `artifacts/hand.log` in the main checkout has one line per delivery: when, from, to, the role
-and whether the conversation was cleared (`new`, `fresh`, or `no` with the reason). Read it to
+and whether the conversation was cleared (`fresh`, or `no` with the reason). Read it to
 see how often an item went to a busy seat.
 
 ```bash

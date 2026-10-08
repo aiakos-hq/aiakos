@@ -65,8 +65,8 @@ queue; every item names the story and its sub-issue. To watch the team, open the
 **A seat keeps no conversation between items.** A long conversation is sent again with every
 request, so a seat that carried its finished work along spent most of its allowance on it.
 `hand` picks an idle seat of a pool and gives the destination an empty conversation before it
-delivers the item (`/new` for a Codex seat, a fresh launch for the architect and the reviewer);
-a busy seat is never touched. A start of the rig does the same for every seat. What a seat needs
+delivers the item (a fresh launch of a pool seat, the architect or the reviewer); a busy seat
+is never touched. A start of the rig does the same for every seat. What a seat needs
 later is therefore in the queue item, the repository or `artifacts/`, never only in what it
 remembers; a slice lives in its analysis worktree and a story in its story worktree, so any seat
 of the right pool continues it.

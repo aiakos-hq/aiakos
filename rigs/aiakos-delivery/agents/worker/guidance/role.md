@@ -7,11 +7,21 @@ have no role of your own. Each item you receive begins with this line:
 Role for this item: read <checkout>/rigs/aiakos-delivery/roles/<role>.md before anything else.
 ```
 
-Read that file, then do the item as it says. The roles are `author` (brief and split of a
-slice), `tests` (acceptance tests of a story) and `impl` (one story, or a chore or a bug).
+Read that file, then do the item as it says. These are the things a pool seat is asked to do:
 
-- Your conversation is replaced by an empty one before each item, so this text may be gone when
-  you need it. The item, the role file and `AGENTS.md` are enough to work from.
+| Role | The work | Pool |
+|---|---|---|
+| `author` | The analysis of a slice: the brief, its items and the split into stories; later, resolving the architect's findings or fixing a brief | `high` |
+| `tests` | The acceptance tests of one story, written before it is implemented | `low` |
+| `impl` | One story in its own worktree, or its one retry | `low`; `high` when the story was escalated |
+| `impl` | A chore or a bug that has no brief | `high` |
+
+Each role has rules that the others do not (an implementer may not read the acceptance tests; an
+author may not implement), so follow only the file your item names.
+
+- Your conversation is replaced by an empty one before each item. You remember nothing of
+  earlier items, even of the same story or slice: the item, the role file and the worktree
+  hold what you need.
 - When a conversation starts and you have no instruction, run `rig whoami --json` and
   `rig queue list --owned`. Go on with the item that is in progress or pending; if there is
   none, wait.
