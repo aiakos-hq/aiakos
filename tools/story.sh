@@ -721,9 +721,30 @@ cmd_done() {
         if [ -n "$bad" ]; then echo "FAIL: $file is outside the brief's paths ($paths)"; ok=0; fi
       done
     fi
-    if git -C "$worktree" diff origin/main...HEAD | grep -E '^\+' | grep -E 'NoWarn|#pragma warning disable|SuppressMessage|<PackageReference[^>]*Version=' > /dev/null; then
-      echo "FAIL: the change adds NoWarn, #pragma warning disable, SuppressMessage or a Version on a PackageReference"; ok=0
-    fi
+    # Only merged exceptions can approve a restricted added line.
+    local exceptions restricted
+    exceptions="$(mktemp)"
+    git show origin/main:tools/gate-exceptions.tsv > "$exceptions" 2>/dev/null || :
+    while IFS= read -r -d '' file; do
+      [ "$file" = tools/gate-exceptions.tsv ] && continue
+      restricted="$(git -C "$worktree" diff --no-ext-diff --unified=0 origin/main...HEAD -- "$file" |
+        awk -v story="$story" -v file="$file" '
+          FILENAME == ARGV[1] {
+            split($0, row, "\t")
+            if (row[1] == story && row[2] == file) approved[row[3]] = 1
+            next
+          }
+          /^@@/ { hunk = 1; next }
+          hunk && /^\+/ {
+            line = substr($0, 2)
+            if (line !~ /[N]oWarn|#[p]ragma warning disable|[S]uppressMessage|<[P]ackageReference[^>]*Version=/) next
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+            if (!(line in approved)) print "FAIL: " file ": " line " has no approved gate exception"
+          }
+        ' "$exceptions" -)"
+      if [ -n "$restricted" ]; then printf '%s\n' "$restricted"; ok=0; fi
+    done < <(git -C "$worktree" diff --name-only -z origin/main...HEAD)
+    rm -f "$exceptions"
     if git -C "$worktree" diff --name-only origin/main...HEAD | xargs -r git -C "$worktree" ls-files --eol -- | grep -v 'i/lf' | grep -v 'i/-text' | grep -v 'i/none' | grep . ; then
       echo "FAIL: the files above are not LF in the index"; ok=0
     fi

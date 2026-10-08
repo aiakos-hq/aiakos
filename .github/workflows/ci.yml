@@ -24,6 +24,9 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Report SDK version
+        run: dotnet --version
+
       - name: Restore
         run: dotnet restore
 

@@ -1,0 +1,61 @@
+#!/bin/sh
+
+kind=${1-}
+name=${2-}
+if [ "$kind" = status ]; then
+    seat=${AIAKOS_SEAT-seat}
+    printf 'aiakos %s\n' "$seat"
+fi
+
+post=1
+case "$kind" in hook|status) ;; *) post=0 ;; esac
+[ -n "${AIAKOS_HOOK_URL-}" ] || post=0
+[ -n "${AIAKOS_SEAT_TOKEN_FILE-}" ] && [ -r "$AIAKOS_SEAT_TOKEN_FILE" ] || post=0
+command -v curl >/dev/null 2>&1 || post=0
+command -v flock >/dev/null 2>&1 || post=0
+command -v cat >/dev/null 2>&1 || post=0
+
+if [ "$post" -eq 1 ]; then
+    seq=0
+    if [ -n "${AIAKOS_SEAT_SEQ_FILE-}" ]; then
+        seqfile=$AIAKOS_SEAT_SEQ_FILE
+        lockfile=$seqfile.lock
+        now=$(date +%s%N 2>/dev/null)
+        now=${now%???}
+        {
+            if flock -w 0.95 9 2>/dev/null; then
+                old=
+                if [ -r "$seqfile" ]; then IFS= read -r old <"$seqfile" || :; fi
+                case "$old" in "") old=invalid ;; esac
+                while [ "${old#0}" != "$old" ]; do old=${old#0}; done
+                [ -n "$old" ] || old=0
+                [ "${#old}" -le 18 ] || old=invalid
+                case "$old" in
+                    ""|*[!0-9]*)
+                        case "$now" in ""|*[!0-9]*) now= ;; esac
+                        value=$now
+                        ;;
+                    *) value=$old ;;
+                esac
+                case "$value" in
+                    ""|*[!0-9]*) ;;
+                    *)
+                        while [ "${value#0}" != "$value" ]; do value=${value#0}; done
+                        [ -n "$value" ] || value=0
+                        [ "${#value}" -le 18 ] || value=0
+                        value=$((value + 1))
+                        if printf '%s\n' "$value" >"$seqfile"; then seq=$value; fi
+                        ;;
+                esac
+                flock -u 9 2>/dev/null || :
+            fi
+        } 2>/dev/null 9>"$lockfile" || :
+    fi
+    curl --connect-timeout 0.5 --max-time 2 --silent --output /dev/null \
+        --data-binary @- -H 'Expect:' -H 'Content-Type: application/json' \
+        -H @"$AIAKOS_SEAT_TOKEN_FILE" \
+        -H "X-Aiakos-Source-Seq: $seq" \
+        "$AIAKOS_HOOK_URL/$kind/$name" 2>/dev/null
+fi
+cat >/dev/null 2>&1
+exit 0

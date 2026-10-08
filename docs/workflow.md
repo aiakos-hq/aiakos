@@ -187,7 +187,8 @@ Every finding carries one tag that says why it happened:
 - `judgment-gap`: the brief had it and the implementer got it wrong.
 
 **What counts as an attempt:** a gate run that reached the build and failed, or a review that
-blocked. A run that stops at a process check before the build (uncommitted changes, a file
+blocked. A gate exception is a row in `tools/gate-exceptions.tsv`, added only by a pull request the maintainer merges.
+A run that stops at a process check before the build (uncommitted changes, a file
 outside the brief's paths) is not an attempt; the implementer fixes it and runs the gate again.
 A build that aborts with
 `Fatal error`, `Internal CLR error` or `Unhandled exception`, or exits non-zero without

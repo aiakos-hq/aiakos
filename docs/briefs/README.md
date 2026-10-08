@@ -38,6 +38,7 @@ Acceptance tests are not here: they stay local, so that an implementer cannot re
 | [10-4 Buffered node events](10-4/brief.md) | #10 | `impl` | approved | [7](10-4/stories.md) | | |
 | [10-3 Authenticated node link](10-3/brief.md) | #10 | `impl` | approved | [10](10-3/stories.md) | | |
 | [10-2 Contract helpers and contract tests](10-2/brief.md) | #10 | `impl/opencode` | approved | [1](10-2/stories.md) | | |
+| [12-3 Hook normalizer and screen classifier](12-3/brief.md) | #12 | `impl` | approved | [5](12-3/stories.md) | | |
 | [12-2 Relay and ingest](12-2/brief.md) | #12 | `impl` | approved | [6](12-2/stories.md) | | |
 | [12-1 Claude orchestrator adapter](12-1/brief.md) | #12 | `impl` | approved | [5](12-1/stories.md) | | |
 | [11-3 Tmux delivery, keys and capture](11-3/brief.md) | #11 | `impl` | approved | [5](11-3/stories.md) | | |
@@ -69,7 +70,7 @@ the new gate.
 | Issue | Slices |
 |---|---|
 | #11 tmux session host | 11-5 adoption |
-| #12 Claude Code adapter | 12-1 orchestrator half, 12-3 normalizer, 12-4 node driver, 12-5 end to end |
+| #12 Claude Code adapter | 12-4 node driver, 12-5 end to end |
 | #15 CLI and released instance | 15-5 release |
 | #16 aiakos-dev rig, M1 acceptance | 16-3 acceptance run |
 

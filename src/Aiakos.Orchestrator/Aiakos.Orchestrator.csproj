@@ -3,6 +3,10 @@
   <!-- ASP.NET Core + Akka.Hosting + gRPC server (spec 0001 R27–R29). -->
 
   <ItemGroup>
+    <EmbeddedResource Include="Harnesses/ClaudeCode/Resources/aiakos-hook-relay" LogicalName="Aiakos.ClaudeCode.HookRelay" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Akka.Hosting" />
     <PackageReference Include="Aspire.Npgsql" />
     <PackageReference Include="Grpc.AspNetCore" />
