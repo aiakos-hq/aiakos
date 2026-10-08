@@ -1,8 +1,21 @@
 # Story review: slice 10-5
 
-Reviewed at commit bd5f981. Stories: 8. Check: ok.
+Reviewed at commit ed2e93e. Stories: 10. Check: ok.
 
 ## Findings
+
+Round 2, open:
+
+- [ ] S3 (context-gap): R3 emits Rejected/SEAT_STOPPING and Failed/SEAT_STOPPING, but how their Error is built (`ErrorReasons.Create` with "Command rejected.") is a sentence of R4, owned by S4 and absent from `story.sh show 10-5 3`. Fix: move that sentence to R2 or R3, or give the message in R3.
+- [ ] S3 (context-gap): E3 needs a queued start and FIFO order, but R4 later rejects a start with another LaunchId on a pending seat at once (SEAT_ALREADY_RUNNING) and R9 rejects a second unfinished delivery (SEAT_BUSY) and a delivery to a seat that is not Ready, so an S3 test built on two starts or two deliveries turns red in S4 or S5. Fix: name in R3 and E3 the command combinations that stay queued under R4 and R9 (for example SendKeys after SendKeys, a start behind SendKeys on a stopped seat) and put the tie in the notes of S3.
+- [ ] S4 (context-gap): for a StartSeat with the same pending LaunchId under another command ID whose original is cancelled by StopSeat, R3 says queued starts are Rejected/SEAT_STOPPING and R4 says the waiter clones the original's result (Completed, Launch Unknown/STOPPED). Fix: say in R4 which of the two it is and add that input to E4.
+- [ ] S5 (context-gap): R4 gives the order of the checks but not when the seat preconditions are evaluated, at receipt or when the command reaches the head of the FIFO, so a DeliverInput received while a StartSeat is pending is either Rejected/SEAT_NOT_READY at once or delivered after Ready. Fix: state the moment in R4 and add that input to E9.
+- [ ] S3 (context-gap): R3 answers for commands already queued when StopSeat arrives, but not for a StartSeat, DeliverInput or SendKeys received while the seat is stopping, nor for a second StopSeat received before the first has finished (both bypass the FIFO, so the driver may be called twice). Fix: give the result of both inputs in R3 and add them to E3.
+- [ ] S2 (context-gap): R2 creates the minimal inventory (LaunchId "", Unknown) when "no R1 start registration applies", and that registration is first applied by S4, so an E2 or E3 test that sends StartSeat for an unknown seat expects values that S4 changes to the requested LaunchId and Launching. Fix: say in the notes of S2 and S3 that start registration arrives with S4 and that their StartSeat cases use a seat registered with RegisterSeat, with the minimal inventory shown by another kind.
+- [ ] S7 (context-gap): R6 says both that sent and unacknowledged work "stays tracked for result/reconnect" and that removal or supersession "closes old writer and acceptance waits", so whether a waiting SendAsync returns false when its session is removed is open, and R7 (S8) keeps it pending until the resend is acknowledged. Fix: state in R6 that the wait stays pending until an ack on a later session or the deadline, and add that input to E6.
+
+Round 1, resolved at ed2e93e (read and confirmed):
+
 
 - [x] S2 (context-gap): E2 ("one seq; buffered replay same bytes/seq/trace") and E3 (STOPPED, SEAT_STOPPING and COMMAND_TIMEOUT results) need a result in NodeEventBuffer, but how a terminal result enters the buffer (seat and launch, ObservedAt, SourceSeq=0, seat registered first, minimal inventory for an unknown seat) is the end of R4, owned by S4, and neither `depends` nor `notes` of S2/S3 names it. Fix: move those sentences out of R4 into R2 (or an item S2 owns), so S4 does not change what S2 and S3 already emit.
 - [x] S2 (context-gap): R2 says a malformed ID is "translated by the stream to FailedPrecondition", but S2 does not touch the stream, R5/E5/T5 do not mention it, and today an ArgumentException from `ReceiveAsync` ends in the generic catch of `OrchestratorConnection.cs:118` as Unavailable. Fix: move the translation into R5 and add it to E5, leaving only the local throw in R2.
@@ -18,12 +31,12 @@ Reviewed at commit bd5f981. Stories: 8. Check: ok.
 
 ## Not checked
 
-- R3 was read for size and left as one story; I did not try to break its stop/timeout race beyond the ties above.
-- R5 against the 10-4 source and stream story (10-4-4), which is not merged: only the 10-4 brief text (R7, R8) was read, not code. By 10-4 R7 every first StartSeat of a new seat and every command for a seat unknown to the node causes one node-wide reconnect; I did not judge that cost.
-- R7 against the link-loss and restart rules of 13-4: only the published port signatures in `docs/briefs/13-4/brief.md` were compared (they match), not 13-4's link-loss transaction.
+- R5 against the 10-4 source and stream story (10-4-4), which is not merged: only the 10-4 brief text (R7, R8) was read, not code. Whether the orchestrator accepts a result replayed through the response reader with an earlier seq (R5) was not checked against 10-4. By 10-4 R7 every first StartSeat of a new seat and every command for a seat unknown to the node causes one node-wide reconnect; I did not judge that cost.
+- R7 against the link-loss and restart rules of 13-4: only the published port signatures in `docs/briefs/13-4/brief.md` were compared in round 1 (they matched), not 13-4's link-loss transaction.
 - Whether a result buffered for a seat the orchestrator does not assign (never eligible, so never acknowledged, and R2 keeps unacknowledged entries forever) can grow without bound.
-- Spec 0002 beyond R40 (the inflight limit advertised by the node matches R6); R38, R39, R41 and R42 were not compared line by line.
-- Nothing was built or run; the stories were not read through `tools/story.sh show` one by one.
+- Spec 0002 beyond R40; R38, R39, R41 and R42 were not compared line by line.
+- The size of S6 (R5 with C1) was not judged again in round 2.
+- Nothing was built or run. Code read in round 2: `ErrorReasons.Create`, `CommandValidator.Validate`, the public members of `NodeEventBuffer`, `NodeIdentity` and the keys of `NodeLinkRegistry`. Only story 3 was rendered with `tools/story.sh show`.
 
 ## Author resolution, round 1
 
