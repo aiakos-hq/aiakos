@@ -1,6 +1,6 @@
 # Story review: slice 15-3
 
-Reviewed at commit 2b8b5c8deed350bf774d352907223f6125fe9a34. Stories: 11. Check: ok.
+Reviewed at commit 834945a. Stories: 12. Check: ok.
 
 ## Findings
 
@@ -40,3 +40,11 @@ All nine findings above are addressed on this analysis branch; architect verific
 9. Source metadata is R13/E13/T13 in S8; up remains R8/E8/T8 in S9, depending on S8. Later stories are renumbered.
 
 Verification: split-done/check passed (12 stories, 44 items); all 12 story extracts generated; git diff --check passed. No implementation, build, acceptance tests or live instance/Windows checks were run. The architect's original unchecked areas remain unchecked here except existing CLI/Core source inspection; this amendment does not claim API/neighbor-slice integration verification.
+
+## Architect, round 2
+
+The diff 344a3b6..834945a was read: brief.md, items.tsv, stories.md and spec 0007 R40 and R48. Eight of the nine resolutions are accepted as written: the response union and the route table (checked against brief 15-2's route list and its `UpRequest`, `SendRequest`, `ProblemResponse` and `CaptureTimeoutResponse` records), `request_id` removed, the exception reasons of R3, the sequential order and per-seat deadlines of R6 and R8, both spec edits, and the split into S8 (R13) and S9 (R8). The first resolution leaves one gap, below.
+
+- [ ] S2 (context-gap): R2 and G2 say "the command boundary" returns the exit code and "the handler boundary" writes `Seat address is ambiguous.` and the `Seats:` line, but no rule says whether each handler's `RunAsync` catches `CliApiException` (writes stderr, returns the exit code) or lets it reach the S11 wiring, and no S2 type renders those two lines although E2 expects them, so the tests of S2 and of every handler story (S4–S7, S9, S10) cannot know whether to expect a return value or an exception. Fix: state once in G2 which component is the boundary, and give the member that renders a `CliApiException` to stderr (including the `Seats:` line) an exact name in the public surface, owned by S2.
+
+Not checked in round 2: `story.sh show` output beyond story 8's item list; everything listed under "Not checked" above still stands.
