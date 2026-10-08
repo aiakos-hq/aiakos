@@ -191,7 +191,7 @@ It never exports body/token attributes; this slice does not add OTLP export.
 
 ## Third-pass contract details
 
-`RegisterRigRequest` carries `IReadOnlyDictionary<string,byte[]> FilesBySha256`, with lowercase SHA-256 hex keys and raw bytes. Each file is at most 1 MiB and the total is at most 16 MiB. Every canonical path/hash/size entry must have exactly one matching map entry; verify byte length and SHA-256 before any write. Reject violations with fixed `FILE_CONTENT_INVALID` and detail `Rig file contents do not match the canonical form.`; never include file bytes in errors.
+`RegisterRigRequest` carries `IReadOnlyDictionary<string,byte[]> FilesBySha256`, with keys equal to the canonical `sha256` value unchanged (`sha256:` plus 64 lowercase hex digits) and raw bytes. Each file is at most 1 MiB and the total is at most 16 MiB. File descriptors are at `shared.culture` (when non-null), `shared.agents[].guidance[]` and `shared.agents[].skills[].files[]`, each with `path`, `sha256` and `bytes`. Every descriptor must match a map entry by its unchanged `sha256` value; repeated hashes share one map entry. Verify byte length against `bytes` and compare `sha256:` plus the computed lowercase SHA-256 hex with `sha256` before any write. Reject violations with fixed `FILE_CONTENT_INVALID` and detail `Rig file contents do not match the canonical form.`; never include file bytes in errors.
 
 `Aiakos.Spec.RigHashVerifier.Verify(string resolvedJson, string specHash, string bindingHash)` returns `RigHashVerification(bool Valid,string SpecHash,string BindingHash)`. It parses and validates the request's canonical JSON and recomputes both hashes through the existing `RigCanonicalizer`/`CanonicalJson`; no orchestrator hash implementation is permitted. `RigRegistration` is `(string Rig,string Resolved,string ToolVersion,string SourcePath,string? SourceCommit,bool SourceDirty,string SpecHash,string BindingHash,IReadOnlyDictionary<string,byte[]> FilesBySha256,IReadOnlyList<Aiakos.Spec.ResolvedSeatParameters> SeatParameters)`; `RigRevisionReceipt` is `(Guid RevisionId,int Revision,bool SpecChanged,bool BindingChanged,IReadOnlyList<SeatRegistrationResponse> Seats)`.
 
@@ -204,7 +204,7 @@ T8. Tests pin verifier output to the 14-4 goldens.
 
 E8 uses the 14-4 minimal canonical JSON and its published `spec_hash` and `binding_hash`: matching values return `Valid=true` and the two recomputed hashes; changing either submitted hash returns `Valid=false` with the same recomputed pair.
 
-Registration file values are arbitrary binary bytes (not UTF-8); keys are lowercase SHA-256 hex. `FILE_CONTENT_INVALID` is HTTP 400, non-retryable, with detail `Rig file contents do not match the canonical form.`. The revision migration uses explicit PostgreSQL types: tenant_id/rig_id/revision_id uuid, revision integer, hashes/tool_version/source_path/source_commit/created_by text, resolved jsonb, source_dirty boolean, created_at timestamptz.
+Registration file values are arbitrary binary bytes (not UTF-8); keys retain the canonical `sha256:` prefix and 64 lowercase hex digits unchanged. `FILE_CONTENT_INVALID` is HTTP 400, non-retryable, with detail `Rig file contents do not match the canonical form.`. The revision migration uses explicit PostgreSQL types: tenant_id/rig_id/revision_id uuid, revision integer, hashes/tool_version/source_path/source_commit/created_by text, resolved jsonb, source_dirty boolean, created_at timestamptz.
 
 R5. Column sources and identity: registration.Rig is the route rig name and must equal
 `Resolved.shared.name` (R11 rejects a mismatch as INVALID_REQUEST). Match the rig by
@@ -305,11 +305,20 @@ revision_id uuid NOT NULL, sha256 text NOT NULL, contents bytea NOT NULL,
 PRIMARY KEY(tenant_id,revision_id,sha256), FOREIGN KEY(tenant_id,revision_id)
 REFERENCES aiakos.rig_revision(tenant_id,revision_id))`. Add UNIQUE(tenant_id,revision_id)
 to rig_revision for this FK. Persist each verified map entry exactly once with its raw bytes
-in the revision transaction; duplicate hash-pair registration reuses the existing revision
+in the revision transaction. The `sha256` column stores the canonical `sha256` value unchanged
+(`sha256:` plus 64 lowercase hex digits), from descriptors at `shared.culture`,
+`shared.agents[].guidance[]` and `shared.agents[].skills[].files[]`; their `bytes` field
+is the verified byte length. Duplicate hash-pair registration reuses the existing revision
 and files. Canonical descriptors remain in resolved jsonb; file bytes never enter that JSON.
 
 R11. The HTTP registration route owns request parsing, the R7 version gate, RigHashVerifier,
-and file-map verification before calling AppendAsync. Reject malformed canonical JSON as
+and file-map verification before calling AppendAsync. File descriptors are at
+`shared.culture` (when non-null), `shared.agents[].guidance[]` and
+`shared.agents[].skills[].files[]`. Match each descriptor to FilesBySha256 using its
+canonical `sha256` value unchanged (`sha256:` plus 64 lowercase hex digits), check
+length against its `bytes` field, and check the prefixed computed SHA-256 value.
+Repeated hashes share one map entry; no descriptor hash may be missing and no map
+key may be extra. Reject malformed canonical JSON as
 INVALID_REQUEST; reject hash mismatch as HASH_MISMATCH and invalid/missing/extra contents
 as FILE_CONTENT_INVALID before any repository call. Registration carries required
 `seat_parameters`, an array of the existing Aiakos.Spec.ResolvedSeatParameters serialized
@@ -324,7 +333,11 @@ or load files from source_path. R11 catches only SeatRemovedWhileRunningExceptio
 SEAT_REMOVED_WHILE_RUNNING mapping below; cancellation propagates unchanged.
 
 E4. Repository matrix (A=(s1,b1), B=(s2,b2), C=(s2,b3); hashes are distinct valid fixture
-strings; each fixture has canonical descriptors and matching loader parameter records):
+strings; each fixture has canonical descriptors and matching loader parameter records).
+The binary fixture uses bytes `[0x00,0xff]`, key
+`sha256:06eb7d6a69ee19e5fbdf749018d3d2abfa04bcbd1365db312eb86dc7169389b8`,
+and a `shared.culture` descriptor with that unchanged `sha256` and `bytes: 2`;
+the stored `rig_revision_file.sha256` is exactly that prefixed key:
 
 | Input | Exact repository result/state |
 |---|---|
@@ -344,7 +357,13 @@ flags, parameter jsonb equality, agent/human column sources, raw binary bytes ro
 revision/file reuse and rollback. These are persistent regression tests committed by S5.
 
 E9. HTTP fixtures use the registration DTO above: resolved is canonical JSON as a JSON
-string, files_by_sha256 is a map of lowercase SHA-256 hex keys to base64 byte-array values,
+string, files_by_sha256 maps unchanged canonical `sha256` values (`sha256:` plus
+64 lowercase hex digits) to base64 byte-array values. The binary fixture has
+`shared.culture` with `path: "culture.md"`,
+`sha256: "sha256:06eb7d6a69ee19e5fbdf749018d3d2abfa04bcbd1365db312eb86dc7169389b8"`
+and `bytes: 2`; its files_by_sha256 maps that exact key to `"AP8="`.
+Guidance and skill-file fixtures use descriptors at `shared.agents[].guidance[]`
+and `shared.agents[].skills[].files[]` with the same unchanged-key and `bytes` checks;
 seat_parameters is the matching loader array (empty for no agent seats). A first empty-seat
 registration returns HTTP 200 `{"revision_id":"<uuid>","revision":1,"spec_changed":true,"binding_changed":true,"seats":[]}`;
 an immediate repeat returns the same id/revision and false flags; other flags and seats are
